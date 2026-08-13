@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 import { ANIMATION_CONFIG, isReducedMotion } from '../animations/config';
 import { CommandPalette } from '../components/ui/CommandPalette';
+import { ShareBoardModal } from '../components/ui/ShareBoardModal';
 import { useAuth } from '../context/AuthContext';
 import apiClient from '../api/apiClient';
 
@@ -54,6 +55,7 @@ export const BoardsPage = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [activeMenuBoardId, setActiveMenuBoardId] = useState(null);
+  const [sharingBoard, setSharingBoard] = useState(null);
   const [isCreatingBoard, setIsCreatingBoard] = useState(false);
 
   const [renamingBoardId, setRenamingBoardId] = useState(null);
@@ -209,6 +211,11 @@ export const BoardsPage = () => {
   return (
     <div className="min-h-screen bg-background text-on-background font-body relative flex">
       <CommandPalette isOpen={isCommandPaletteOpen} onClose={() => setIsCommandPaletteOpen(false)} />
+      <ShareBoardModal
+        isOpen={!!sharingBoard}
+        onClose={() => setSharingBoard(null)}
+        board={sharingBoard}
+      />
 
       <nav
         ref={sidebarRef}
@@ -473,14 +480,15 @@ export const BoardsPage = () => {
                           </button>
 
                           <button
-                            disabled
-                            className="w-full px-3 py-2 text-left text-on-surface-variant/50 font-medium flex items-center justify-between cursor-not-allowed opacity-60"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuBoardId(null);
+                              setSharingBoard(board);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-surface-container-high text-on-surface font-bold flex items-center gap-2 cursor-pointer"
                           >
-                            <div className="flex items-center gap-2">
-                              <span className="material-symbols-outlined text-base">share</span>
-                              <span>Share</span>
-                            </div>
-                            <span className="text-[9px] bg-surface-container-high px-1.5 py-0.5 rounded text-on-surface-variant font-mono">Soon</span>
+                            <span className="material-symbols-outlined text-base text-primary">share</span>
+                            <span>Share</span>
                           </button>
 
                           <div className="my-1 border-t border-outline-variant/40" />

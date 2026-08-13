@@ -10,14 +10,20 @@ import LaserOverlay from '../components/ui/LaserOverlay';
 import apiClient from '../api/apiClient';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
+import { ShareBoardModal } from '../components/ui/ShareBoardModal';
+import { useAuth } from '../context/AuthContext';
 
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [boardTitle, setBoardTitle] = useState('Untitled Board');
+  const [currentBoard, setCurrentBoard] = useState(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [loadingBoard, setLoadingBoard] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [activeUsers, setActiveUsers] = useState([]);
 
   const [activeTool, setActiveTool] = useState('select');
   const [activeColor, setActiveColor] = useState('#000000');
@@ -150,6 +156,7 @@ export const MainCanvasPage = () => {
         if (!isMounted) return;
 
         if (res.success && res.data?.board) {
+          setCurrentBoard(res.data.board);
           setBoardTitle(res.data.board.title || 'Untitled Board');
           const canvasData = res.data.board.canvasData;
 
@@ -203,10 +210,39 @@ export const MainCanvasPage = () => {
   useEffect(() => {
     if (!boardId) return;
 
+    const handlePresence = ({ boardId: id, users }) => {
+      if (id === boardId && Array.isArray(users)) {
+        setActiveUsers(users);
+      }
+    };
+
+    const handleUserJoined = ({ boardId: id, user }) => {
+      if (id === boardId && user) {
+        setActiveUsers((prev) => {
+          if (prev.some((u) => u.id === user.id)) return prev;
+          return [...prev, user];
+        });
+      }
+    };
+
+    const handleUserLeft = ({ boardId: id, userId }) => {
+      if (id === boardId && userId) {
+        setActiveUsers((prev) => prev.filter((u) => u.id !== userId));
+      }
+    };
+
+    socketService.on('board:presence', handlePresence);
+    socketService.on('board:user:joined', handleUserJoined);
+    socketService.on('board:user:left', handleUserLeft);
+
     socketService.joinBoard(boardId);
 
     return () => {
+      socketService.off('board:presence', handlePresence);
+      socketService.off('board:user:joined', handleUserJoined);
+      socketService.off('board:user:left', handleUserLeft);
       socketService.leaveBoard(boardId);
+      setActiveUsers([]);
     };
   }, [boardId]);
 
@@ -483,7 +519,48 @@ export const MainCanvasPage = () => {
             <span>Save failed</span>
           </div>
         )}
+
+        {activeUsers.length > 0 && (
+          <div className="flex items-center gap-1.5 ml-1 border-l border-outline-variant/60 pl-2">
+            <div className="flex items-center -space-x-1.5">
+              {activeUsers.slice(0, 4).map((u) => (
+                <div
+                  key={u.id}
+                  className="w-6 h-6 rounded-full bg-primary text-on-primary font-bold text-[10px] flex items-center justify-center ring-2 ring-surface shadow-xs"
+                  title={u.name || 'User'}
+                >
+                  {u.avatar ? (
+                    <img src={u.avatar} alt={u.name} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    (u.name ? u.name.charAt(0).toUpperCase() : 'U')
+                  )}
+                </div>
+              ))}
+            </div>
+            {activeUsers.length > 4 && (
+              <span className="text-[10px] font-bold text-on-surface-variant">
+                +{activeUsers.length - 4}
+              </span>
+            )}
+          </div>
+        )}
+
+        <button
+          onClick={() => setIsShareModalOpen(true)}
+          className="flex items-center gap-1 px-2.5 py-1 bg-surface-container-high hover:bg-primary-container text-on-surface hover:text-primary rounded-full text-xs font-label font-bold border border-outline-variant transition-colors ml-1 cursor-pointer"
+          title="Share Board"
+        >
+          <span className="material-symbols-outlined text-base">share</span>
+          <span className="hidden sm:inline">Share</span>
+        </button>
       </div>
+
+      <ShareBoardModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        board={currentBoard || { id: boardId, title: boardTitle }}
+        addToast={addToast}
+      />
 
       <ContextMenu
         position={contextMenuPos}

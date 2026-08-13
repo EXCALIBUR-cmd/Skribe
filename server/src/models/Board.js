@@ -8,6 +8,12 @@ const boardSchema = new mongoose.Schema(
       required: [true, 'Board owner is required'],
       index: true
     },
+    members: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      }
+    ],
     title: {
       type: String,
       required: [true, 'Board title is required'],
@@ -55,6 +61,7 @@ const boardSchema = new mongoose.Schema(
 );
 
 boardSchema.index({ owner: 1, isDeleted: 1, updatedAt: -1 });
+boardSchema.index({ members: 1, isDeleted: 1, updatedAt: -1 });
 boardSchema.index({ owner: 1, _id: 1, isDeleted: 1 });
 
 export const Board = mongoose.model('Board', boardSchema);

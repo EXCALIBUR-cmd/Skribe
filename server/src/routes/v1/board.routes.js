@@ -17,4 +17,10 @@ router.patch('/:id', validateBoardId, validateUpdateBoard, boardController.updat
 
 router.delete('/:id', validateBoardId, boardController.delete);
 
+router.get('/:id/collaborators', validateBoardId, boardController.getCollaborators);
+
+router.post('/:id/collaborators', validateBoardId, boardController.addCollaborator);
+
+router.delete('/:id/collaborators/:userId', validateBoardId, boardController.removeCollaborator);
+
 export default router;

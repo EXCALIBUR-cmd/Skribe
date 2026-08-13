@@ -15,7 +15,7 @@ const startServer = async () => {
 
     app.set('io', io);
 
-    httpServer.listen(config.port, () => {
+    httpServer.listen(config.port, '0.0.0.0', () => {
       console.log(`\n==================================================`);
       console.log(`🚀 Skribe Backend Server running in [${config.nodeEnv}] mode`);
       console.log(`📡 HTTP:  http://localhost:${config.port}`);

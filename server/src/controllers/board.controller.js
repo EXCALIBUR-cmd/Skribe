@@ -2,7 +2,6 @@ import boardService from '../services/board.service.js';
 import { success } from '../utils/apiResponse.js';
 
 export class BoardController {
-
   async create(req, res, next) {
     try {
       const userId = req.user.id;
@@ -51,11 +50,8 @@ export class BoardController {
       console.log('[BOARD UPDATE DEBUG] Board ID:', boardId);
       console.log('[BOARD UPDATE DEBUG] Authenticated User:', userId);
       console.log('[BOARD UPDATE DEBUG] Received fields:', Object.keys(updatePayload));
-      console.log('[BOARD UPDATE DEBUG] Canvas object count:', updatePayload?.canvasData?.objects?.length ?? 'N/A (no canvasData)');
 
       const board = await boardService.updateBoard(boardId, userId, updatePayload);
-
-      console.log('[BOARD UPDATE DEBUG] MongoDB update result — persisted object count:', board?.canvasData?.objects?.length ?? 'N/A');
 
       return success(res, { board }, 'Board updated successfully', 200);
     } catch (err) {
@@ -71,6 +67,46 @@ export class BoardController {
       await boardService.deleteBoard(boardId, userId);
 
       return success(res, null, 'Board deleted successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async addCollaborator(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const boardId = req.params.id;
+      const { email } = req.body || {};
+
+      const collaborator = await boardService.addCollaborator(boardId, userId, email);
+
+      return success(res, { collaborator }, 'Collaborator added successfully', 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async removeCollaborator(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const { id: boardId, userId: collaboratorUserId } = req.params;
+
+      await boardService.removeCollaborator(boardId, userId, collaboratorUserId);
+
+      return success(res, null, 'Collaborator removed successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getCollaborators(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const boardId = req.params.id;
+
+      const collaborators = await boardService.getCollaborators(boardId, userId);
+
+      return success(res, { collaborators }, 'Collaborators retrieved successfully', 200);
     } catch (err) {
       next(err);
     }

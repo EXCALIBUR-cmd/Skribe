@@ -57,11 +57,14 @@ export const disconnect = () => {
 };
 
 export const joinBoard = (boardId) => {
-  if (!socket || !socket.connected) {
-    console.warn('[Socket] joinBoard called but socket is not connected');
-    return;
+  if (!socket) return;
+  if (socket.connected) {
+    socket.emit('join-board', { boardId });
+  } else {
+    socket.once('connect', () => {
+      socket.emit('join-board', { boardId });
+    });
   }
-  socket.emit('join-board', { boardId });
 };
 
 export const leaveBoard = (boardId) => {
