@@ -21,6 +21,7 @@ export const PropertiesSidebar = ({
   onDelete,
   onBringToFront,
   onSendToBack,
+  onSidebarExpandChange,
   className = ''
 }) => {
   const [isManualCollapsed, setIsManualCollapsed] = useState(false);
@@ -31,6 +32,12 @@ export const PropertiesSidebar = ({
   const isLaserMode = activeTool === 'laser';
   const isPenMode = activeTool === 'draw';
   const isExpanded = (hasSelection || isLaserMode || isPenMode || activeTool !== 'select') && !isManualCollapsed;
+
+  useEffect(() => {
+    if (typeof onSidebarExpandChange === 'function') {
+      onSidebarExpandChange(isExpanded);
+    }
+  }, [isExpanded, onSidebarExpandChange]);
   const editingContext = selectedProps?.editingContext || 'background';
 
   const sections = getRegisteredSectionsForObject(selectedProps);

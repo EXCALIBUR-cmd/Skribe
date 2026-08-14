@@ -33,6 +33,7 @@ export const MainCanvasPage = () => {
   const [toasts, setToasts] = useState([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -550,44 +551,50 @@ export const MainCanvasPage = () => {
 
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
-      <div className="fixed top-20 left-6 z-40 flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none">
+      <div
+        className={`fixed top-20 z-40 transition-all duration-220 ease-out flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none overflow-hidden ${
+          isSidebarExpanded
+            ? 'left-[336px] max-w-[calc(100vw-350px)]'
+            : 'left-16 md:left-20 max-w-[calc(100vw-90px)]'
+        }`}
+      >
         <button
           onClick={handleBackToBoards}
-          className="flex items-center justify-center w-7 h-7 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors cursor-pointer"
+          className="flex items-center justify-center w-7 h-7 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors cursor-pointer shrink-0"
           title="Back to All Boards"
         >
           <span className="material-symbols-outlined text-lg">arrow_back</span>
         </button>
 
-        <span className="font-headline font-bold text-xs text-on-surface truncate max-w-[150px] sm:max-w-[220px]">
+        <span className="font-headline font-bold text-xs text-on-surface truncate max-w-[90px] xs:max-w-[130px] sm:max-w-[180px] md:max-w-[240px]">
           {boardTitle}
         </span>
 
-        <div className="h-3.5 w-px bg-outline-variant/60 mx-0.5" />
+        <div className="h-3.5 w-px bg-outline-variant/60 mx-0.5 shrink-0" />
 
         {saveStatus === 'saving' && (
-          <div className="flex items-center gap-1.5 text-primary text-[11px] font-bold font-mono">
+          <div className="flex items-center gap-1.5 text-primary text-[11px] font-bold font-mono shrink-0">
             <div className="w-2 h-2 rounded-full bg-primary animate-ping" />
             <span>Saving...</span>
           </div>
         )}
         {saveStatus === 'saved' && (
-          <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold font-mono">
+          <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold font-mono shrink-0">
             <span className="material-symbols-outlined text-sm font-bold">check_circle</span>
             <span>Saved</span>
           </div>
         )}
         {saveStatus === 'error' && (
-          <div className="flex items-center gap-1 text-error text-[11px] font-bold font-mono">
+          <div className="flex items-center gap-1 text-error text-[11px] font-bold font-mono shrink-0">
             <span className="material-symbols-outlined text-sm font-bold">error</span>
             <span>Save failed</span>
           </div>
         )}
 
         {activeUsers.length > 0 && (
-          <div className="flex items-center gap-1.5 ml-1 border-l border-outline-variant/60 pl-2">
+          <div className="flex items-center gap-1.5 ml-1 border-l border-outline-variant/60 pl-2 shrink-0">
             <div className="flex items-center -space-x-1.5">
-              {activeUsers.slice(0, 4).map((u) => (
+              {activeUsers.slice(0, 3).map((u) => (
                 <div
                   key={u.id}
                   className="w-6 h-6 rounded-full bg-primary text-on-primary font-bold text-[10px] flex items-center justify-center ring-2 ring-surface shadow-xs"
@@ -601,9 +608,9 @@ export const MainCanvasPage = () => {
                 </div>
               ))}
             </div>
-            {activeUsers.length > 4 && (
+            {activeUsers.length > 3 && (
               <span className="text-[10px] font-bold text-on-surface-variant">
-                +{activeUsers.length - 4}
+                +{activeUsers.length - 3}
               </span>
             )}
           </div>
@@ -611,7 +618,7 @@ export const MainCanvasPage = () => {
 
         <button
           onClick={() => setIsShareModalOpen(true)}
-          className="flex items-center gap-1 px-2.5 py-1 bg-surface-container-high hover:bg-primary-container text-on-surface hover:text-primary rounded-full text-xs font-label font-bold border border-outline-variant transition-colors ml-1 cursor-pointer"
+          className="flex items-center gap-1 px-2.5 py-1 bg-surface-container-high hover:bg-primary-container text-on-surface hover:text-primary rounded-full text-xs font-label font-bold border border-outline-variant transition-colors ml-1 cursor-pointer shrink-0"
           title="Share Board"
         >
           <span className="material-symbols-outlined text-base">share</span>
@@ -669,6 +676,7 @@ export const MainCanvasPage = () => {
         onDelete={() => fabricCanvasRef.current?.deleteSelected()}
         onBringToFront={() => fabricCanvasRef.current?.bringToFront()}
         onSendToBack={() => fabricCanvasRef.current?.sendToBack()}
+        onSidebarExpandChange={(expanded) => setIsSidebarExpanded(expanded)}
       />
 
       <EraserOverlay activeTool={activeTool} />
@@ -702,7 +710,11 @@ export const MainCanvasPage = () => {
 
       <div
         ref={paletteRef}
-        className="fixed top-[72px] left-1/2 -translate-x-1/2 z-40 bg-surface/95 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md flex items-center gap-1.5 transition-all duration-200 ease-out pointer-events-auto select-none"
+        className={`fixed top-[136px] xl:top-20 -translate-x-1/2 z-40 bg-surface/95 backdrop-blur-md rounded-full px-2.5 sm:px-3.5 py-1.5 border border-outline-variant/80 shadow-md flex items-center gap-1 sm:gap-1.5 transition-all duration-220 ease-out pointer-events-auto select-none overflow-x-auto ${
+          isSidebarExpanded
+            ? 'left-[calc(50vw+160px)] max-w-[calc(100vw-350px)]'
+            : 'left-1/2 max-w-[calc(100vw-90px)]'
+        }`}
       >
         <button
           onClick={() => {
@@ -830,7 +842,13 @@ export const MainCanvasPage = () => {
         </button>
       </div>
 
-      <div className="fixed left-1/2 -translate-x-1/2 bottom-20 z-50 pointer-events-auto">
+      <div
+        className={`fixed -translate-x-1/2 bottom-[88px] md:bottom-20 z-50 transition-all duration-220 ease-out pointer-events-auto ${
+          isSidebarExpanded
+            ? 'left-[calc(50vw+160px)]'
+            : 'left-1/2'
+        }`}
+      >
         <button
           ref={fabRef}
           onClick={handleToggleFABWheel}

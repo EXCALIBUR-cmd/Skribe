@@ -26,55 +26,111 @@ export class EraserManager {
     console.log('[HierarchicalEraser] Batch erase transaction started');
   }
 
+  getPointer(canvas, opt) {
+    if (opt && opt.pointer) {
+      return opt.pointer;
+    }
+    const e = opt ? (opt.e || opt) : opt;
+    if (!e) return { x: 0, y: 0 };
+    if (canvas && typeof canvas.getPointer === 'function') {
+      return canvas.getPointer(e);
+    }
+    const vpt = canvas?.viewportTransform || [1, 0, 0, 1, 0, 0];
+    const invVpt = fabric.util.invertTransform(vpt);
+    const rect = canvas?.getElement ? canvas.getElement().getBoundingClientRect() : { left: 0, top: 0 };
+    const offsetX = e.offsetX !== undefined ? e.offsetX : (e.clientX - (rect?.left || 0));
+    const offsetY = e.offsetY !== undefined ? e.offsetY : (e.clientY - (rect?.top || 0));
+    return fabric.util.transformPoint(new fabric.Point(offsetX, offsetY), invVpt);
+  }
+
   isObjectHit(obj, pt, pointer) {
     if (!obj || obj.isTemporaryDrawPath || obj.system) return false;
+
+    const isPathOrStroke = obj.type === 'path' || obj.isVectorStroke || obj.isSkribeLine || obj.isStraightLine;
+    const strokeW = obj.strokeWidth || 4;
+    const hitMargin = isPathOrStroke
+      ? Math.max(strokeW / 2 + 16, 20)
+      : Math.max(strokeW / 2 + 10, 14);
+
+    let localPt = null;
+    try {
+      const matrix = typeof obj.calcTransformMatrix === 'function' ? obj.calcTransformMatrix() : null;
+      if (matrix && fabric.util && typeof fabric.util.invertTransform === 'function') {
+        const invMatrix = fabric.util.invertTransform(matrix);
+        if (invMatrix && typeof fabric.util.transformPoint === 'function') {
+          localPt = fabric.util.transformPoint(pointer, invMatrix);
+        }
+      }
+    } catch (err) {
+      console.error('[EraserManager] transform error:', err);
+    }
+
+    if (localPt && typeof obj.width === 'number' && typeof obj.height === 'number') {
+      const halfW = (obj.width || 0) / 2;
+      const halfH = (obj.height || 0) / 2;
+
+      const inLocalBounds =
+        localPt.x >= -halfW - hitMargin &&
+        localPt.x <= halfW + hitMargin &&
+        localPt.y >= -halfH - hitMargin &&
+        localPt.y <= halfH + hitMargin;
+
+      if (inLocalBounds) {
+        if (!isPathOrStroke || obj.width < 24 || obj.height < 24) {
+          return true;
+        }
+
+        const points = obj.vectorStrokeData?.points;
+        if (Array.isArray(points) && points.length > 0) {
+          for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            const dist = Math.hypot(pointer.x - p.x, pointer.y - p.y);
+            if (dist <= hitMargin) {
+              return true;
+            }
+          }
+        }
+
+        if (Array.isArray(obj.path) && obj.path.length > 0) {
+          for (let i = 0; i < obj.path.length; i++) {
+            const cmd = obj.path[i];
+            if (cmd && cmd.length >= 3) {
+              const px = cmd[cmd.length - 2];
+              const py = cmd[cmd.length - 1];
+              if (typeof px === 'number' && typeof py === 'number') {
+                const dist = Math.hypot(localPt.x - px, localPt.y - py);
+                if (dist <= hitMargin) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+
+        const centerDist = Math.hypot(localPt.x, localPt.y);
+        if (centerDist <= Math.max(halfW, halfH) + hitMargin) {
+          return true;
+        }
+      }
+    }
 
     if (typeof obj.containsPoint === 'function' && obj.containsPoint(pt)) {
       return true;
     }
 
-    if (typeof obj.getBoundingRect === 'function') {
-      const rect = obj.getBoundingRect(true);
-      const isPathOrStroke = obj.type === 'path' || obj.isVectorStroke || obj.isSkribeLine || obj.isStraightLine;
-      const strokeW = obj.strokeWidth || 4;
+    const sceneRect = typeof obj.getBoundingRect === 'function'
+      ? (obj.getBoundingRect(false, false) || obj.getBoundingRect())
+      : null;
 
-      const hitMargin = isPathOrStroke
-        ? Math.max(strokeW / 2 + 12, 14)
-        : Math.max(strokeW / 2 + 8, 10);
+    if (sceneRect) {
+      const inSceneRect =
+        pointer.x >= sceneRect.left - hitMargin &&
+        pointer.x <= sceneRect.left + sceneRect.width + hitMargin &&
+        pointer.y >= sceneRect.top - hitMargin &&
+        pointer.y <= sceneRect.top + sceneRect.height + hitMargin;
 
-      const inExpandedRect =
-        pointer.x >= rect.left - hitMargin &&
-        pointer.x <= rect.left + rect.width + hitMargin &&
-        pointer.y >= rect.top - hitMargin &&
-        pointer.y <= rect.top + rect.height + hitMargin;
-
-      if (inExpandedRect) {
-
-        if (rect.width < 16 || rect.height < 16) {
-          return true;
-        }
-
-        if (isPathOrStroke) {
-          const points = obj.vectorStrokeData?.points;
-          if (Array.isArray(points) && points.length > 0) {
-            for (let i = 0; i < points.length; i++) {
-              const p = points[i];
-              const dist = Math.hypot(pointer.x - p.x, pointer.y - p.y);
-              if (dist <= hitMargin) {
-                return true;
-              }
-            }
-          }
-
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
-          const centerDist = Math.hypot(pointer.x - centerX, pointer.y - centerY);
-          if (centerDist <= Math.max(rect.width / 2, rect.height / 2) + hitMargin) {
-            return true;
-          }
-        } else {
-          return true;
-        }
+      if (inSceneRect) {
+        return true;
       }
     }
 
@@ -83,10 +139,7 @@ export class EraserManager {
 
   findTopTarget(canvas, opt) {
     if (!canvas) return null;
-    const e = opt ? (opt.e || opt) : null;
-    if (!e) return null;
-
-    const pointer = canvas.getPointer ? canvas.getPointer(e) : { x: e.clientX, y: e.clientY };
+    const pointer = this.getPointer(canvas, opt);
     const pt = new fabric.Point(pointer.x, pointer.y);
     const objects = canvas.getObjects().slice().reverse();
 
@@ -117,14 +170,10 @@ export class EraserManager {
   evaluateHover(canvas, opt) {
     if (!canvas) return { isLocked: false, hasTarget: false };
 
-    const e = opt ? (opt.e || opt) : null;
-    const clientX = e ? e.clientX : 0;
-    const clientY = e ? e.clientY : 0;
-    const pointer = canvas.getPointer ? canvas.getPointer(e) : { x: 0, y: 0 };
-
+    const pointer = this.getPointer(canvas, opt);
     const target = this.findTopTarget(canvas, opt);
 
-    console.log(`[HierarchicalEraser] MouseMove | Cursor: (${clientX}, ${clientY}) | Scene: (${pointer.x.toFixed(1)}, ${pointer.y.toFixed(1)}) | Target: ${target ? `${target.type} (ID: ${target.id || 'none'})` : 'NONE'}`);
+    console.log(`[HierarchicalEraser] MouseMove | Scene: (${pointer.x.toFixed(1)}, ${pointer.y.toFixed(1)}) | Target: ${target ? `${target.type} (ID: ${target.id || 'none'})` : 'NONE'}`);
 
     if (!target) {
       this.clearHoverPreview(canvas);
@@ -213,7 +262,6 @@ export class EraserManager {
         parentShape.attachedTextId = null;
       }
     } else {
-
       if (target.attachedTextId) {
         const textObj = canvas.getObjects().find((o) => o.id === target.attachedTextId);
         if (textObj) objectsToRemove.add(textObj);
