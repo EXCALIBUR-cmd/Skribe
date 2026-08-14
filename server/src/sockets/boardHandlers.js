@@ -149,6 +149,60 @@ export const registerBoardHandlers = (io, socket) => {
 
     socket.emit('board-left', { boardId, room });
   });
+
+  socket.on('canvas:object-added', ({ boardId, objectId, objectData } = {}) => {
+    if (!boardId || !objectId || !objectData) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:object-added', { boardId, objectId, objectData, senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:path-created', ({ boardId, objectId, objectData } = {}) => {
+    if (!boardId || !objectId || !objectData) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:path-created', { boardId, objectId, objectData, senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:object-modified', ({ boardId, objectId, objectData } = {}) => {
+    if (!boardId || !objectId || !objectData) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:object-modified', { boardId, objectId, objectData, senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:object-removed', ({ boardId, objectId, objectIds } = {}) => {
+    if (!boardId || (!objectId && (!Array.isArray(objectIds) || objectIds.length === 0))) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:object-removed', { boardId, objectId, objectIds: objectIds || (objectId ? [objectId] : []), senderSocketId: socket.id });
+  });
+
+  socket.on('laser:move', ({ boardId, sceneX, sceneY, color, width } = {}) => {
+    if (!boardId || sceneX === undefined || sceneY === undefined) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('laser:move', {
+      boardId,
+      clientId: socket.id,
+      userId: socket.user.id,
+      sceneX,
+      sceneY,
+      color,
+      width
+    });
+  });
+
+  socket.on('laser:hide', ({ boardId } = {}) => {
+    if (!boardId) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('laser:hide', {
+      boardId,
+      clientId: socket.id,
+      userId: socket.user.id
+    });
+  });
 };
 
 export default registerBoardHandlers;

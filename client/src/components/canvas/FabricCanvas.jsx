@@ -49,6 +49,10 @@ export const FabricCanvas = forwardRef(({
   onContextMenu,
   onHistoryChange,
   onCanvasChange,
+  onLocalObjectAdded,
+  onLocalPathCreated,
+  onLocalObjectModified,
+  onLocalObjectRemoved,
   className = ''
 }, ref) => {
   const canvasRef = useRef(null);
@@ -76,6 +80,7 @@ export const FabricCanvas = forwardRef(({
   const lineStartPointRef = useRef({ x: 0, y: 0 });
 
   const isErasingDragRef = useRef(false);
+  const isRemoteOperationRef = useRef(false);
 
   useEffect(() => {
     activeToolRef.current = activeTool;
@@ -89,9 +94,233 @@ export const FabricCanvas = forwardRef(({
   const isLoadingFromJSONRef = useRef(false);
 
   const onCanvasChangeRef = useRef(onCanvasChange);
+  const onLocalObjectAddedRef = useRef(onLocalObjectAdded);
+  const onLocalPathCreatedRef = useRef(onLocalPathCreated);
+  const onLocalObjectModifiedRef = useRef(onLocalObjectModified);
+  const onLocalObjectRemovedRef = useRef(onLocalObjectRemoved);
+
   useEffect(() => {
     onCanvasChangeRef.current = onCanvasChange;
-  }, [onCanvasChange]);
+    onLocalObjectAddedRef.current = onLocalObjectAdded;
+    onLocalPathCreatedRef.current = onLocalPathCreated;
+    onLocalObjectModifiedRef.current = onLocalObjectModified;
+    onLocalObjectRemovedRef.current = onLocalObjectRemoved;
+  }, [onCanvasChange, onLocalObjectAdded, onLocalPathCreated, onLocalObjectModified, onLocalObjectRemoved]);
+
+  const serializeFabricObject = (obj) => {
+    if (!obj || typeof obj.toJSON !== 'function') return null;
+    const canvas = fabricCanvasRef.current;
+    const data = obj.toJSON([
+      'id',
+      'elementId',
+      'parentShapeId',
+      'attachedTextId',
+      'metadata',
+      'aiMetadata',
+      'isStickyNote',
+      'isChecklistNote',
+      'isCalloutNote',
+      'checklistItems',
+      'noteColor',
+      'contrastResolved',
+      'isConnector',
+      'connectorType',
+      'startArrow',
+      'endArrow',
+      'sourceShapeId',
+      'targetShapeId',
+      'skribeLine',
+      'locked',
+      'protected',
+      'system',
+      'isVectorStroke',
+      'vectorStrokeData',
+      'isStraightLine',
+      'isSkribeLine',
+      'angle',
+      'padding'
+    ]);
+
+    if (canvas && data) {
+      const idx = canvas.getObjects().indexOf(obj);
+      if (idx !== -1) {
+        data.stackIndex = idx;
+      }
+    }
+
+    return data;
+  };
+
+  const findCanvasObjectById = (canvas, id) => {
+    if (!canvas || !id) return null;
+    return canvas.getObjects().find((o) => o.id === id);
+  };
+
+  const applyRemoteObjectAdded = async ({ objectId, objectData }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !objectData) return;
+
+    const targetId = objectId || objectData.id;
+    const existingObj = findCanvasObjectById(canvas, targetId);
+    if (existingObj) return;
+
+    try {
+      isRemoteOperationRef.current = true;
+      const objData = JSON.parse(JSON.stringify(objectData));
+      if (objData.isStickyNote && objData.fill && typeof objData.fill === 'object') {
+        delete objData.fill;
+      }
+
+      const enlivened = await fabric.util.enlivenObjects([objData]);
+      if (Array.isArray(enlivened) && enlivened.length > 0) {
+        const obj = enlivened[0];
+        ensureObjectId(obj);
+        if (targetId) obj.id = targetId;
+
+        if (obj.isStickyNote) {
+          const paperColor = obj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
+          obj.noteColor = paperColor;
+          obj.set('fill', createRuledPaperFill(paperColor));
+        }
+
+        if (obj.isSkribeLine || obj.skribeLine) {
+          if (obj.skribeLine && !(obj.skribeLine instanceof SkribeLine)) {
+            obj.skribeLine = new SkribeLine(obj.skribeLine);
+          }
+          attachSkribeLineControls(obj);
+          syncSkribeLineToFabric(obj);
+        }
+
+        canvas.add(obj);
+
+        if (objectData.stackIndex !== undefined && typeof canvas.moveObjectTo === 'function') {
+          canvas.moveObjectTo(obj, objectData.stackIndex);
+        }
+
+        canvas.requestRenderAll();
+      }
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteObjectAdded error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
+  const applyRemoteObjectModified = async ({ objectId, objectData }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !objectData) return;
+
+    const targetId = objectId || objectData.id;
+    const existingObj = findCanvasObjectById(canvas, targetId);
+
+    try {
+      isRemoteOperationRef.current = true;
+
+      if (!existingObj) {
+        await applyRemoteObjectAdded({ objectId, objectData });
+        return;
+      }
+
+      const objData = JSON.parse(JSON.stringify(objectData));
+      if (objData.isStickyNote && objData.fill && typeof objData.fill === 'object') {
+        delete objData.fill;
+      }
+
+      const enlivened = await fabric.util.enlivenObjects([objData]);
+      if (Array.isArray(enlivened) && enlivened.length > 0) {
+        const newObj = enlivened[0];
+
+        const propsToCopy = [
+          'left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle',
+          'fill', 'stroke', 'strokeWidth', 'strokeDashArray', 'opacity',
+          'text', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign',
+          'checklistItems', 'noteColor', 'contrastResolved',
+          'isStickyNote', 'isChecklistNote', 'isCalloutNote',
+          'isConnector', 'connectorType', 'startArrow', 'endArrow',
+          'sourceShapeId', 'targetShapeId', 'skribeLine',
+          'isVectorStroke', 'vectorStrokeData', 'path', 'x1', 'y1', 'x2', 'y2'
+        ];
+
+        const propsToSet = {};
+        propsToCopy.forEach((prop) => {
+          if (newObj[prop] !== undefined) {
+            propsToSet[prop] = newObj[prop];
+          }
+        });
+
+        existingObj.set(propsToSet);
+
+        if (existingObj.type === 'textbox' || existingObj.type === 'i-text' || existingObj.type === 'text') {
+          if (typeof existingObj.initDimensions === 'function') {
+            existingObj.initDimensions();
+          }
+        }
+
+        if (existingObj.isStickyNote) {
+          const paperColor = existingObj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
+          existingObj.noteColor = paperColor;
+          existingObj.set('fill', createRuledPaperFill(paperColor));
+        }
+
+        if (existingObj.isSkribeLine || existingObj.skribeLine) {
+          if (existingObj.skribeLine && !(existingObj.skribeLine instanceof SkribeLine)) {
+            existingObj.skribeLine = new SkribeLine(existingObj.skribeLine);
+          }
+          syncSkribeLineToFabric(existingObj);
+        }
+
+        if (objectData.stackIndex !== undefined && typeof canvas.moveObjectTo === 'function') {
+          const currentIdx = canvas.getObjects().indexOf(existingObj);
+          if (currentIdx !== -1 && currentIdx !== objectData.stackIndex) {
+            canvas.moveObjectTo(existingObj, objectData.stackIndex);
+          }
+        }
+
+        existingObj.setCoords();
+        syncLinkedPosition({ target: existingObj });
+        canvas.requestRenderAll();
+      }
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteObjectModified error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
+  const notifyLocalObjectAdded = (obj) => {
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    ensureObjectId(obj);
+    const data = serializeFabricObject(obj);
+    if (data && onLocalObjectAddedRef.current) {
+      onLocalObjectAddedRef.current({ objectId: obj.id, objectData: data });
+    }
+  };
+
+  const notifyLocalPathCreated = (obj) => {
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    ensureObjectId(obj);
+    const data = serializeFabricObject(obj);
+    if (data && onLocalPathCreatedRef.current) {
+      onLocalPathCreatedRef.current({ objectId: obj.id, objectData: data });
+    }
+  };
+
+  const notifyLocalObjectModified = (obj) => {
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    ensureObjectId(obj);
+    const data = serializeFabricObject(obj);
+    if (data && onLocalObjectModifiedRef.current) {
+      onLocalObjectModifiedRef.current({ objectId: obj.id, objectData: data });
+    }
+  };
+
+  const notifyLocalObjectRemoved = (objOrIds) => {
+    if (isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    const ids = Array.isArray(objOrIds) ? objOrIds : [objOrIds?.id || objOrIds?.elementId || objOrIds].filter(Boolean);
+    if (ids.length > 0 && onLocalObjectRemovedRef.current) {
+      onLocalObjectRemovedRef.current({ objectId: ids[0], objectIds: ids });
+    }
+  };
 
   const syncLinkedPosition = (opt) => {
     const canvas = fabricCanvasRef.current;
@@ -330,7 +559,7 @@ export const FabricCanvas = forwardRef(({
 
   const saveState = () => {
     const canvas = fabricCanvasRef.current;
-    if (!canvas || isHistoryProcessingRef.current) return;
+    if (!canvas || isHistoryProcessingRef.current || isRemoteOperationRef.current) return;
 
     canvas.getObjects().forEach((o) => ensureObjectId(o));
 
@@ -449,6 +678,8 @@ export const FabricCanvas = forwardRef(({
     });
 
     canvas.add(shape, textObj);
+    notifyLocalObjectAdded(shape);
+    notifyLocalObjectAdded(textObj);
     if (typeof canvas.bringObjectToFront === 'function') {
       canvas.bringObjectToFront(textObj);
     } else if (typeof canvas.bringToFront === 'function') {
@@ -854,6 +1085,7 @@ export const FabricCanvas = forwardRef(({
     const pathObj = createSkribeLineFabricObject(skribeLineModel);
     ensureObjectId(pathObj);
     canvas.add(pathObj);
+    notifyLocalObjectAdded(pathObj);
     canvas.setActiveObject(pathObj);
     canvas.requestRenderAll();
     saveState();
@@ -928,6 +1160,7 @@ export const FabricCanvas = forwardRef(({
 
     ensureObjectId(connectorObj);
     canvas.add(connectorObj);
+    notifyLocalObjectAdded(connectorObj);
     canvas.setActiveObject(connectorObj);
     canvas.requestRenderAll();
     saveState();
@@ -952,6 +1185,7 @@ export const FabricCanvas = forwardRef(({
 
     ensureObjectId(text);
     canvas.add(text);
+    notifyLocalObjectAdded(text);
     canvas.setActiveObject(text);
     saveState();
     if (onToolComplete) onToolComplete();
@@ -1155,7 +1389,10 @@ export const FabricCanvas = forwardRef(({
       if (objectsToDelete.size === 0) return;
 
       canvas.discardActiveObject();
+      const deletedIds = [];
       objectsToDelete.forEach((obj) => {
+        if (obj.id) deletedIds.push(obj.id);
+        if (obj.elementId && obj.elementId !== obj.id) deletedIds.push(obj.elementId);
         if (obj.attachedTextId) {
           const text = canvas.getObjects().find((o) => o.id === obj.attachedTextId);
           if (text) text.parentShapeId = null;
@@ -1166,6 +1403,7 @@ export const FabricCanvas = forwardRef(({
         }
         canvas.remove(obj);
       });
+      notifyLocalObjectRemoved(deletedIds);
     }
 
     canvas.requestRenderAll();
@@ -1220,6 +1458,8 @@ export const FabricCanvas = forwardRef(({
           });
 
           canvas.add(clonedShape, clonedText);
+          notifyLocalObjectAdded(clonedShape);
+          notifyLocalObjectAdded(clonedText);
           if (typeof canvas.bringObjectToFront === 'function') {
             canvas.bringObjectToFront(clonedText);
           }
@@ -1247,6 +1487,7 @@ export const FabricCanvas = forwardRef(({
       const clonedObj = createSkribeLineFabricObject(clonedModel);
       ensureObjectId(clonedObj);
       canvas.add(clonedObj);
+      notifyLocalObjectAdded(clonedObj);
       canvas.setActiveObject(clonedObj);
       canvas.requestRenderAll();
       updateSelectionState();
@@ -1264,6 +1505,7 @@ export const FabricCanvas = forwardRef(({
         selectable: true
       });
       canvas.add(cloned);
+      notifyLocalObjectAdded(cloned);
       canvas.setActiveObject(cloned);
       canvas.requestRenderAll();
       updateSelectionState();
@@ -1409,7 +1651,38 @@ export const FabricCanvas = forwardRef(({
     }
   };
 
+
+
+  const applyRemoteObjectRemoved = ({ objectId, objectIds }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    const idsToRemove = new Set(Array.isArray(objectIds) ? objectIds : [objectId].filter(Boolean));
+    if (idsToRemove.size === 0) return;
+
+    try {
+      isRemoteOperationRef.current = true;
+      const allObjects = canvas.getObjects();
+      const targets = allObjects.filter((o) => idsToRemove.has(o.id) || idsToRemove.has(o.elementId));
+
+      if (targets.length > 0) {
+        canvas.discardActiveObject();
+        targets.forEach((obj) => canvas.remove(obj));
+        canvas.requestRenderAll();
+      }
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteObjectRemoved error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
   useImperativeHandle(ref, () => ({
+
+    applyRemoteObjectAdded: (data) => applyRemoteObjectAdded(data),
+    applyRemotePathCreated: (data) => applyRemoteObjectAdded(data),
+    applyRemoteObjectModified: (data) => applyRemoteObjectModified(data),
+    applyRemoteObjectRemoved: (data) => applyRemoteObjectRemoved(data),
 
     getCanvas: () => fabricCanvasRef.current,
 
@@ -1676,6 +1949,9 @@ export const FabricCanvas = forwardRef(({
             shapeObj.vectorStrokeData.style = value === 'dashed' ? 'dashed' : value === 'dotted' ? 'dotted' : 'solid';
           }
         }
+
+        if (shapeObj) notifyLocalObjectModified(shapeObj);
+        if (textObj && textObj !== shapeObj) notifyLocalObjectModified(textObj);
       });
 
       canvas.requestRenderAll();
@@ -2131,46 +2407,69 @@ export const FabricCanvas = forwardRef(({
     };
 
     const handleObjectChange = (opt) => {
-      const target = opt.target;
-      if (target && target.isTemporaryDrawPath) return;
+      const target = opt ? opt.target : null;
+      if (!target || target.isTemporaryDrawPath) return;
 
-      if (target && target.parentShapeId) {
-        const parentShape = canvas.getObjects().find((o) => o.id === target.parentShapeId && o.isChecklistNote);
-        if (parentShape && parentShape.isChecklistNote) {
-          const rawLines = (target.text || '').split('\n');
-          let items = parentShape.checklistItems || [];
-          const prevItems = JSON.parse(JSON.stringify(items));
+      const notifyTarget = (obj) => {
+        if (!obj || obj.isTemporaryDrawPath) return;
 
-          items = items.map((item, idx) => {
-            if (idx < rawLines.length) {
-              const cleanText = rawLines[idx].replace(/^[☐☑]\s?/, '');
-              return { ...item, text: cleanText };
+        if (obj.parentShapeId) {
+          const parentShape = canvas.getObjects().find((o) => o.id === obj.parentShapeId && o.isChecklistNote);
+          if (parentShape && parentShape.isChecklistNote) {
+            const rawLines = (obj.text || '').split('\n');
+            let items = parentShape.checklistItems || [];
+            const prevItems = JSON.parse(JSON.stringify(items));
+
+            items = items.map((item, idx) => {
+              if (idx < rawLines.length) {
+                const cleanText = rawLines[idx].replace(/^[☐☑]\s?/, '');
+                return { ...item, text: cleanText };
+              }
+              return item;
+            });
+
+            if (rawLines.length > items.length) {
+              for (let i = items.length; i < rawLines.length; i++) {
+                const cleanText = rawLines[i].replace(/^[☐☑]\s?/, '');
+                items.push({
+                  id: 'c_' + Date.now() + '_' + i,
+                  checked: false,
+                  text: cleanText
+                });
+              }
             }
-            return item;
-          });
 
-          if (rawLines.length > items.length) {
-            for (let i = items.length; i < rawLines.length; i++) {
-              const cleanText = rawLines[i].replace(/^[☐☑]\s?/, '');
-              items.push({
-                id: 'c_' + Date.now() + '_' + i,
-                checked: false,
-                text: cleanText
-              });
-            }
+            parentShape.checklistItems = items;
+
+            logChecklistMutation({
+              functionName: 'handleObjectChange (Typing)',
+              lineNo: 1670,
+              reason: 'Typing input changed text content',
+              prevItems,
+              nextItems: parentShape.checklistItems
+            });
           }
-
-          parentShape.checklistItems = items;
-
-          logChecklistMutation({
-            functionName: 'handleObjectChange (Typing)',
-            lineNo: 1670,
-            reason: 'Typing input changed text content',
-            prevItems,
-            nextItems: parentShape.checklistItems
-          });
         }
+
+        notifyLocalObjectModified(obj);
+
+        if (obj.attachedTextId) {
+          const textObj = canvas.getObjects().find((o) => o.id === obj.attachedTextId);
+          if (textObj) notifyLocalObjectModified(textObj);
+        }
+
+        if (obj.parentShapeId) {
+          const shapeObj = canvas.getObjects().find((o) => o.id === obj.parentShapeId);
+          if (shapeObj) notifyLocalObjectModified(shapeObj);
+        }
+      };
+
+      if (target.type === 'activeSelection' && typeof target.forEachObject === 'function') {
+        target.forEachObject((obj) => notifyTarget(obj));
+      } else {
+        notifyTarget(target);
       }
+
       updateSelectionState();
       saveState();
     };
@@ -2188,13 +2487,11 @@ export const FabricCanvas = forwardRef(({
       e.stopPropagation();
 
       if (e.ctrlKey || e.metaKey) {
-
         let zoom = canvas.getZoom();
         zoom *= 0.999 ** e.deltaY;
         const mousePoint = new fabric.Point(e.offsetX, e.offsetY);
         applyZoom(zoom, mousePoint, false);
       } else {
-
         const vpt = canvas.viewportTransform;
         vpt[4] -= e.deltaX;
         vpt[5] -= e.deltaY;
@@ -2410,7 +2707,12 @@ export const FabricCanvas = forwardRef(({
 
       if (isErasingDragRef.current) {
         isErasingDragRef.current = false;
+        const erasedIds = Array.from(eraserManager.batchedObjects).map((o) => o.id || o.elementId).filter(Boolean);
         eraserManager.commitBatchErase(canvas, saveState);
+
+        if (erasedIds.length > 0) {
+          notifyLocalObjectRemoved(erasedIds);
+        }
 
         if (canvas.getObjects().length === 0 && activeToolRef.current === 'eraser') {
           console.log('[ToolLifecycle] Canvas is empty - auto-reverting to Select tool');
@@ -2460,6 +2762,7 @@ export const FabricCanvas = forwardRef(({
         });
 
         canvas.add(pathObj);
+        notifyLocalObjectAdded(pathObj);
         canvas.setActiveObject(pathObj);
         canvas.requestRenderAll();
         saveState();
@@ -2491,6 +2794,7 @@ export const FabricCanvas = forwardRef(({
           const finalStrokeObj = renderVectorStroke(vectorData);
           if (finalStrokeObj) {
             canvas.add(finalStrokeObj);
+            notifyLocalPathCreated(finalStrokeObj);
             canvas.setActiveObject(finalStrokeObj);
             canvas.requestRenderAll();
             saveState();
@@ -2514,6 +2818,8 @@ export const FabricCanvas = forwardRef(({
       handleObjectScaling(opt);
       handleObjectChange(opt);
     });
+    canvas.on('text:changed', handleObjectChange);
+    canvas.on('editing:exited', handleObjectChange);
     canvas.on('selection:created', handleSelectionHighlight);
     canvas.on('selection:updated', handleSelectionHighlight);
     canvas.on('selection:cleared', () => {

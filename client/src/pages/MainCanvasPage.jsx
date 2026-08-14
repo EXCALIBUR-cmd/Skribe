@@ -247,6 +247,70 @@ export const MainCanvasPage = () => {
   }, [boardId]);
 
   useEffect(() => {
+    if (!boardId) return;
+
+    const handleRemoteObjectAdded = ({ boardId: id, objectId, objectData }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteObjectAdded({ objectId, objectData });
+      }
+    };
+
+    const handleRemotePathCreated = ({ boardId: id, objectId, objectData }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemotePathCreated({ objectId, objectData });
+      }
+    };
+
+    const handleRemoteObjectModified = ({ boardId: id, objectId, objectData }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteObjectModified({ objectId, objectData });
+      }
+    };
+
+    const handleRemoteObjectRemoved = ({ boardId: id, objectId, objectIds }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteObjectRemoved({ objectId, objectIds });
+      }
+    };
+
+    socketService.on('canvas:object-added', handleRemoteObjectAdded);
+    socketService.on('canvas:path-created', handleRemotePathCreated);
+    socketService.on('canvas:object-modified', handleRemoteObjectModified);
+    socketService.on('canvas:object-removed', handleRemoteObjectRemoved);
+
+    return () => {
+      socketService.off('canvas:object-added', handleRemoteObjectAdded);
+      socketService.off('canvas:path-created', handleRemotePathCreated);
+      socketService.off('canvas:object-modified', handleRemoteObjectModified);
+      socketService.off('canvas:object-removed', handleRemoteObjectRemoved);
+    };
+  }, [boardId]);
+
+  const handleLocalObjectAdded = useCallback(({ objectId, objectData }) => {
+    if (boardId && objectId && objectData) {
+      socketService.emit('canvas:object-added', { boardId, objectId, objectData });
+    }
+  }, [boardId]);
+
+  const handleLocalPathCreated = useCallback(({ objectId, objectData }) => {
+    if (boardId && objectId && objectData) {
+      socketService.emit('canvas:path-created', { boardId, objectId, objectData });
+    }
+  }, [boardId]);
+
+  const handleLocalObjectModified = useCallback(({ objectId, objectData }) => {
+    if (boardId && objectId && objectData) {
+      socketService.emit('canvas:object-modified', { boardId, objectId, objectData });
+    }
+  }, [boardId]);
+
+  const handleLocalObjectRemoved = useCallback(({ objectId, objectIds }) => {
+    if (boardId && (objectId || objectIds)) {
+      socketService.emit('canvas:object-removed', { boardId, objectId, objectIds });
+    }
+  }, [boardId]);
+
+  useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
@@ -609,7 +673,12 @@ export const MainCanvasPage = () => {
 
       <EraserOverlay activeTool={activeTool} />
 
-      <LaserOverlay activeTool={activeTool} laserConfig={laserConfig} />
+      <LaserOverlay
+        activeTool={activeTool}
+        laserConfig={laserConfig}
+        boardId={boardId}
+        fabricCanvasRef={fabricCanvasRef}
+      />
 
       <FabricCanvas
         ref={fabricCanvasRef}
@@ -624,6 +693,10 @@ export const MainCanvasPage = () => {
           setCanRedo(redoable);
         }}
         onCanvasChange={handleCanvasChange}
+        onLocalObjectAdded={handleLocalObjectAdded}
+        onLocalPathCreated={handleLocalPathCreated}
+        onLocalObjectModified={handleLocalObjectModified}
+        onLocalObjectRemoved={handleLocalObjectRemoved}
         className="absolute inset-0 z-0"
       />
 

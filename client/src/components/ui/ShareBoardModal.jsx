@@ -2,32 +2,66 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
 import { useAuth } from '../../context/AuthContext';
 
-export const ShareBoardModal = ({ isOpen, onClose, board, isOwner: propIsOwner, addToast }) => {
+export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner: propIsOwner, addToast }) => {
   const { user } = useAuth();
   const [email, setEmail] = useState('');
   const [collaborators, setCollaborators] = useState([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fetchedBoard, setFetchedBoard] = useState(null);
+
+  const board = useMemo(() => {
+    if (initialBoard && (initialBoard.owner || initialBoard.ownerId)) {
+      return initialBoard;
+    }
+    return fetchedBoard || initialBoard;
+  }, [initialBoard, fetchedBoard]);
 
   const isOwner = useMemo(() => {
     if (propIsOwner === true) return true;
     if (!board || !user) return false;
 
-    const currentUserId = String(user.id || user._id || '');
+    const currentUserId = String(user.id || user._id || user.userId || '').trim();
     if (!currentUserId) return false;
 
+    let boardOwnerId = '';
     if (board.owner) {
       if (typeof board.owner === 'object') {
-        const ownerId = String(board.owner.id || board.owner._id || '');
-        if (ownerId && ownerId === currentUserId) return true;
+        boardOwnerId = String(board.owner.id || board.owner._id || board.owner.userId || '').trim();
       } else {
-        if (String(board.owner) === currentUserId) return true;
+        boardOwnerId = String(board.owner).trim();
       }
+    } else if (board.ownerId) {
+      boardOwnerId = String(board.ownerId).trim();
+    } else if (board.user) {
+      if (typeof board.user === 'object') {
+        boardOwnerId = String(board.user.id || board.user._id || '').trim();
+      } else {
+        boardOwnerId = String(board.user).trim();
+      }
+    } else if (board.userId) {
+      boardOwnerId = String(board.userId).trim();
+    }
+
+    if (boardOwnerId && boardOwnerId === currentUserId) {
+      return true;
     }
 
     return false;
   }, [board, user, propIsOwner]);
+
+  const fetchBoardDetails = useCallback(async (boardId) => {
+    if (!boardId) return;
+    try {
+      const res = await apiClient.get(`/boards/${boardId}`);
+      if (res.success && res.data?.board) {
+        setFetchedBoard(res.data.board);
+      }
+    } catch (err) {
+      console.error('[ShareBoardModal] Failed to fetch board details:', err);
+    }
+  }, []);
 
   const fetchCollaborators = useCallback(async () => {
     if (!board?.id) return;
@@ -47,12 +81,18 @@ export const ShareBoardModal = ({ isOpen, onClose, board, isOwner: propIsOwner, 
   }, [board?.id]);
 
   useEffect(() => {
-    if (isOpen && board?.id) {
+    if (isOpen && initialBoard?.id) {
       setEmail('');
       setError('');
+      setFetchedBoard(null);
+
+      if (!initialBoard.owner && !initialBoard.ownerId) {
+        fetchBoardDetails(initialBoard.id);
+      }
+
       fetchCollaborators();
     }
-  }, [isOpen, board?.id, fetchCollaborators]);
+  }, [isOpen, initialBoard?.id, initialBoard?.owner, initialBoard?.ownerId, fetchBoardDetails, fetchCollaborators]);
 
   if (!isOpen || !board) return null;
 
@@ -125,7 +165,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board, isOwner: propIsOwner, 
             </div>
             <div>
               <h2 className="font-headline font-bold text-lg text-on-surface line-clamp-1">
-                Share "{board.title}"
+                Share "{board.title || 'Board'}"
               </h2>
               <p className="font-body text-xs text-on-surface-variant">
                 Manage board collaborators
