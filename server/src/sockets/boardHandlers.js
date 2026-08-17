@@ -157,11 +157,18 @@ export const registerBoardHandlers = (io, socket) => {
     socket.to(room).emit('canvas:object-added', { boardId, objectId, objectData, senderSocketId: socket.id });
   });
 
-  socket.on('canvas:path-created', ({ boardId, objectId, objectData } = {}) => {
+  socket.on('canvas:path-created', ({ boardId, objectId, strokeId, objectData } = {}) => {
     if (!boardId || !objectId || !objectData) return;
     const room = boardRoomName(boardId);
     if (!socket.rooms.has(room)) return;
-    socket.to(room).emit('canvas:path-created', { boardId, objectId, objectData, senderSocketId: socket.id });
+    socket.to(room).emit('canvas:path-created', { boardId, objectId, strokeId, objectData, senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:draw-stream', ({ boardId, strokeId, points, color, width, opacity } = {}) => {
+    if (!boardId || !strokeId || !Array.isArray(points)) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:draw-stream', { boardId, strokeId, points, color, width, opacity, senderSocketId: socket.id });
   });
 
   socket.on('canvas:object-modified', ({ boardId, objectId, objectData } = {}) => {
@@ -169,6 +176,13 @@ export const registerBoardHandlers = (io, socket) => {
     const room = boardRoomName(boardId);
     if (!socket.rooms.has(room)) return;
     socket.to(room).emit('canvas:object-modified', { boardId, objectId, objectData, senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:object-transform', ({ boardId, objectId, transform } = {}) => {
+    if (!boardId || !objectId || !transform) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:object-transform', { boardId, objectId, transform, senderSocketId: socket.id });
   });
 
   socket.on('canvas:object-removed', ({ boardId, objectId, objectIds } = {}) => {
@@ -223,6 +237,30 @@ export const registerBoardHandlers = (io, socket) => {
     const room = boardRoomName(boardId);
     if (!socket.rooms.has(room)) return;
     socket.to(room).emit('cursor:hide', {
+      boardId,
+      clientId: socket.id,
+      userId: String(socket.user.id)
+    });
+  });
+
+  socket.on('selection:change', ({ boardId, objectIds } = {}) => {
+    if (!boardId || !Array.isArray(objectIds)) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('selection:change', {
+      boardId,
+      clientId: socket.id,
+      userId: String(socket.user.id),
+      name: socket.user.name,
+      objectIds
+    });
+  });
+
+  socket.on('selection:clear', ({ boardId } = {}) => {
+    if (!boardId) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('selection:clear', {
       boardId,
       clientId: socket.id,
       userId: String(socket.user.id)

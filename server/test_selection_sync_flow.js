@@ -31,8 +31,8 @@ async function request(path, options = {}) {
   return { status: res.status, data, setCookie };
 }
 
-const runCursorSyncVerification = async () => {
-  console.log('--- Starting Skribe Phase 4E.1 Live Collaborative Cursors Verification ---');
+const runSelectionSyncVerification = async () => {
+  console.log('--- Starting Skribe Phase 4E.2 Remote Selection Indicators Verification ---');
 
   await connectDB();
 
@@ -73,7 +73,7 @@ const runCursorSyncVerification = async () => {
   const boardRes = await request('/api/v1/boards', {
     method: 'POST',
     cookie: cookieA,
-    body: { title: 'Cursor Verification Board' }
+    body: { title: 'Selection Verification Board' }
   });
 
   const boardObj = boardRes.data.data.board || boardRes.data.data;
@@ -105,27 +105,27 @@ const runCursorSyncVerification = async () => {
   await Promise.all([joinA, joinB]);
   console.log('✅ TEST 2 PASSED: Owner and Collaborator joined board room');
 
-  const cursorMoveReceivedPromise = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout waiting for cursor:move')), 5000);
-    socketB.on('cursor:move', (data) => {
-      if (data.boardId === boardId && data.sceneX === 1250 && data.sceneY === 850) {
+  const selectionChangeReceivedPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Timeout waiting for selection:change')), 5000);
+    socketB.on('selection:change', (data) => {
+      if (data.boardId === boardId && Array.isArray(data.objectIds) && data.objectIds[0] === 'shape_rect_101') {
         clearTimeout(timeout);
         resolve(data);
       }
     });
   });
 
-  socketA.emit('cursor:move', { boardId, sceneX: 1250, sceneY: 850 });
-  const cursorMoveData = await cursorMoveReceivedPromise;
+  socketA.emit('selection:change', { boardId, objectIds: ['shape_rect_101'] });
+  const selData = await selectionChangeReceivedPromise;
 
-  if (cursorMoveData.name !== userA.name || cursorMoveData.userId !== userA.id) {
-    throw new Error('User identity mismatch in cursor:move payload');
+  if (selData.name !== userA.name || selData.userId !== userA.id) {
+    throw new Error('User identity mismatch in selection:change payload');
   }
-  console.log('✅ TEST 3 PASSED: Collaborator received real-time cursor:move with user identity');
+  console.log('✅ TEST 3 PASSED: Collaborator received real-time selection:change with user identity');
 
-  const cursorHideReceivedPromise = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout waiting for cursor:hide')), 5000);
-    socketB.on('cursor:hide', (data) => {
+  const selectionClearReceivedPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Timeout waiting for selection:clear')), 5000);
+    socketB.on('selection:clear', (data) => {
       if (data.boardId === boardId && data.userId === userA.id) {
         clearTimeout(timeout);
         resolve(data);
@@ -133,24 +133,24 @@ const runCursorSyncVerification = async () => {
     });
   });
 
-  socketA.emit('cursor:hide', { boardId });
-  await cursorHideReceivedPromise;
-  console.log('✅ TEST 4 PASSED: Collaborator received real-time cursor:hide');
+  socketA.emit('selection:clear', { boardId });
+  await selectionClearReceivedPromise;
+  console.log('✅ TEST 4 PASSED: Collaborator received real-time selection:clear');
 
-  let unauthorizedCursorReceived = false;
-  socketB.on('cursor:move', (data) => {
+  let unauthorizedSelectionReceived = false;
+  socketB.on('selection:change', (data) => {
     if (data.userId === userC.id) {
-      unauthorizedCursorReceived = true;
+      unauthorizedSelectionReceived = true;
     }
   });
 
-  socketC.emit('cursor:move', { boardId, sceneX: 9999, sceneY: 9999 });
+  socketC.emit('selection:change', { boardId, objectIds: ['shape_rect_999'] });
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  if (unauthorizedCursorReceived) {
-    throw new Error('Unauthorized user C broadcasted cursor event!');
+  if (unauthorizedSelectionReceived) {
+    throw new Error('Unauthorized user C broadcasted selection event!');
   }
-  console.log('✅ TEST 5 PASSED: Unauthorized user cursor event rejected by server room scoping');
+  console.log('✅ TEST 5 PASSED: Unauthorized user selection event rejected by server room scoping');
 
   const userLeftReceivedPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Timeout waiting for board:user:left')), 5000);
@@ -178,13 +178,13 @@ const runCursorSyncVerification = async () => {
   }
 
   console.log('\n==================================================');
-  console.log('✅ ALL 6 LIVE COLLABORATIVE CURSOR VERIFICATION TESTS PASSED!');
+  console.log('✅ ALL 6 REMOTE SELECTION INDICATOR VERIFICATION TESTS PASSED!');
   console.log('==================================================\n');
   process.exit(0);
 };
 
-runCursorSyncVerification().catch(async (err) => {
-  console.error('❌ CURSOR VERIFICATION TEST FAILED:', err);
+runSelectionSyncVerification().catch(async (err) => {
+  console.error('❌ SELECTION VERIFICATION TEST FAILED:', err);
   if (server) {
     await new Promise((resolve) => server.close(resolve));
   }

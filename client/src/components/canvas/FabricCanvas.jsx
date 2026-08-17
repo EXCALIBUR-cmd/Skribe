@@ -52,6 +52,8 @@ export const FabricCanvas = forwardRef(({
   onLocalObjectAdded,
   onLocalPathCreated,
   onLocalObjectModified,
+  onLocalObjectTransform,
+  onLocalDrawStream,
   onLocalObjectRemoved,
   className = ''
 }, ref) => {
@@ -74,6 +76,10 @@ export const FabricCanvas = forwardRef(({
   const activeDrawPathRef = useRef(null);
   const isDrawingStrokeRef = useRef(false);
   const animFrameRequestedRef = useRef(false);
+  const strokeIdRef = useRef(null);
+  const remoteDrawPathsRef = useRef({});
+  const finalizedStrokeIdsRef = useRef(new Set());
+  const drawStreamAnimFrameRef = useRef(null);
 
   const isDrawingLineRef = useRef(false);
   const activeLineRef = useRef(null);
@@ -81,6 +87,7 @@ export const FabricCanvas = forwardRef(({
 
   const isErasingDragRef = useRef(false);
   const isRemoteOperationRef = useRef(false);
+  const transformAnimFrameRef = useRef(null);
 
   useEffect(() => {
     activeToolRef.current = activeTool;
@@ -97,6 +104,8 @@ export const FabricCanvas = forwardRef(({
   const onLocalObjectAddedRef = useRef(onLocalObjectAdded);
   const onLocalPathCreatedRef = useRef(onLocalPathCreated);
   const onLocalObjectModifiedRef = useRef(onLocalObjectModified);
+  const onLocalObjectTransformRef = useRef(onLocalObjectTransform);
+  const onLocalDrawStreamRef = useRef(onLocalDrawStream);
   const onLocalObjectRemovedRef = useRef(onLocalObjectRemoved);
 
   useEffect(() => {
@@ -104,8 +113,10 @@ export const FabricCanvas = forwardRef(({
     onLocalObjectAddedRef.current = onLocalObjectAdded;
     onLocalPathCreatedRef.current = onLocalPathCreated;
     onLocalObjectModifiedRef.current = onLocalObjectModified;
+    onLocalObjectTransformRef.current = onLocalObjectTransform;
+    onLocalDrawStreamRef.current = onLocalDrawStream;
     onLocalObjectRemovedRef.current = onLocalObjectRemoved;
-  }, [onCanvasChange, onLocalObjectAdded, onLocalPathCreated, onLocalObjectModified, onLocalObjectRemoved]);
+  }, [onCanvasChange, onLocalObjectAdded, onLocalPathCreated, onLocalObjectModified, onLocalObjectTransform, onLocalDrawStream, onLocalObjectRemoved]);
 
   const serializeFabricObject = (obj) => {
     if (!obj || typeof obj.toJSON !== 'function') return null;
@@ -113,6 +124,7 @@ export const FabricCanvas = forwardRef(({
     const data = obj.toJSON([
       'id',
       'elementId',
+      'strokeId',
       'parentShapeId',
       'attachedTextId',
       'metadata',
@@ -153,12 +165,24 @@ export const FabricCanvas = forwardRef(({
 
   const findCanvasObjectById = (canvas, id) => {
     if (!canvas || !id) return null;
-    return canvas.getObjects().find((o) => o.id === id);
+    return canvas.getObjects().find((o) => (o.id && o.id === id) || (o.elementId && o.elementId === id) || (o.strokeId && o.strokeId === id));
   };
 
-  const applyRemoteObjectAdded = async ({ objectId, objectData }) => {
+  const applyRemoteObjectAdded = async ({ objectId, strokeId, objectData }) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !objectData) return;
+
+    const targetStrokeId = strokeId || objectData.strokeId;
+    if (targetStrokeId) {
+      finalizedStrokeIdsRef.current.add(targetStrokeId);
+      const tempPathObj = remoteDrawPathsRef.current[targetStrokeId];
+      if (tempPathObj) {
+        canvas.remove(tempPathObj);
+        delete remoteDrawPathsRef.current[targetStrokeId];
+      }
+      const leftoverTempPaths = canvas.getObjects().filter((o) => o.isTemporaryDrawPath && (o.strokeId === targetStrokeId || o.id === targetStrokeId));
+      leftoverTempPaths.forEach((tp) => canvas.remove(tp));
+    }
 
     const targetId = objectId || objectData.id;
     const existingObj = findCanvasObjectById(canvas, targetId);
@@ -176,6 +200,14 @@ export const FabricCanvas = forwardRef(({
         const obj = enlivened[0];
         ensureObjectId(obj);
         if (targetId) obj.id = targetId;
+        if (objectData.attachedTextId) obj.attachedTextId = objectData.attachedTextId;
+        if (objectData.parentShapeId) obj.parentShapeId = objectData.parentShapeId;
+        if (objectData.elementId) obj.elementId = objectData.elementId;
+        else if (targetId) obj.elementId = targetId;
+        if (objectData.strokeId) obj.strokeId = objectData.strokeId;
+        if (objectData.isStickyNote) obj.isStickyNote = objectData.isStickyNote;
+        if (objectData.isChecklistNote) obj.isChecklistNote = objectData.isChecklistNote;
+        if (objectData.isCalloutNote) obj.isCalloutNote = objectData.isCalloutNote;
 
         if (obj.isStickyNote) {
           const paperColor = obj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
@@ -192,6 +224,8 @@ export const FabricCanvas = forwardRef(({
         }
 
         canvas.add(obj);
+        obj.setCoords();
+        obj.set({ dirty: true });
 
         if (objectData.stackIndex !== undefined && typeof canvas.moveObjectTo === 'function') {
           canvas.moveObjectTo(obj, objectData.stackIndex);
@@ -206,21 +240,63 @@ export const FabricCanvas = forwardRef(({
     }
   };
 
+  const applyRemoteDrawStream = ({ strokeId, points, color, width, opacity }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !strokeId || !Array.isArray(points) || points.length === 0) return;
+
+    if (finalizedStrokeIdsRef.current.has(strokeId)) return;
+
+    try {
+      isRemoteOperationRef.current = true;
+      let pathObj = remoteDrawPathsRef.current[strokeId];
+
+      if (!pathObj) {
+        let pathStr = `M ${points[0].x} ${points[0].y}`;
+        for (let i = 1; i < points.length; i++) {
+          pathStr += ` L ${points[i].x} ${points[i].y}`;
+        }
+
+        pathObj = new fabric.Path(pathStr, {
+          stroke: color || '#000000',
+          strokeWidth: width || 4,
+          opacity: opacity ?? 1.0,
+          strokeLineCap: 'round',
+          strokeLineJoin: 'round',
+          fill: '',
+          selectable: false,
+          evented: false,
+          objectCaching: false
+        });
+
+        pathObj.isTemporaryDrawPath = true;
+        pathObj.strokeId = strokeId;
+        canvas.add(pathObj);
+        remoteDrawPathsRef.current[strokeId] = pathObj;
+      } else {
+        if (Array.isArray(pathObj.path)) {
+          pathObj.path = points.map((p, idx) => [idx === 0 ? 'M' : 'L', p.x, p.y]);
+        }
+      }
+
+      pathObj.set({ dirty: true });
+      canvas.requestRenderAll();
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteDrawStream error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
   const applyRemoteObjectModified = async ({ objectId, objectData }) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !objectData) return;
 
     const targetId = objectId || objectData.id;
     const existingObj = findCanvasObjectById(canvas, targetId);
+    if (!existingObj) return;
 
     try {
       isRemoteOperationRef.current = true;
-
-      if (!existingObj) {
-        await applyRemoteObjectAdded({ objectId, objectData });
-        return;
-      }
-
       const objData = JSON.parse(JSON.stringify(objectData));
       if (objData.isStickyNote && objData.fill && typeof objData.fill === 'object') {
         delete objData.fill;
@@ -232,6 +308,7 @@ export const FabricCanvas = forwardRef(({
 
         const propsToCopy = [
           'left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle',
+          'originX', 'originY', 'pathOffset', 'rx', 'ry',
           'fill', 'stroke', 'strokeWidth', 'strokeDashArray', 'opacity',
           'text', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign',
           'checklistItems', 'noteColor', 'contrastResolved',
@@ -251,13 +328,16 @@ export const FabricCanvas = forwardRef(({
         existingObj.set(propsToSet);
 
         if (existingObj.type === 'textbox' || existingObj.type === 'i-text' || existingObj.type === 'text') {
+          if (typeof existingObj._clearCache === 'function') {
+            existingObj._clearCache();
+          }
           if (typeof existingObj.initDimensions === 'function') {
             existingObj.initDimensions();
           }
         }
 
         if (existingObj.isStickyNote) {
-          const paperColor = existingObj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
+          const paperColor = objectData.noteColor || existingObj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
           existingObj.noteColor = paperColor;
           existingObj.set('fill', createRuledPaperFill(paperColor));
         }
@@ -276,12 +356,42 @@ export const FabricCanvas = forwardRef(({
           }
         }
 
+        existingObj.set({ dirty: true });
         existingObj.setCoords();
         syncLinkedPosition({ target: existingObj });
         canvas.requestRenderAll();
       }
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectModified error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
+  const applyRemoteObjectTransform = ({ objectId, transform }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !objectId || !transform) return;
+
+    const existingObj = findCanvasObjectById(canvas, objectId);
+    if (!existingObj) return;
+
+    try {
+      isRemoteOperationRef.current = true;
+      const { left, top, scaleX, scaleY, angle } = transform;
+      const updateProps = {};
+      if (left !== undefined) updateProps.left = left;
+      if (top !== undefined) updateProps.top = top;
+      if (scaleX !== undefined) updateProps.scaleX = scaleX;
+      if (scaleY !== undefined) updateProps.scaleY = scaleY;
+      if (angle !== undefined) updateProps.angle = angle;
+
+      existingObj.set(updateProps);
+      existingObj.set({ dirty: true });
+      existingObj.setCoords();
+      syncLinkedPosition({ target: existingObj });
+      canvas.requestRenderAll();
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteObjectTransform error:', err);
     } finally {
       isRemoteOperationRef.current = false;
     }
@@ -301,7 +411,7 @@ export const FabricCanvas = forwardRef(({
     ensureObjectId(obj);
     const data = serializeFabricObject(obj);
     if (data && onLocalPathCreatedRef.current) {
-      onLocalPathCreatedRef.current({ objectId: obj.id, objectData: data });
+      onLocalPathCreatedRef.current({ objectId: obj.id, strokeId: obj.strokeId || strokeIdRef.current, objectData: data });
     }
   };
 
@@ -311,6 +421,23 @@ export const FabricCanvas = forwardRef(({
     const data = serializeFabricObject(obj);
     if (data && onLocalObjectModifiedRef.current) {
       onLocalObjectModifiedRef.current({ objectId: obj.id, objectData: data });
+    }
+  };
+
+  const notifyLocalObjectTransform = (obj) => {
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    ensureObjectId(obj);
+    if (onLocalObjectTransformRef.current) {
+      const matrix = obj.calcTransformMatrix ? obj.calcTransformMatrix() : null;
+      const decomp = matrix ? fabric.util.qrDecompose(matrix) : null;
+      const transform = {
+        left: decomp ? decomp.translateX : obj.left,
+        top: decomp ? decomp.translateY : obj.top,
+        scaleX: decomp ? decomp.scaleX : obj.scaleX,
+        scaleY: decomp ? decomp.scaleY : obj.scaleY,
+        angle: decomp ? decomp.angle : obj.angle
+      };
+      onLocalObjectTransformRef.current({ objectId: obj.id, transform });
     }
   };
 
@@ -342,13 +469,15 @@ export const FabricCanvas = forwardRef(({
           text.set({
             left: target.left + rotatedX,
             top: target.top + rotatedY,
-            angle: target.angle
+            angle: target.angle,
+            dirty: true
           });
         } else {
           text.set({
             left: target.left,
             top: target.top,
-            angle: target.angle
+            angle: target.angle,
+            dirty: true
           });
         }
         text.setCoords();
@@ -1393,6 +1522,7 @@ export const FabricCanvas = forwardRef(({
       objectsToDelete.forEach((obj) => {
         if (obj.id) deletedIds.push(obj.id);
         if (obj.elementId && obj.elementId !== obj.id) deletedIds.push(obj.elementId);
+        if (obj.strokeId) deletedIds.push(obj.strokeId);
         if (obj.attachedTextId) {
           const text = canvas.getObjects().find((o) => o.id === obj.attachedTextId);
           if (text) text.parentShapeId = null;
@@ -1663,13 +1793,29 @@ export const FabricCanvas = forwardRef(({
     try {
       isRemoteOperationRef.current = true;
       const allObjects = canvas.getObjects();
-      const targets = allObjects.filter((o) => idsToRemove.has(o.id) || idsToRemove.has(o.elementId));
+      const targets = allObjects.filter((o) =>
+        idsToRemove.has(o.id) ||
+        idsToRemove.has(o.elementId) ||
+        idsToRemove.has(o.strokeId) ||
+        (o.attachedTextId && idsToRemove.has(o.attachedTextId)) ||
+        (o.parentShapeId && idsToRemove.has(o.parentShapeId))
+      );
 
       if (targets.length > 0) {
         canvas.discardActiveObject();
         targets.forEach((obj) => canvas.remove(obj));
-        canvas.requestRenderAll();
       }
+
+      const leftoverTempPaths = allObjects.filter((o) =>
+        o.isTemporaryDrawPath && (
+          idsToRemove.has(o.strokeId) ||
+          idsToRemove.has(o.id) ||
+          idsToRemove.has(o.elementId)
+        )
+      );
+      leftoverTempPaths.forEach((tp) => canvas.remove(tp));
+
+      canvas.requestRenderAll();
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectRemoved error:', err);
     } finally {
@@ -1682,6 +1828,8 @@ export const FabricCanvas = forwardRef(({
     applyRemoteObjectAdded: (data) => applyRemoteObjectAdded(data),
     applyRemotePathCreated: (data) => applyRemoteObjectAdded(data),
     applyRemoteObjectModified: (data) => applyRemoteObjectModified(data),
+    applyRemoteObjectTransform: (data) => applyRemoteObjectTransform(data),
+    applyRemoteDrawStream: (data) => applyRemoteDrawStream(data),
     applyRemoteObjectRemoved: (data) => applyRemoteObjectRemoved(data),
 
     getCanvas: () => fabricCanvasRef.current,
@@ -2531,6 +2679,7 @@ export const FabricCanvas = forwardRef(({
 
       if (tool === 'draw') {
         isDrawingStrokeRef.current = true;
+        strokeIdRef.current = 'stroke_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
         const vpt = canvas.viewportTransform;
         const invVpt = fabric.util.invertTransform(vpt);
         const clickPoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
@@ -2563,6 +2712,16 @@ export const FabricCanvas = forwardRef(({
         canvas.add(tempPath);
         activeDrawPathRef.current = tempPath;
         canvas.requestRenderAll();
+
+        if (onLocalDrawStreamRef.current && strokeIdRef.current) {
+          onLocalDrawStreamRef.current({
+            strokeId: strokeIdRef.current,
+            points: strokePointsRef.current,
+            color: drawColor,
+            width: strokeWidth,
+            opacity: strokeOpacity
+          });
+        }
         return;
       }
 
@@ -2699,6 +2858,22 @@ export const FabricCanvas = forwardRef(({
             }
           });
         }
+
+        if (!drawStreamAnimFrameRef.current) {
+          drawStreamAnimFrameRef.current = requestAnimationFrame(() => {
+            drawStreamAnimFrameRef.current = null;
+            if (onLocalDrawStreamRef.current && strokeIdRef.current) {
+              const pConfig = penConfigRef.current || { color: '#000000', width: 4, opacity: 1.0 };
+              onLocalDrawStreamRef.current({
+                strokeId: strokeIdRef.current,
+                points: strokePointsRef.current,
+                color: pConfig.color || '#000000',
+                width: pConfig.width || 4,
+                opacity: pConfig.opacity ?? 1.0
+              });
+            }
+          });
+        }
       }
     };
 
@@ -2707,7 +2882,17 @@ export const FabricCanvas = forwardRef(({
 
       if (isErasingDragRef.current) {
         isErasingDragRef.current = false;
-        const erasedIds = Array.from(eraserManager.batchedObjects).map((o) => o.id || o.elementId).filter(Boolean);
+        const erasedIdSet = new Set();
+        const batchedArray = Array.from(eraserManager.batchedObjects);
+        for (const obj of batchedArray) {
+          if (obj.id) erasedIdSet.add(obj.id);
+          if (obj.elementId) erasedIdSet.add(obj.elementId);
+          if (obj.strokeId) erasedIdSet.add(obj.strokeId);
+          if (obj.attachedTextId) erasedIdSet.add(obj.attachedTextId);
+          if (obj.parentShapeId) erasedIdSet.add(obj.parentShapeId);
+        }
+        const erasedIds = Array.from(erasedIdSet);
+
         eraserManager.commitBatchErase(canvas, saveState);
 
         if (erasedIds.length > 0) {
@@ -2793,6 +2978,9 @@ export const FabricCanvas = forwardRef(({
 
           const finalStrokeObj = renderVectorStroke(vectorData);
           if (finalStrokeObj) {
+            if (strokeIdRef.current) {
+              finalStrokeObj.strokeId = strokeIdRef.current;
+            }
             canvas.add(finalStrokeObj);
             notifyLocalPathCreated(finalStrokeObj);
             canvas.setActiveObject(finalStrokeObj);
@@ -2804,9 +2992,37 @@ export const FabricCanvas = forwardRef(({
       }
     };
 
-    canvas.on('object:moving', handleObjectMoving);
-    canvas.on('object:scaling', handleObjectScaling);
-    canvas.on('object:rotating', handleObjectRotating);
+    const handleObjectTransformLive = (opt) => {
+      const target = opt ? opt.target : null;
+      if (!target || target.isTemporaryDrawPath) return;
+
+      if (transformAnimFrameRef.current) return;
+      transformAnimFrameRef.current = requestAnimationFrame(() => {
+        transformAnimFrameRef.current = null;
+        if (target.type === 'activeSelection' && typeof target.forEachObject === 'function') {
+          target.forEachObject((obj) => notifyLocalObjectTransform(obj));
+        } else {
+          notifyLocalObjectTransform(target);
+          if (target.attachedTextId) {
+            const textObj = canvas.getObjects().find((o) => o.id === target.attachedTextId);
+            if (textObj) notifyLocalObjectTransform(textObj);
+          }
+        }
+      });
+    };
+
+    canvas.on('object:moving', (opt) => {
+      handleObjectMoving(opt);
+      handleObjectTransformLive(opt);
+    });
+    canvas.on('object:scaling', (opt) => {
+      handleObjectScaling(opt);
+      handleObjectTransformLive(opt);
+    });
+    canvas.on('object:rotating', (opt) => {
+      handleObjectRotating(opt);
+      handleObjectTransformLive(opt);
+    });
     canvas.on('mouse:dblclick', handleDoubleClick);
     canvas.on('mouse:wheel', handleWheel);
     canvas.on('mouse:down', handleMouseDown);
@@ -2852,6 +3068,10 @@ export const FabricCanvas = forwardRef(({
     }
 
     return () => {
+      if (transformAnimFrameRef.current) {
+        cancelAnimationFrame(transformAnimFrameRef.current);
+        transformAnimFrameRef.current = null;
+      }
       if (canvasEl) {
         canvasEl.removeEventListener('contextmenu', handleContextMenu);
       }

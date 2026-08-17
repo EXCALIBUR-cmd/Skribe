@@ -8,6 +8,7 @@ import ToolWheel from '../components/ui/ToolWheel';
 import EraserOverlay from '../components/ui/EraserOverlay';
 import LaserOverlay from '../components/ui/LaserOverlay';
 import CollaborativeCursorsOverlay from '../components/ui/CollaborativeCursorsOverlay';
+import CollaborativeSelectionsOverlay from '../components/ui/CollaborativeSelectionsOverlay';
 import apiClient from '../api/apiClient';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
@@ -284,9 +285,9 @@ export const MainCanvasPage = () => {
       }
     };
 
-    const handleRemotePathCreated = ({ boardId: id, objectId, objectData }) => {
+    const handleRemotePathCreated = ({ boardId: id, objectId, strokeId, objectData }) => {
       if (id === boardId && fabricCanvasRef.current) {
-        fabricCanvasRef.current.applyRemotePathCreated({ objectId, objectData });
+        fabricCanvasRef.current.applyRemotePathCreated({ objectId, strokeId, objectData });
       }
     };
 
@@ -296,21 +297,38 @@ export const MainCanvasPage = () => {
       }
     };
 
+    const handleRemoteObjectTransform = ({ boardId: id, objectId, transform }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteObjectTransform({ objectId, transform });
+      }
+    };
+
+    const handleRemoteDrawStream = (data) => {
+      if (data && data.boardId === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteDrawStream(data);
+      }
+    };
+
     const handleRemoteObjectRemoved = ({ boardId: id, objectId, objectIds }) => {
       if (id === boardId && fabricCanvasRef.current) {
         fabricCanvasRef.current.applyRemoteObjectRemoved({ objectId, objectIds });
       }
     };
 
+
     socketService.on('canvas:object-added', handleRemoteObjectAdded);
     socketService.on('canvas:path-created', handleRemotePathCreated);
     socketService.on('canvas:object-modified', handleRemoteObjectModified);
+    socketService.on('canvas:object-transform', handleRemoteObjectTransform);
+    socketService.on('canvas:draw-stream', handleRemoteDrawStream);
     socketService.on('canvas:object-removed', handleRemoteObjectRemoved);
 
     return () => {
       socketService.off('canvas:object-added', handleRemoteObjectAdded);
       socketService.off('canvas:path-created', handleRemotePathCreated);
       socketService.off('canvas:object-modified', handleRemoteObjectModified);
+      socketService.off('canvas:object-transform', handleRemoteObjectTransform);
+      socketService.off('canvas:draw-stream', handleRemoteDrawStream);
       socketService.off('canvas:object-removed', handleRemoteObjectRemoved);
     };
   }, [boardId]);
@@ -321,15 +339,27 @@ export const MainCanvasPage = () => {
     }
   }, [boardId]);
 
-  const handleLocalPathCreated = useCallback(({ objectId, objectData }) => {
+  const handleLocalPathCreated = useCallback(({ objectId, strokeId, objectData }) => {
     if (boardId && objectId && objectData) {
-      socketService.emit('canvas:path-created', { boardId, objectId, objectData });
+      socketService.emit('canvas:path-created', { boardId, objectId, strokeId, objectData });
     }
   }, [boardId]);
 
   const handleLocalObjectModified = useCallback(({ objectId, objectData }) => {
     if (boardId && objectId && objectData) {
       socketService.emit('canvas:object-modified', { boardId, objectId, objectData });
+    }
+  }, [boardId]);
+
+  const handleLocalObjectTransform = useCallback(({ objectId, transform }) => {
+    if (boardId && objectId && transform) {
+      socketService.emit('canvas:object-transform', { boardId, objectId, transform });
+    }
+  }, [boardId]);
+
+  const handleLocalDrawStream = useCallback((data) => {
+    if (boardId && data) {
+      socketService.emit('canvas:draw-stream', { boardId, ...data });
     }
   }, [boardId]);
 
@@ -723,6 +753,12 @@ export const MainCanvasPage = () => {
         fabricCanvasRef={fabricCanvasRef}
       />
 
+      <CollaborativeSelectionsOverlay
+        boardId={boardId}
+        fabricCanvasRef={fabricCanvasRef}
+        selectedProps={selectedProps}
+      />
+
       <FabricCanvas
         ref={fabricCanvasRef}
         activeTool={activeTool}
@@ -739,6 +775,8 @@ export const MainCanvasPage = () => {
         onLocalObjectAdded={handleLocalObjectAdded}
         onLocalPathCreated={handleLocalPathCreated}
         onLocalObjectModified={handleLocalObjectModified}
+        onLocalObjectTransform={handleLocalObjectTransform}
+        onLocalDrawStream={handleLocalDrawStream}
         onLocalObjectRemoved={handleLocalObjectRemoved}
         className="absolute inset-0 z-0"
       />

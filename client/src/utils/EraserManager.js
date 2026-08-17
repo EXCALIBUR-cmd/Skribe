@@ -270,6 +270,10 @@ export class EraserManager {
         const linked = canvas.getObjects().filter((o) => o.elementId === target.elementId);
         linked.forEach((o) => objectsToRemove.add(o));
       }
+      if (target.strokeId) {
+        const tempPaths = canvas.getObjects().filter((o) => o.isTemporaryDrawPath && o.strokeId === target.strokeId);
+        tempPaths.forEach((o) => objectsToRemove.add(o));
+      }
     }
 
     const activeObj = canvas.getActiveObject();
