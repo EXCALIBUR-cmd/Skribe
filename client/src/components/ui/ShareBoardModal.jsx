@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
 import { useAuth } from '../../context/AuthContext';
 
-export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner: propIsOwner, addToast }) => {
+export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner: propIsOwner, loadingBoard, addToast }) => {
   const { user } = useAuth();
   const [email, setEmail] = useState('');
   const [collaborators, setCollaborators] = useState([]);
@@ -19,7 +19,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
   }, [initialBoard, fetchedBoard]);
 
   const isOwner = useMemo(() => {
-    if (propIsOwner === true) return true;
+    if (typeof propIsOwner === 'boolean') return propIsOwner;
     if (!board || !user) return false;
 
     const currentUserId = String(user.id || user._id || user.userId || '').trim();
@@ -181,7 +181,12 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
         </div>
 
         <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-          {isOwner ? (
+          {loadingBoard && !board.owner && !board.ownerId ? (
+            <div className="py-4 text-center text-xs font-bold text-on-surface-variant flex items-center justify-center gap-2 bg-surface-container-low/50 rounded-2xl border border-dashed border-outline-variant/60">
+              <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span>Loading ownership details...</span>
+            </div>
+          ) : isOwner ? (
             <form onSubmit={handleAddCollaborator} className="space-y-2">
               <label className="block text-xs font-label font-bold text-on-surface uppercase tracking-wider">
                 Add Collaborator

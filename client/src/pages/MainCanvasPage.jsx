@@ -7,6 +7,7 @@ import ToastNotification from '../components/ui/ToastNotification';
 import ToolWheel from '../components/ui/ToolWheel';
 import EraserOverlay from '../components/ui/EraserOverlay';
 import LaserOverlay from '../components/ui/LaserOverlay';
+import CollaborativeCursorsOverlay from '../components/ui/CollaborativeCursorsOverlay';
 import apiClient from '../api/apiClient';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
@@ -23,6 +24,33 @@ export const MainCanvasPage = () => {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [loadingBoard, setLoadingBoard] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+
+  const isOwner = useMemo(() => {
+    if (!currentBoard || !user) return false;
+    const currentUserId = String(user.id || user._id || user.userId || '').trim();
+    if (!currentUserId) return false;
+
+    let boardOwnerId = '';
+    if (currentBoard.owner) {
+      if (typeof currentBoard.owner === 'object') {
+        boardOwnerId = String(currentBoard.owner.id || currentBoard.owner._id || currentBoard.owner.userId || '').trim();
+      } else {
+        boardOwnerId = String(currentBoard.owner).trim();
+      }
+    } else if (currentBoard.ownerId) {
+      boardOwnerId = String(currentBoard.ownerId).trim();
+    } else if (currentBoard.user) {
+      if (typeof currentBoard.user === 'object') {
+        boardOwnerId = String(currentBoard.user.id || currentBoard.user._id || '').trim();
+      } else {
+        boardOwnerId = String(currentBoard.user).trim();
+      }
+    } else if (currentBoard.userId) {
+      boardOwnerId = String(currentBoard.userId).trim();
+    }
+
+    return !!(boardOwnerId && boardOwnerId === currentUserId);
+  }, [currentBoard, user]);
   const [activeUsers, setActiveUsers] = useState([]);
 
   const [activeTool, setActiveTool] = useState('select');
@@ -630,6 +658,8 @@ export const MainCanvasPage = () => {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         board={currentBoard || { id: boardId, title: boardTitle }}
+        isOwner={isOwner}
+        loadingBoard={loadingBoard}
         addToast={addToast}
       />
 
@@ -684,6 +714,11 @@ export const MainCanvasPage = () => {
       <LaserOverlay
         activeTool={activeTool}
         laserConfig={laserConfig}
+        boardId={boardId}
+        fabricCanvasRef={fabricCanvasRef}
+      />
+
+      <CollaborativeCursorsOverlay
         boardId={boardId}
         fabricCanvasRef={fabricCanvasRef}
       />

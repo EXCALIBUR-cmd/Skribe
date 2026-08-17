@@ -203,6 +203,31 @@ export const registerBoardHandlers = (io, socket) => {
       userId: socket.user.id
     });
   });
+
+  socket.on('cursor:move', ({ boardId, sceneX, sceneY } = {}) => {
+    if (!boardId || sceneX === undefined || sceneY === undefined) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('cursor:move', {
+      boardId,
+      clientId: socket.id,
+      userId: String(socket.user.id),
+      name: socket.user.name,
+      sceneX,
+      sceneY
+    });
+  });
+
+  socket.on('cursor:hide', ({ boardId } = {}) => {
+    if (!boardId) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('cursor:hide', {
+      boardId,
+      clientId: socket.id,
+      userId: String(socket.user.id)
+    });
+  });
 };
 
 export default registerBoardHandlers;
