@@ -659,7 +659,14 @@ export const MainCanvasPage = () => {
                   title={u.name || 'User'}
                 >
                   {u.avatar ? (
-                    <img src={u.avatar} alt={u.name} className="w-full h-full rounded-full object-cover" />
+                    <img
+                      src={u.avatar}
+                      alt={u.name}
+                      className="w-full h-full rounded-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
                   ) : (
                     (u.name ? u.name.charAt(0).toUpperCase() : 'U')
                   )}

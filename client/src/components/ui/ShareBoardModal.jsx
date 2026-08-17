@@ -255,7 +255,14 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
                     <div className="flex items-center gap-3 overflow-hidden">
                       <div className="w-8 h-8 rounded-full bg-primary text-on-primary font-bold text-xs flex items-center justify-center shrink-0">
                         {member.avatar ? (
-                          <img src={member.avatar} alt={member.name} className="w-full h-full rounded-full object-cover" />
+                          <img
+                            src={member.avatar}
+                            alt={member.name}
+                            className="w-full h-full rounded-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
                         ) : (
                           (member.name ? member.name.charAt(0).toUpperCase() : 'U')
                         )}

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { getMenuItemsForCategory, getCategoryLabel } from '../../config/ToolRegistry';
+import { getMenuItemsForCategory, getCategoryLabel } from '../config/ToolRegistry';
 
 export const FloatingToolPanel = React.memo(({
   isOpen,

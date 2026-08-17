@@ -160,6 +160,17 @@ export const FabricCanvas = forwardRef(({
       }
     }
 
+    if (data) {
+      if (obj.isStickyNote !== undefined) data.isStickyNote = obj.isStickyNote;
+      if (obj.isChecklistNote !== undefined) data.isChecklistNote = obj.isChecklistNote;
+      if (obj.isCalloutNote !== undefined) data.isCalloutNote = obj.isCalloutNote;
+      if (obj.noteColor !== undefined) data.noteColor = obj.noteColor;
+      if (obj.attachedTextId !== undefined) data.attachedTextId = obj.attachedTextId;
+      if (obj.parentShapeId !== undefined) data.parentShapeId = obj.parentShapeId;
+      if (obj.elementId !== undefined) data.elementId = obj.elementId;
+      if (obj.strokeId !== undefined) data.strokeId = obj.strokeId;
+    }
+
     return data;
   };
 
@@ -191,28 +202,40 @@ export const FabricCanvas = forwardRef(({
     try {
       isRemoteOperationRef.current = true;
       const objData = JSON.parse(JSON.stringify(objectData));
-      if (objData.isStickyNote && objData.fill && typeof objData.fill === 'object') {
+      if ((objData.isStickyNote || objectData.isStickyNote || objectData.noteColor || (objectData.id && typeof objectData.id === 'string' && objectData.id.startsWith('shape_'))) && objData.fill && typeof objData.fill === 'object') {
         delete objData.fill;
       }
 
       const enlivened = await fabric.util.enlivenObjects([objData]);
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const obj = enlivened[0];
-        ensureObjectId(obj);
         if (targetId) obj.id = targetId;
         if (objectData.attachedTextId) obj.attachedTextId = objectData.attachedTextId;
         if (objectData.parentShapeId) obj.parentShapeId = objectData.parentShapeId;
         if (objectData.elementId) obj.elementId = objectData.elementId;
-        else if (targetId) obj.elementId = targetId;
         if (objectData.strokeId) obj.strokeId = objectData.strokeId;
-        if (objectData.isStickyNote) obj.isStickyNote = objectData.isStickyNote;
-        if (objectData.isChecklistNote) obj.isChecklistNote = objectData.isChecklistNote;
-        if (objectData.isCalloutNote) obj.isCalloutNote = objectData.isCalloutNote;
+        ensureObjectId(obj);
+        if (objectData.isStickyNote !== undefined) obj.isStickyNote = objectData.isStickyNote;
+        if (objectData.isChecklistNote !== undefined) obj.isChecklistNote = objectData.isChecklistNote;
+        if (objectData.isCalloutNote !== undefined) obj.isCalloutNote = objectData.isCalloutNote;
+        if (objectData.noteColor !== undefined) obj.noteColor = objectData.noteColor;
 
-        if (obj.isStickyNote) {
-          const paperColor = obj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
+        const isSticky = !!(obj.isStickyNote || objectData.isStickyNote || objectData.noteColor || (obj.attachedTextId && obj.type === 'rect'));
+        if (isSticky) {
+          obj.isStickyNote = true;
+          const paperColor = objectData.noteColor || obj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
           obj.noteColor = paperColor;
-          obj.set('fill', createRuledPaperFill(paperColor));
+          obj.set({
+            originX: 'center',
+            originY: 'center',
+            fill: createRuledPaperFill(paperColor)
+          });
+        }
+        if (obj.parentShapeId) {
+          const parentShape = canvas.getObjects().find((o) => o.id === obj.parentShapeId);
+          if (parentShape && (parentShape.isStickyNote || parentShape.isChecklistNote || parentShape.isCalloutNote)) {
+            obj.set({ originX: 'left', originY: 'top' });
+          }
         }
 
         if (obj.isSkribeLine || obj.skribeLine) {
@@ -223,6 +246,11 @@ export const FabricCanvas = forwardRef(({
           syncSkribeLineToFabric(obj);
         }
 
+        if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') {
+          if (typeof obj._clearCache === 'function') obj._clearCache();
+          if (typeof obj.initDimensions === 'function') obj.initDimensions();
+        }
+
         canvas.add(obj);
         obj.setCoords();
         obj.set({ dirty: true });
@@ -230,6 +258,8 @@ export const FabricCanvas = forwardRef(({
         if (objectData.stackIndex !== undefined && typeof canvas.moveObjectTo === 'function') {
           canvas.moveObjectTo(obj, objectData.stackIndex);
         }
+        ensureLinkedTextStacking(obj);
+        syncLinkedPosition({ target: obj });
 
         canvas.requestRenderAll();
       }
@@ -250,35 +280,41 @@ export const FabricCanvas = forwardRef(({
       isRemoteOperationRef.current = true;
       let pathObj = remoteDrawPathsRef.current[strokeId];
 
-      if (!pathObj) {
-        let pathStr = `M ${points[0].x} ${points[0].y}`;
-        for (let i = 1; i < points.length; i++) {
-          pathStr += ` L ${points[i].x} ${points[i].y}`;
-        }
+      const pathData = points.map((p, idx) => {
+        const px = typeof p.x === 'number' ? p.x : p[0];
+        const py = typeof p.y === 'number' ? p.y : p[1];
+        return [idx === 0 ? 'M' : 'L', px, py];
+      });
 
-        pathObj = new fabric.Path(pathStr, {
+      if (!pathObj) {
+        pathObj = new fabric.Path(pathData, {
+          fill: 'transparent',
           stroke: color || '#000000',
           strokeWidth: width || 4,
-          opacity: opacity ?? 1.0,
+          opacity: opacity !== undefined ? opacity : 1.0,
           strokeLineCap: 'round',
           strokeLineJoin: 'round',
-          fill: '',
           selectable: false,
           evented: false,
-          objectCaching: false
+          strokeId,
+          isTemporaryDrawPath: true
         });
-
-        pathObj.isTemporaryDrawPath = true;
-        pathObj.strokeId = strokeId;
         canvas.add(pathObj);
         remoteDrawPathsRef.current[strokeId] = pathObj;
       } else {
-        if (Array.isArray(pathObj.path)) {
-          pathObj.path = points.map((p, idx) => [idx === 0 ? 'M' : 'L', p.x, p.y]);
+        pathObj.set({
+          path: pathData,
+          dirty: true
+        });
+        if (typeof pathObj._calcDimensions === 'function') {
+          const dims = pathObj._calcDimensions();
+          if (dims) {
+            pathObj.set(dims);
+          }
         }
       }
-
       pathObj.set({ dirty: true });
+      pathObj.setCoords();
       canvas.requestRenderAll();
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteDrawStream error:', err);
@@ -289,16 +325,15 @@ export const FabricCanvas = forwardRef(({
 
   const applyRemoteObjectModified = async ({ objectId, objectData }) => {
     const canvas = fabricCanvasRef.current;
-    if (!canvas || !objectData) return;
+    if (!canvas || !objectId || !objectData) return;
 
-    const targetId = objectId || objectData.id;
-    const existingObj = findCanvasObjectById(canvas, targetId);
+    const existingObj = findCanvasObjectById(canvas, objectId);
     if (!existingObj) return;
 
     try {
       isRemoteOperationRef.current = true;
       const objData = JSON.parse(JSON.stringify(objectData));
-      if (objData.isStickyNote && objData.fill && typeof objData.fill === 'object') {
+      if ((objData.isStickyNote || objectData.isStickyNote || objectData.noteColor || existingObj.isStickyNote || (existingObj.id && typeof existingObj.id === 'string' && existingObj.id.startsWith('shape_'))) && objData.fill && typeof objData.fill === 'object') {
         delete objData.fill;
       }
 
@@ -320,12 +355,40 @@ export const FabricCanvas = forwardRef(({
 
         const propsToSet = {};
         propsToCopy.forEach((prop) => {
-          if (newObj[prop] !== undefined) {
-            propsToSet[prop] = newObj[prop];
+          const val = objectData[prop] !== undefined ? objectData[prop] : newObj[prop];
+          if (val !== undefined) {
+            propsToSet[prop] = val;
           }
         });
 
+        const isSticky = !!(
+          existingObj.isStickyNote ||
+          objectData.isStickyNote ||
+          objectData.noteColor ||
+          existingObj.noteColor ||
+          (newObj && newObj.isStickyNote) ||
+          (existingObj.attachedTextId && existingObj.type === 'rect')
+        );
+
+        if (isSticky) {
+          delete propsToSet.fill;
+          existingObj.isStickyNote = true;
+          const paperColor = objectData.noteColor || existingObj.noteColor || '#fff3a0';
+          existingObj.noteColor = paperColor;
+          propsToSet.noteColor = paperColor;
+          existingObj.set('fill', createRuledPaperFill(paperColor));
+        } else if (propsToSet.fill && typeof propsToSet.fill === 'object') {
+          delete propsToSet.fill;
+        }
+
         existingObj.set(propsToSet);
+        if (objectData.isStickyNote !== undefined) existingObj.isStickyNote = objectData.isStickyNote;
+        if (objectData.isChecklistNote !== undefined) existingObj.isChecklistNote = objectData.isChecklistNote;
+        if (objectData.isCalloutNote !== undefined) existingObj.isCalloutNote = objectData.isCalloutNote;
+        if (objectData.noteColor !== undefined) existingObj.noteColor = objectData.noteColor;
+        if (objectData.attachedTextId) existingObj.attachedTextId = objectData.attachedTextId;
+        if (objectData.parentShapeId) existingObj.parentShapeId = objectData.parentShapeId;
+        if (objectData.elementId) existingObj.elementId = objectData.elementId;
 
         if (existingObj.type === 'textbox' || existingObj.type === 'i-text' || existingObj.type === 'text') {
           if (typeof existingObj._clearCache === 'function') {
@@ -334,12 +397,6 @@ export const FabricCanvas = forwardRef(({
           if (typeof existingObj.initDimensions === 'function') {
             existingObj.initDimensions();
           }
-        }
-
-        if (existingObj.isStickyNote) {
-          const paperColor = objectData.noteColor || existingObj.noteColor || (typeof objectData.fill === 'string' ? objectData.fill : '#fff3a0');
-          existingObj.noteColor = paperColor;
-          existingObj.set('fill', createRuledPaperFill(paperColor));
         }
 
         if (existingObj.isSkribeLine || existingObj.skribeLine) {
@@ -359,6 +416,7 @@ export const FabricCanvas = forwardRef(({
         existingObj.set({ dirty: true });
         existingObj.setCoords();
         syncLinkedPosition({ target: existingObj });
+        ensureLinkedTextStacking(existingObj);
         canvas.requestRenderAll();
       }
     } catch (err) {
@@ -454,39 +512,143 @@ export const FabricCanvas = forwardRef(({
     const target = opt ? opt.target : null;
     if (!target || !canvas) return;
 
-    if (target.attachedTextId) {
-      const text = canvas.getObjects().find((o) => o.id === target.attachedTextId);
-      if (text) {
-        const isNoteCard = !!(target.isStickyNote || target.isChecklistNote || target.isCalloutNote);
+    const allObjects = canvas.getObjects();
+
+    const processSingleTarget = (t) => {
+      if (!t) return;
+
+      const attachedTextId = t.attachedTextId;
+      const elementId = t.elementId;
+      let textObj = null;
+
+      if (attachedTextId) {
+        textObj = allObjects.find((o) => o.id === attachedTextId);
+      }
+      if (!textObj && elementId) {
+        textObj = allObjects.find((o) => o.elementId === elementId && o !== t && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text'));
+      }
+
+      if (textObj) {
+        const isNoteCard = !!(t.isStickyNote || t.isChecklistNote || t.isCalloutNote);
+        const scaleX = t.scaleX || 1;
+        const scaleY = t.scaleY || 1;
+        const width = (t.width || 100) * scaleX;
+        const height = (t.height || 100) * scaleY;
+
+        let centerX = t.left;
+        let centerY = t.top;
+        if (t.originX === 'left') centerX += width / 2;
+        else if (t.originX === 'right') centerX -= width / 2;
+
+        if (t.originY === 'top') centerY += height / 2;
+        else if (t.originY === 'bottom') centerY -= height / 2;
+
         if (isNoteCard) {
           const padding = 18;
-          const angleRad = ((target.angle || 0) * Math.PI) / 180;
-          const offsetX = - (target.width / 2) + padding;
-          const offsetY = - (target.height / 2) + padding;
+          const angleRad = ((t.angle || 0) * Math.PI) / 180;
+          const offsetX = - (width / 2) + padding;
+          const offsetY = - (height / 2) + padding;
           const rotatedX = offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad);
           const rotatedY = offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad);
 
-          text.set({
-            left: target.left + rotatedX,
-            top: target.top + rotatedY,
-            angle: target.angle,
+          textObj.set({
+            originX: 'left',
+            originY: 'top',
+            left: centerX + rotatedX,
+            top: centerY + rotatedY,
+            angle: t.angle,
             dirty: true
           });
         } else {
-          text.set({
-            left: target.left,
-            top: target.top,
-            angle: target.angle,
+          let targetLeft = centerX;
+          let targetTop = centerY;
+
+          if (textObj.originX === 'left') targetLeft -= width / 2;
+          else if (textObj.originX === 'right') targetLeft += width / 2;
+
+          if (textObj.originY === 'top') targetTop -= height / 2;
+          else if (textObj.originY === 'bottom') targetTop += height / 2;
+
+          textObj.set({
+            left: targetLeft,
+            top: targetTop,
+            angle: t.angle,
             dirty: true
           });
         }
-        text.setCoords();
+        textObj.setCoords();
       }
+
+      const parentShapeId = t.parentShapeId;
+      let shapeObj = null;
+
+      if (parentShapeId) {
+        shapeObj = allObjects.find((o) => o.id === parentShapeId);
+      }
+      if (!shapeObj && elementId && (t.type === 'textbox' || t.type === 'i-text' || t.type === 'text')) {
+        shapeObj = allObjects.find((o) => o.elementId === elementId && o !== t && o.type !== 'textbox' && o.type !== 'i-text' && o.type !== 'text');
+      }
+
+      if (shapeObj) {
+        const isNoteCard = !!(shapeObj.isStickyNote || shapeObj.isChecklistNote || shapeObj.isCalloutNote);
+        const scaleX = shapeObj.scaleX || 1;
+        const scaleY = shapeObj.scaleY || 1;
+        const width = (shapeObj.width || 100) * scaleX;
+        const height = (shapeObj.height || 100) * scaleY;
+
+        let shapeCenterX = t.left;
+        let shapeCenterY = t.top;
+
+        if (isNoteCard) {
+          const padding = 18;
+          const angleRad = ((t.angle || 0) * Math.PI) / 180;
+          const offsetX = - (width / 2) + padding;
+          const offsetY = - (height / 2) + padding;
+          const rotatedX = offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad);
+          const rotatedY = offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad);
+
+          shapeCenterX = t.left - rotatedX;
+          shapeCenterY = t.top - rotatedY;
+        } else {
+          if (t.originX === 'left') shapeCenterX += width / 2;
+          else if (t.originX === 'right') shapeCenterX -= width / 2;
+
+          if (t.originY === 'top') shapeCenterY += height / 2;
+          else if (t.originY === 'bottom') shapeCenterY -= height / 2;
+        }
+
+        let shapeLeft = shapeCenterX;
+        let shapeTop = shapeCenterY;
+
+        if (shapeObj.originX === 'left') shapeLeft -= width / 2;
+        else if (shapeObj.originX === 'right') shapeLeft += width / 2;
+
+        if (shapeObj.originY === 'top') shapeTop -= height / 2;
+        else if (shapeObj.originY === 'bottom') shapeTop += height / 2;
+
+        shapeObj.set({
+          left: shapeLeft,
+          top: shapeTop,
+          angle: t.angle,
+          dirty: true
+        });
+        shapeObj.setCoords();
+      }
+
+      if (t.attachedTextId || t.elementId) {
+        ensureLinkedTextStacking(t);
+      } else if (shapeObj) {
+        ensureLinkedTextStacking(shapeObj);
+      }
+    };
+
+    if (target.type === 'activeSelection' && typeof target.forEachObject === 'function') {
+      target.forEachObject((o) => processSingleTarget(o));
+    } else {
+      processSingleTarget(target);
     }
 
-    const allObjects = canvas.getObjects();
     const connectors = allObjects.filter((o) => o.isConnector);
-
     connectors.forEach((conn) => {
       if (conn.sourceShapeId === target.id || conn.targetShapeId === target.id) {
         const sourceObj = allObjects.find((o) => o.id === conn.sourceShapeId);
@@ -527,6 +689,14 @@ export const FabricCanvas = forwardRef(({
 
   const handleObjectMoving = (opt) => {
     const target = opt ? opt.target : null;
+    if (target) {
+      console.log('[LINK-MOVING]', {
+        targetId: target.id,
+        targetElementId: target.elementId,
+        targetAttachedTextId: target.attachedTextId,
+        targetType: target.type
+      });
+    }
     if (!target || !target.skribeLine) {
       syncLinkedPosition(opt);
       return;
@@ -641,13 +811,87 @@ export const FabricCanvas = forwardRef(({
     };
   }, []);
 
+  const getDeterministicObjectId = (obj) => {
+    if (!obj) return 'obj_unknown';
+    const type = obj.type || 'obj';
+    const left = Math.round((obj.left || 0) * 100) / 100;
+    const top = Math.round((obj.top || 0) * 100) / 100;
+    const width = Math.round((obj.width || 0) * 100) / 100;
+    const height = Math.round((obj.height || 0) * 100) / 100;
+    const stroke = typeof obj.stroke === 'string' ? obj.stroke : '';
+    const fill = typeof obj.fill === 'string' ? obj.fill : '';
+    let extra = '';
+    if (Array.isArray(obj.path)) {
+      extra = `_p${obj.path.length}_${obj.path[0] ? obj.path[0].join('') : ''}`;
+    } else if (obj.text) {
+      extra = `_t${obj.text.substring(0, 10)}`;
+    }
+    const str = `${type}_${left}_${top}_${width}_${height}_${stroke}_${fill}${extra}`;
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return `obj_det_${Math.abs(hash).toString(36)}`;
+  };
+
   const ensureObjectId = (obj) => {
     if (!obj) return;
     if (!obj.id) {
-      obj.id = 'obj_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      if (obj.strokeId) {
+        obj.id = obj.strokeId;
+      } else if (obj.elementId) {
+        obj.id = (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') ? 'text_' + obj.elementId : 'shape_' + obj.elementId;
+      } else if (isLoadingFromJSONRef.current) {
+        obj.id = getDeterministicObjectId(obj);
+      } else {
+        obj.id = 'obj_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      }
     }
     if (!obj.elementId) {
-      obj.elementId = obj.id;
+      if (typeof obj.id === 'string' && (obj.id.startsWith('shape_') || obj.id.startsWith('text_'))) {
+        obj.elementId = obj.id.replace(/^(shape_|text_)/, '');
+      } else {
+        obj.elementId = obj.id;
+      }
+    }
+    if (!obj.attachedTextId && typeof obj.id === 'string' && obj.id.startsWith('shape_')) {
+      obj.attachedTextId = 'text_' + obj.elementId;
+    }
+    if (!obj.parentShapeId && typeof obj.id === 'string' && obj.id.startsWith('text_')) {
+      obj.parentShapeId = 'shape_' + obj.elementId;
+    }
+  };
+
+  const ensureLinkedTextStacking = (targetShape) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !targetShape) return;
+
+    const attachedTextId = targetShape.attachedTextId;
+    const elementId = targetShape.elementId;
+    let textObj = null;
+
+    if (attachedTextId) {
+      textObj = canvas.getObjects().find((o) => o.id === attachedTextId);
+    }
+    if (!textObj && elementId) {
+      textObj = canvas.getObjects().find((o) => o.elementId === elementId && o !== targetShape && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text'));
+    }
+
+    if (textObj) {
+      const allObjs = canvas.getObjects();
+      const shapeIdx = allObjs.indexOf(targetShape);
+      const textIdx = allObjs.indexOf(textObj);
+
+      if (shapeIdx !== -1 && textIdx !== -1 && textIdx <= shapeIdx) {
+        if (typeof canvas.moveObjectAbove === 'function') {
+          canvas.moveObjectAbove(textObj, targetShape);
+        } else if (typeof canvas.bringObjectToFront === 'function') {
+          canvas.bringObjectToFront(textObj);
+        } else if (typeof canvas.bringToFront === 'function') {
+          canvas.bringToFront(textObj);
+        }
+      }
     }
   };
 
@@ -699,6 +943,7 @@ export const FabricCanvas = forwardRef(({
     const serialized = canvas.toJSON([
       'id',
       'elementId',
+      'strokeId',
       'parentShapeId',
       'attachedTextId',
       'metadata',
@@ -809,11 +1054,7 @@ export const FabricCanvas = forwardRef(({
     canvas.add(shape, textObj);
     notifyLocalObjectAdded(shape);
     notifyLocalObjectAdded(textObj);
-    if (typeof canvas.bringObjectToFront === 'function') {
-      canvas.bringObjectToFront(textObj);
-    } else if (typeof canvas.bringToFront === 'function') {
-      canvas.bringToFront(textObj);
-    }
+    ensureLinkedTextStacking(shape);
 
     canvas.setActiveObject(shape);
     saveState();
@@ -854,6 +1095,8 @@ export const FabricCanvas = forwardRef(({
     shape.attachedTextId = text.id;
 
     canvas.add(text);
+    notifyLocalObjectAdded(text);
+    notifyLocalObjectModified(shape);
     if (typeof canvas.bringObjectToFront === 'function') {
       canvas.bringObjectToFront(text);
     }
@@ -1691,6 +1934,14 @@ export const FabricCanvas = forwardRef(({
 
     ensureObjectId(activeObj);
 
+    console.log('[LINK-SELECTION]', {
+      targetId: activeObj.id,
+      targetElementId: activeObj.elementId,
+      targetAttachedTextId: activeObj.attachedTextId,
+      targetType: activeObj.type,
+      isActiveSelection: activeObj.type === 'activeSelection'
+    });
+
     let targetShape = activeObj.parentShapeId
       ? canvas.getObjects().find((o) => o.id === activeObj.parentShapeId)
       : activeObj;
@@ -1851,6 +2102,9 @@ export const FabricCanvas = forwardRef(({
         Promise.resolve(canvas.loadFromJSON(jsonPayload)).then(() => {
           canvas.getObjects().forEach((o) => {
             ensureObjectId(o);
+            if (o.attachedTextId || o.elementId) {
+              ensureLinkedTextStacking(o);
+            }
             if (o.skribeLine) {
               syncSkribeLineToFabric(o);
             }
@@ -1877,6 +2131,7 @@ export const FabricCanvas = forwardRef(({
       return canvas.toJSON([
         'id',
         'elementId',
+        'strokeId',
         'parentShapeId',
         'attachedTextId',
         'metadata',
@@ -2603,6 +2858,15 @@ export const FabricCanvas = forwardRef(({
 
         if (obj.attachedTextId) {
           const textObj = canvas.getObjects().find((o) => o.id === obj.attachedTextId);
+          console.log('[LINK-FINAL]', {
+            shapeId: obj.id,
+            attachedTextId: obj.attachedTextId,
+            shapeLeft: obj.left,
+            shapeTop: obj.top,
+            textLeft: textObj?.left,
+            textTop: textObj?.top,
+            textParentShapeId: textObj?.parentShapeId
+          });
           if (textObj) notifyLocalObjectModified(textObj);
         }
 
@@ -2847,6 +3111,8 @@ export const FabricCanvas = forwardRef(({
 
         if (Array.isArray(activeDrawPathRef.current.path)) {
           activeDrawPathRef.current.path.push(['L', scenePoint.x, scenePoint.y]);
+          activeDrawPathRef.current.set({ dirty: true });
+          activeDrawPathRef.current.setCoords();
         }
 
         if (!animFrameRequestedRef.current) {
@@ -3002,11 +3268,15 @@ export const FabricCanvas = forwardRef(({
         if (target.type === 'activeSelection' && typeof target.forEachObject === 'function') {
           target.forEachObject((obj) => notifyLocalObjectTransform(obj));
         } else {
+          const linkedTextObj = target.attachedTextId ? canvas.getObjects().find((o) => o.id === target.attachedTextId) : null;
+          console.log('[LINK-TRANSFORM]', {
+            targetId: target.id,
+            attachedTextId: target.attachedTextId,
+            linkedTextId: linkedTextObj?.id,
+            linkedTextFound: !!linkedTextObj,
+            linkedTextObjectReferenceExists: linkedTextObj ? canvas.getObjects().includes(linkedTextObj) : false
+          });
           notifyLocalObjectTransform(target);
-          if (target.attachedTextId) {
-            const textObj = canvas.getObjects().find((o) => o.id === target.attachedTextId);
-            if (textObj) notifyLocalObjectTransform(textObj);
-          }
         }
       });
     };
