@@ -44,6 +44,7 @@ export const FabricCanvas = forwardRef(({
   penConfig = { color: '#000000', width: 4, opacity: 1.0, brushType: 'standard' },
   activeColor = '#000000',
   onZoomChange,
+  onViewportChange,
   onSelectionChange,
   onToolComplete,
   onContextMenu,
@@ -101,6 +102,7 @@ export const FabricCanvas = forwardRef(({
   const isLoadingFromJSONRef = useRef(false);
 
   const onCanvasChangeRef = useRef(onCanvasChange);
+  const onViewportChangeRef = useRef(onViewportChange);
   const onLocalObjectAddedRef = useRef(onLocalObjectAdded);
   const onLocalPathCreatedRef = useRef(onLocalPathCreated);
   const onLocalObjectModifiedRef = useRef(onLocalObjectModified);
@@ -110,13 +112,26 @@ export const FabricCanvas = forwardRef(({
 
   useEffect(() => {
     onCanvasChangeRef.current = onCanvasChange;
+    onViewportChangeRef.current = onViewportChange;
     onLocalObjectAddedRef.current = onLocalObjectAdded;
     onLocalPathCreatedRef.current = onLocalPathCreated;
     onLocalObjectModifiedRef.current = onLocalObjectModified;
     onLocalObjectTransformRef.current = onLocalObjectTransform;
     onLocalDrawStreamRef.current = onLocalDrawStream;
     onLocalObjectRemovedRef.current = onLocalObjectRemoved;
-  }, [onCanvasChange, onLocalObjectAdded, onLocalPathCreated, onLocalObjectModified, onLocalObjectTransform, onLocalDrawStream, onLocalObjectRemoved]);
+  }, [onCanvasChange, onViewportChange, onLocalObjectAdded, onLocalPathCreated, onLocalObjectModified, onLocalObjectTransform, onLocalDrawStream, onLocalObjectRemoved]);
+
+  const notifyViewportChange = () => {
+    const canvas = fabricCanvasRef.current;
+    const viewportTransform = canvas?.viewportTransform;
+    if (!canvas || !viewportTransform || !onViewportChangeRef.current) return;
+
+    onViewportChangeRef.current({
+      x: viewportTransform[4],
+      y: viewportTransform[5],
+      zoom: canvas.getZoom()
+    });
+  };
 
   const serializeFabricObject = (obj) => {
     if (!obj || typeof obj.toJSON !== 'function') return null;
@@ -1907,6 +1922,7 @@ export const FabricCanvas = forwardRef(({
         update: () => {
           canvas.zoomToPoint(centerPoint, currentZoom.value);
           canvas.requestRenderAll();
+          notifyViewportChange();
           if (onZoomChange) {
             onZoomChange(Math.round(currentZoom.value * 100));
           }
@@ -1915,6 +1931,7 @@ export const FabricCanvas = forwardRef(({
     } else {
       canvas.zoomToPoint(centerPoint, clampedZoom);
       canvas.requestRenderAll();
+      notifyViewportChange();
       if (onZoomChange) {
         onZoomChange(Math.round(clampedZoom * 100));
       }
@@ -2085,6 +2102,23 @@ export const FabricCanvas = forwardRef(({
 
     getCanvas: () => fabricCanvasRef.current,
 
+    setViewport: (viewport) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas || !viewport) return;
+
+      const { x, y, zoom } = viewport;
+      if (![x, y, zoom].every((value) => typeof value === 'number' && Number.isFinite(value))) return;
+      if (zoom < 0.2 || zoom > 5) return;
+
+      if (zoomAnimationRef.current) {
+        zoomAnimationRef.current.pause();
+      }
+
+      canvas.setViewportTransform([zoom, 0, 0, zoom, x, y]);
+      canvas.requestRenderAll();
+      if (onZoomChange) onZoomChange(Math.round(zoom * 100));
+    },
+
     loadFromJSON: (canvasData, callback) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas || !canvasData) {
@@ -2100,13 +2134,47 @@ export const FabricCanvas = forwardRef(({
           return;
         }
         Promise.resolve(canvas.loadFromJSON(jsonPayload)).then(() => {
-          canvas.getObjects().forEach((o) => {
-            ensureObjectId(o);
-            if (o.attachedTextId || o.elementId) {
-              ensureLinkedTextStacking(o);
+          const loadedObjects = canvas.getObjects();
+
+          loadedObjects.forEach((o, index) => {
+            const persistedObject = jsonPayload.objects[index];
+            if (persistedObject) {
+              ['id', 'elementId', 'attachedTextId', 'parentShapeId'].forEach((property) => {
+                if (persistedObject[property] !== undefined) {
+                  o[property] = persistedObject[property];
+                }
+              });
             }
+            ensureObjectId(o);
             if (o.skribeLine) {
               syncSkribeLineToFabric(o);
+            }
+          });
+
+          loadedObjects.forEach((o) => {
+            if (!o.elementId) return;
+
+            const isText = o.type === 'textbox' || o.type === 'i-text' || o.type === 'text';
+            const linkedObject = loadedObjects.find((candidate) => (
+              candidate !== o &&
+              candidate.elementId === o.elementId &&
+              (isText
+                ? candidate.type !== 'textbox' && candidate.type !== 'i-text' && candidate.type !== 'text'
+                : candidate.type === 'textbox' || candidate.type === 'i-text' || candidate.type === 'text')
+            ));
+
+            if (!linkedObject) return;
+            if (isText) {
+              o.parentShapeId = linkedObject.id;
+            } else {
+              o.attachedTextId = linkedObject.id;
+            }
+          });
+
+          loadedObjects.forEach((o) => {
+            if (o.attachedTextId || o.elementId) {
+              ensureLinkedTextStacking(o);
+              syncLinkedPosition({ target: o });
             }
           });
           canvas.requestRenderAll();
@@ -2128,37 +2196,10 @@ export const FabricCanvas = forwardRef(({
     toJSON: () => {
       const canvas = fabricCanvasRef.current;
       if (!canvas) return { version: '6.5.1', objects: [] };
-      return canvas.toJSON([
-        'id',
-        'elementId',
-        'strokeId',
-        'parentShapeId',
-        'attachedTextId',
-        'metadata',
-        'aiMetadata',
-        'isStickyNote',
-        'isChecklistNote',
-        'isCalloutNote',
-        'checklistItems',
-        'noteColor',
-        'contrastResolved',
-        'isConnector',
-        'connectorType',
-        'startArrow',
-        'endArrow',
-        'sourceShapeId',
-        'targetShapeId',
-        'skribeLine',
-        'locked',
-        'protected',
-        'system',
-        'isVectorStroke',
-        'vectorStrokeData',
-        'isStraightLine',
-        'isSkribeLine',
-        'angle',
-        'padding'
-      ]);
+      return {
+        version: canvas.version,
+        objects: canvas.getObjects().map(serializeFabricObject).filter(Boolean)
+      };
     },
 
     deleteSelected: (mode = 'auto') => {
@@ -2908,6 +2949,7 @@ export const FabricCanvas = forwardRef(({
         vpt[4] -= e.deltaX;
         vpt[5] -= e.deltaY;
         canvas.requestRenderAll();
+        notifyViewportChange();
       }
     };
 
@@ -3046,6 +3088,7 @@ export const FabricCanvas = forwardRef(({
         vpt[4] += e.clientX - lastPosRef.current.x;
         vpt[5] += e.clientY - lastPosRef.current.y;
         canvas.requestRenderAll();
+        notifyViewportChange();
         lastPosRef.current = { x: e.clientX, y: e.clientY };
         return;
       }

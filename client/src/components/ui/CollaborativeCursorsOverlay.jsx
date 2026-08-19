@@ -156,7 +156,7 @@ export const CollaborativeCursorsOverlay = ({ boardId, fabricCanvasRef }) => {
   if (activeRemoteCursors.length === 0) return null;
 
   return (
-    <div className="fixed inset-0 z-[9998] pointer-events-none overflow-hidden select-none">
+    <div className="fixed inset-0 z-9998 pointer-events-none overflow-hidden select-none">
       {activeRemoteCursors.map((cursor) => {
         let screenX = cursor.sceneX;
         let screenY = cursor.sceneY;

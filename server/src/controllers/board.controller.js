@@ -59,6 +59,19 @@ export class BoardController {
     }
   }
 
+  async saveViewport(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const boardId = req.params.id;
+      const { x, y, zoom } = req.body || {};
+      await boardService.saveViewport(boardId, userId, { x, y, zoom });
+
+      return success(res, { viewport: { x, y, zoom } }, 'Viewport saved successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async delete(req, res, next) {
     try {
       const userId = req.user.id;

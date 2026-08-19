@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 import { ANIMATION_CONFIG, isReducedMotion } from '../animations/config';
 import { CommandPalette } from '../components/ui/CommandPalette';
+import AnimatedModal from '../components/ui/AnimatedModal';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
 import { useAuth } from '../context/AuthContext';
 import apiClient from '../api/apiClient';
@@ -57,6 +58,9 @@ export const BoardsPage = () => {
   const [activeMenuBoardId, setActiveMenuBoardId] = useState(null);
   const [sharingBoard, setSharingBoard] = useState(null);
   const [isCreatingBoard, setIsCreatingBoard] = useState(false);
+  const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
+  const [newBoardTitle, setNewBoardTitle] = useState('');
+  const [createBoardError, setCreateBoardError] = useState('');
 
   const [renamingBoardId, setRenamingBoardId] = useState(null);
 
@@ -83,16 +87,42 @@ export const BoardsPage = () => {
     fetchBoards();
   }, [fetchBoards]);
 
-  const handleCreateBoard = async () => {
+  const handleOpenCreateBoard = () => {
+    if (isCreatingBoard) return;
+    setNewBoardTitle('');
+    setCreateBoardError('');
+    setIsCreateBoardModalOpen(true);
+  };
+
+  const handleCloseCreateBoard = () => {
+    if (isCreatingBoard) return;
+    setIsCreateBoardModalOpen(false);
+    setCreateBoardError('');
+  };
+
+  const handleCreateBoard = async (event) => {
+    event.preventDefault();
+    if (isCreatingBoard) return;
+
+    const trimmedTitle = newBoardTitle.trim();
+    if (!trimmedTitle) {
+      setCreateBoardError('Please enter a board name.');
+      return;
+    }
+
     try {
       setIsCreatingBoard(true);
-      const res = await apiClient.post('/boards', { title: 'Untitled Board' });
-      if (res.success && res.data?.board) {
-        navigate(`/board/${res.data.board.id}`);
+      setCreateBoardError('');
+      const res = await apiClient.post('/boards', { title: trimmedTitle });
+      if (!res.success || !res.data?.board?.id) {
+        throw new Error(res.message || 'Failed to create new board.');
       }
+
+      setIsCreateBoardModalOpen(false);
+      navigate(`/board/${res.data.board.id}`);
     } catch (err) {
       console.error('[BoardsPage] Create board failed:', err);
-      alert(err.message || 'Failed to create new board.');
+      setCreateBoardError(err.message || 'Failed to create new board.');
     } finally {
       setIsCreatingBoard(false);
     }
@@ -217,13 +247,71 @@ export const BoardsPage = () => {
         board={sharingBoard}
       />
 
+      <AnimatedModal
+        isOpen={isCreateBoardModalOpen}
+        onClose={handleCloseCreateBoard}
+        title="Create New Board"
+      >
+        <form onSubmit={handleCreateBoard} className="space-y-5">
+          <div className="space-y-2">
+            <label htmlFor="new-board-title" className="font-label text-sm font-bold text-on-surface">
+              Board name
+            </label>
+            <input
+              id="new-board-title"
+              type="text"
+              value={newBoardTitle}
+              onChange={(event) => {
+                setNewBoardTitle(event.target.value);
+                if (createBoardError) setCreateBoardError('');
+              }}
+              placeholder="Project Architecture"
+              maxLength={100}
+              autoFocus
+              disabled={isCreatingBoard}
+              className="w-full bg-surface-container-low border-2 border-outline-variant rounded-lg px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary transition-colors disabled:opacity-60"
+            />
+            {createBoardError && (
+              <p className="text-xs font-bold text-error" role="alert">{createBoardError}</p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={handleCloseCreateBoard}
+              disabled={isCreatingBoard}
+              className="px-4 py-2 rounded-full text-sm font-label font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isCreatingBoard}
+              className="bg-primary text-on-primary border-2 border-on-primary-fixed rounded-full px-4 py-2 font-label text-sm font-bold shadow-sm hover:scale-105 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              {isCreatingBoard && <span className="material-symbols-outlined text-base animate-spin">progress_activity</span>}
+              <span>{isCreatingBoard ? 'Creating...' : 'Create Board'}</span>
+            </button>
+          </div>
+        </form>
+      </AnimatedModal>
+
       <nav
         ref={sidebarRef}
         className="hidden md:flex flex-col py-6 fixed left-0 top-16 h-[calc(100vh-64px)] w-64 rounded-r-2xl bg-surface-container-lowest border-r-2 border-outline-variant shadow-md z-40 overflow-hidden"
       >
-        <div className="px-4 py-3 flex items-center justify-between mb-4 border-b border-surface-variant">
+        <div
+          className={`py-3 flex items-center mb-4 border-b border-surface-variant ${
+            isSidebarCollapsed ? 'px-2 gap-1 justify-center' : 'px-4 justify-between'
+          }`}
+        >
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-lg bg-secondary-container border-2 border-secondary flex items-center justify-center shrink-0 -rotate-2">
+            <div
+              className={`rounded-lg bg-secondary-container border-2 border-secondary flex items-center justify-center shrink-0 -rotate-2 ${
+                isSidebarCollapsed ? 'w-8 h-8' : 'w-10 h-10'
+              }`}
+            >
               <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>
                 folder_open
               </span>
@@ -241,10 +329,12 @@ export const BoardsPage = () => {
           </div>
           <button
             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-            className="p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer"
+            className={`rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer ${
+              isSidebarCollapsed ? 'p-1' : 'p-1.5'
+            }`}
             title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
           >
-            <span className="material-symbols-outlined text-xl">
+            <span className={`material-symbols-outlined ${isSidebarCollapsed ? 'text-lg' : 'text-xl'}`}>
               {isSidebarCollapsed ? 'chevron_right' : 'chevron_left'}
             </span>
           </button>
@@ -252,7 +342,7 @@ export const BoardsPage = () => {
 
         <div className="px-4 mb-6">
           <button
-            onClick={handleCreateBoard}
+            onClick={handleOpenCreateBoard}
             disabled={isCreatingBoard}
             className="w-full bg-primary text-on-primary font-label text-sm font-bold py-3 px-3 rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-102 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
@@ -344,7 +434,7 @@ export const BoardsPage = () => {
                 className="bg-surface-container-low border-2 border-outline-variant rounded-full px-4 py-2 text-xs text-on-surface font-body outline-none focus:border-primary transition-colors w-48 md:w-64"
               />
               <button
-                onClick={handleCreateBoard}
+                onClick={handleOpenCreateBoard}
                 disabled={isCreatingBoard}
                 className="bg-primary text-on-primary border-2 border-on-primary-fixed rounded-full px-4 py-2 font-label text-sm font-bold shadow-sm hover:scale-105 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
@@ -378,7 +468,7 @@ export const BoardsPage = () => {
                 Create your first whiteboard to start brainstorming, sketching, and making a mess.
               </p>
               <button
-                onClick={handleCreateBoard}
+                    onClick={handleOpenCreateBoard}
                 className="mt-6 bg-primary text-on-primary font-label text-sm font-bold py-3 px-6 rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-105 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
               >
                 <span className="material-symbols-outlined">add</span>

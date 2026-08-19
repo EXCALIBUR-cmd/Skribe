@@ -1,14 +1,57 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../ui/Button';
 
 export const Header = () => {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+  const [isHidden, setIsHidden] = useState(false);
+
+  const isCanvasRoute = location.pathname === '/canvas' || location.pathname.startsWith('/board/');
+
+  useEffect(() => {
+    if (!isCanvasRoute) {
+      setIsHidden(false);
+      return undefined;
+    }
+
+    let lastScrollY = window.scrollY;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY > lastScrollY) setIsHidden(true);
+      if (currentScrollY < lastScrollY) setIsHidden(false);
+      lastScrollY = currentScrollY;
+    };
+
+    const handleWheel = (event) => {
+      if (event.deltaY > 0) setIsHidden(true);
+      if (event.deltaY < 0) setIsHidden(false);
+    };
+
+    const handlePointerMove = (event) => {
+      if (event.clientY <= 32) setIsHidden(false);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('wheel', handleWheel, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('pointermove', handlePointerMove);
+    };
+  }, [isCanvasRoute]);
 
   return (
-    <header className="w-full h-16 px-6 border-b border-surface-variant bg-surface/90 backdrop-blur-md flex items-center justify-between z-40 sticky top-0">
+    <header
+      className={`w-full h-16 px-6 border-b border-surface-variant bg-surface/90 backdrop-blur-md flex items-center justify-between z-40 sticky top-0 transition-[transform,opacity] duration-300 ease-out will-change-transform ${
+        isCanvasRoute && isHidden ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+      }`}
+    >
       <div className="flex items-center gap-3">
         <Link to={user ? "/boards" : "/"} className="flex items-center gap-2 group">
           <span className="material-symbols-outlined text-primary text-3xl font-bold transition-transform group-hover:rotate-12">

@@ -53,8 +53,24 @@ export const validateUpdateBoard = (req, res, next) => {
   next();
 };
 
+export const validateViewport = (req, res, next) => {
+  const { x, y, zoom } = req.body || {};
+  const values = [x, y, zoom];
+
+  if (!values.every((value) => typeof value === 'number' && Number.isFinite(value))) {
+    return error(res, 'Viewport values must be finite numbers', 400);
+  }
+
+  if (zoom < 0.2 || zoom > 5) {
+    return error(res, 'Viewport zoom must be between 0.2 and 5', 400);
+  }
+
+  next();
+};
+
 export default {
   validateBoardId,
   validateCreateBoard,
-  validateUpdateBoard
+  validateUpdateBoard,
+  validateViewport
 };

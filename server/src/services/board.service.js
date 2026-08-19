@@ -78,7 +78,24 @@ export class BoardService {
       lastOpenedAt: new Date()
     });
 
-    return (updatedBoard || board).toJSON();
+    const boardJson = (updatedBoard || board).toJSON();
+    boardJson.viewportStates = (boardJson.viewportStates || []).filter(
+      (state) => String(state.userId) === String(userId)
+    );
+    return boardJson;
+  }
+
+  async saveViewport(boardId, userId, viewport) {
+    const board = await boardRepository.findBoardById(boardId);
+    this._verifyAccess(board, userId);
+
+    const viewportStates = Array.isArray(board.viewportStates)
+      ? board.viewportStates.filter((state) => String(state.userId) !== String(userId))
+      : [];
+    viewportStates.push({ userId, viewport });
+
+    const updatedBoard = await boardRepository.updateBoard(boardId, { viewportStates });
+    return updatedBoard.toJSON();
   }
 
   async updateBoard(boardId, userId, updatePayload) {

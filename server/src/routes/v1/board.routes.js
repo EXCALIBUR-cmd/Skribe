@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import boardController from '../../controllers/board.controller.js';
-import { validateBoardId, validateCreateBoard, validateUpdateBoard } from '../../validators/board.validator.js';
+import { validateBoardId, validateCreateBoard, validateUpdateBoard, validateViewport } from '../../validators/board.validator.js';
 import { authenticate } from '../../middleware/auth.middleware.js';
 
 const router = Router();
@@ -14,6 +14,8 @@ router.get('/', boardController.getAll);
 router.get('/:id', validateBoardId, boardController.getById);
 
 router.patch('/:id', validateBoardId, validateUpdateBoard, boardController.update);
+
+router.patch('/:id/viewport', validateBoardId, validateViewport, boardController.saveViewport);
 
 router.delete('/:id', validateBoardId, boardController.delete);
 

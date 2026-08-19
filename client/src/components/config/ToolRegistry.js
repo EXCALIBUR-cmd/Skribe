@@ -12,18 +12,14 @@ export const TOOL_REGISTRY = {
   },
 
   shapes: {
-    categoryLabel: 'Shapes & Connectors',
+    categoryLabel: 'Shapes',
     items: [
       { id: 'rect', label: 'Rectangle', icon: 'rectangle', toolType: 'rect' },
       { id: 'rounded_rect', label: 'Rounded Rectangle', icon: 'square', toolType: 'rounded_rect' },
       { id: 'circle', label: 'Circle', icon: 'circle', toolType: 'circle' },
       { id: 'triangle', label: 'Triangle', icon: 'change_history', toolType: 'triangle' },
       { id: 'diamond', label: 'Diamond', icon: 'diamond', toolType: 'diamond' },
-      { id: 'hexagon', label: 'Hexagon', icon: 'hexagon', toolType: 'hexagon' },
-      { id: 'line', label: 'Straight Line', icon: 'horizontal_rule', toolType: 'line' },
-      { id: 'arrow_straight', label: 'Straight Connector', icon: 'east', toolType: 'arrow', connectorType: 'straight' },
-      { id: 'connector_elbow', label: 'Elbow Connector', icon: 'call_split', toolType: 'arrow', connectorType: 'elbow' },
-      { id: 'connector_curved', label: 'Curved Connector', icon: 'timeline', toolType: 'arrow', connectorType: 'curved' }
+      { id: 'hexagon', label: 'Hexagon', icon: 'hexagon', toolType: 'hexagon' }
     ]
   },
 

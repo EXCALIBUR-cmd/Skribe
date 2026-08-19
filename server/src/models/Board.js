@@ -28,6 +28,10 @@ const boardSchema = new mongoose.Schema(
         objects: []
       })
     },
+    viewportStates: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
     thumbnail: {
       type: String,
       default: ''

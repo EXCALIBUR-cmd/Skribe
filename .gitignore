@@ -32,3 +32,8 @@ lerna-debug.log*
 *.sw?
 
 Thumbs.db
+.claude/
+.aidevteam/
+AGENTS.md
+.github/copilot-instructions.md
+.mcp.json.example

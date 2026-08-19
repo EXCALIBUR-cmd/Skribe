@@ -15,6 +15,14 @@ import socketService from '../services/socket';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
 import { useAuth } from '../context/AuthContext';
 
+const isValidViewport = (viewport) => (
+  viewport &&
+  typeof viewport.x === 'number' && Number.isFinite(viewport.x) &&
+  typeof viewport.y === 'number' && Number.isFinite(viewport.y) &&
+  typeof viewport.zoom === 'number' && Number.isFinite(viewport.zoom) &&
+  viewport.zoom >= 0.2 && viewport.zoom <= 5
+);
+
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
   const { user } = useAuth();
@@ -82,6 +90,8 @@ export const MainCanvasPage = () => {
   const debounceTimerRef = useRef(null);
   const saveSequenceRef = useRef(0);
   const abortControllerRef = useRef(null);
+  const viewportSaveTimerRef = useRef(null);
+  const latestViewportRef = useRef(null);
 
   const saveBoardData = useCallback(async (canvasDataToSave, isFlush = false) => {
     if (!boardId || isInitialLoadingRef.current || !canvasDataToSave) {
@@ -145,6 +155,38 @@ export const MainCanvasPage = () => {
     }
   }, [boardId]);
 
+  const saveViewport = useCallback(async (viewport) => {
+    if (!boardId || !isValidViewport(viewport)) return;
+
+    try {
+      await apiClient.patch(`/boards/${boardId}/viewport`, viewport);
+    } catch (err) {
+      console.error('[MainCanvasPage] Failed to save viewport:', err);
+    }
+  }, [boardId]);
+
+  const handleViewportChange = useCallback((viewport) => {
+    if (!isValidViewport(viewport)) return;
+
+    latestViewportRef.current = viewport;
+    if (viewportSaveTimerRef.current) {
+      clearTimeout(viewportSaveTimerRef.current);
+    }
+
+    viewportSaveTimerRef.current = setTimeout(() => {
+      viewportSaveTimerRef.current = null;
+      saveViewport(viewport);
+    }, 500);
+  }, [saveViewport]);
+
+  const flushViewportSave = useCallback(async () => {
+    if (viewportSaveTimerRef.current) {
+      clearTimeout(viewportSaveTimerRef.current);
+      viewportSaveTimerRef.current = null;
+    }
+    await saveViewport(latestViewportRef.current);
+  }, [saveViewport]);
+
   const handleCanvasChange = useCallback(() => {
     if (isInitialLoadingRef.current) {
       console.log('[BOARD SAVE DEBUG] handleCanvasChange fired but isInitialLoading=true — suppressed');
@@ -189,6 +231,8 @@ export const MainCanvasPage = () => {
           setCurrentBoard(res.data.board);
           setBoardTitle(res.data.board.title || 'Untitled Board');
           const canvasData = res.data.board.canvasData;
+          const savedViewport = res.data.board.viewportStates?.[0]?.viewport;
+          latestViewportRef.current = isValidViewport(savedViewport) ? savedViewport : null;
 
           console.log('[BOARD LOAD DEBUG] Board ID:', boardId);
           console.log('[BOARD LOAD DEBUG] Received canvas data:', !!canvasData);
@@ -204,6 +248,9 @@ export const MainCanvasPage = () => {
               console.log('[BOARD LOAD DEBUG] Loading', initialJson?.objects?.length ?? 0, 'objects into Fabric');
               fabricCanvasRef.current.loadFromJSON(initialJson, () => {
                 if (isMounted) {
+                  if (isValidViewport(savedViewport)) {
+                    fabricCanvasRef.current.setViewport(savedViewport);
+                  }
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);
                   isInitialLoadingRef.current = false;
@@ -236,6 +283,16 @@ export const MainCanvasPage = () => {
       isMounted = false;
     };
   }, [boardId, addToast]);
+
+  useEffect(() => () => {
+    if (viewportSaveTimerRef.current) {
+      clearTimeout(viewportSaveTimerRef.current);
+      viewportSaveTimerRef.current = null;
+    }
+    if (latestViewportRef.current) {
+      saveViewport(latestViewportRef.current);
+    }
+  }, [saveViewport]);
 
   useEffect(() => {
     if (!boardId) return;
@@ -392,6 +449,13 @@ export const MainCanvasPage = () => {
 
   useEffect(() => {
     const handleBeforeUnload = () => {
+      if (boardId && isValidViewport(latestViewportRef.current)) {
+        const viewportBlob = new Blob([JSON.stringify(latestViewportRef.current)], {
+          type: 'application/json'
+        });
+        navigator.sendBeacon(`/api/v1/boards/${boardId}/viewport`, viewportBlob);
+      }
+
       if (
         !isInitialLoadingRef.current &&
         latestCanvasDataRef.current &&
@@ -584,6 +648,7 @@ export const MainCanvasPage = () => {
   ], [addToast]);
 
   const handleBackToBoards = useCallback(async () => {
+    await flushViewportSave();
     if (
       !isInitialLoadingRef.current &&
       latestCanvasDataRef.current &&
@@ -605,7 +670,7 @@ export const MainCanvasPage = () => {
       }
     }
     navigate('/boards');
-  }, [boardId, navigate]);
+  }, [boardId, flushViewportSave, navigate]);
 
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
@@ -771,6 +836,7 @@ export const MainCanvasPage = () => {
         activeTool={activeTool}
         penConfig={penConfig}
         onZoomChange={(newZoom) => setZoom(newZoom)}
+        onViewportChange={handleViewportChange}
         onSelectionChange={(props) => setSelectedProps(props)}
         onToolComplete={() => setActiveTool('select')}
         onContextMenu={(pos) => setContextMenuPos(pos)}

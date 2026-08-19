@@ -1,8 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export const WelcomePage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <main className="w-full max-w-4xl mx-auto px-10 flex flex-col items-center justify-center relative z-10 min-h-[calc(100vh-140px)] py-8">
@@ -39,7 +41,7 @@ export const WelcomePage = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-3xl mb-8">
         {/* Action 1: Start Drawing */}
         <button
-          onClick={() => navigate('/canvas')}
+          onClick={() => navigate(user ? '/boards' : '/canvas')}
           className="group flex flex-col items-center justify-center p-6 bg-primary text-on-primary rounded-xl border-2 border-primary sticker-shadow btn-pressed transition-all relative overflow-hidden cursor-pointer"
         >
           <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
