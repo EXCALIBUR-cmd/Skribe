@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:mess-cleanup": "node --test src/features/messCleanup/extractWorkspaceModel.test.js",
+    "test:mess-cleanup-analysis": "node --test src/features/messCleanup/analyzeWorkspace.test.js",
+    "test:mess-cleanup-layout": "node --test src/features/messCleanup/layoutEngine.test.js",
+    "test:mess-cleanup-preview": "node --test src/features/messCleanup/previewModel.test.js",
+    "test:mess-cleanup-apply": "node --test src/features/messCleanup/applyCleanup.test.js",
+    "test:mess-cleanup-bulk-apply": "node --test src/features/messCleanup/fabricCanvasBulkApply.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

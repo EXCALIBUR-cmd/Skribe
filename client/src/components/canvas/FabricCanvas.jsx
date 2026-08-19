@@ -20,6 +20,7 @@ import {
   auditRenderPipeline
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
+import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -100,6 +101,7 @@ export const FabricCanvas = forwardRef(({
   const redoStackRef = useRef([]);
   const isHistoryProcessingRef = useRef(false);
   const isLoadingFromJSONRef = useRef(false);
+  const isBulkOperationRef = useRef(false);
 
   const onCanvasChangeRef = useRef(onCanvasChange);
   const onViewportChangeRef = useRef(onViewportChange);
@@ -471,7 +473,7 @@ export const FabricCanvas = forwardRef(({
   };
 
   const notifyLocalObjectAdded = (obj) => {
-    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current || isBulkOperationRef.current) return;
     ensureObjectId(obj);
     const data = serializeFabricObject(obj);
     if (data && onLocalObjectAddedRef.current) {
@@ -480,7 +482,7 @@ export const FabricCanvas = forwardRef(({
   };
 
   const notifyLocalPathCreated = (obj) => {
-    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current || isBulkOperationRef.current) return;
     ensureObjectId(obj);
     const data = serializeFabricObject(obj);
     if (data && onLocalPathCreatedRef.current) {
@@ -489,7 +491,7 @@ export const FabricCanvas = forwardRef(({
   };
 
   const notifyLocalObjectModified = (obj) => {
-    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current || isBulkOperationRef.current) return;
     ensureObjectId(obj);
     const data = serializeFabricObject(obj);
     if (data && onLocalObjectModifiedRef.current) {
@@ -498,7 +500,7 @@ export const FabricCanvas = forwardRef(({
   };
 
   const notifyLocalObjectTransform = (obj) => {
-    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    if (!obj || isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current || isBulkOperationRef.current) return;
     ensureObjectId(obj);
     if (onLocalObjectTransformRef.current) {
       const matrix = obj.calcTransformMatrix ? obj.calcTransformMatrix() : null;
@@ -515,7 +517,7 @@ export const FabricCanvas = forwardRef(({
   };
 
   const notifyLocalObjectRemoved = (objOrIds) => {
-    if (isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current) return;
+    if (isRemoteOperationRef.current || isLoadingFromJSONRef.current || isHistoryProcessingRef.current || isBulkOperationRef.current) return;
     const ids = Array.isArray(objOrIds) ? objOrIds : [objOrIds?.id || objOrIds?.elementId || objOrIds].filter(Boolean);
     if (ids.length > 0 && onLocalObjectRemovedRef.current) {
       onLocalObjectRemovedRef.current({ objectId: ids[0], objectIds: ids });
@@ -947,7 +949,7 @@ export const FabricCanvas = forwardRef(({
 
   const saveState = () => {
     const canvas = fabricCanvasRef.current;
-    if (!canvas || isHistoryProcessingRef.current || isRemoteOperationRef.current) return;
+    if (!canvas || isHistoryProcessingRef.current || isRemoteOperationRef.current || isBulkOperationRef.current) return;
 
     canvas.getObjects().forEach((o) => ensureObjectId(o));
 
@@ -2091,7 +2093,41 @@ export const FabricCanvas = forwardRef(({
     }
   };
 
+  const applyMessCleanup = (layoutProposal, workspaceModel) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) {
+      return { success: false, error: 'Canvas not initialized', reason: 'Fabric canvas ref is null' };
+    }
+
+    if (isHistoryProcessingRef.current || isLoadingFromJSONRef.current || isBulkOperationRef.current) {
+      return { success: false, error: 'Canvas busy', reason: 'Canvas is currently loading, processing history, or executing a bulk operation' };
+    }
+
+    try {
+      isBulkOperationRef.current = true;
+      const result = applyCleanup(canvas, layoutProposal, workspaceModel);
+
+      if (result.success) {
+        isBulkOperationRef.current = false;
+        saveState();
+        isBulkOperationRef.current = true;
+      }
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: 'Bulk apply exception',
+        reason: error?.message || String(error)
+      };
+    } finally {
+      isBulkOperationRef.current = false;
+    }
+  };
+
   useImperativeHandle(ref, () => ({
+
+    applyMessCleanup: (layoutProposal, workspaceModel) => applyMessCleanup(layoutProposal, workspaceModel),
 
     applyRemoteObjectAdded: (data) => applyRemoteObjectAdded(data),
     applyRemotePathCreated: (data) => applyRemoteObjectAdded(data),

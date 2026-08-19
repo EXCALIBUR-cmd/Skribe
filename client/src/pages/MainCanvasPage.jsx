@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
@@ -14,6 +15,10 @@ import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
 import { useAuth } from '../context/AuthContext';
+import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
+import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
+import { createLayoutProposal } from '../features/messCleanup/layoutEngine.js';
+import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
 
 const isValidViewport = (viewport) => (
   viewport &&
@@ -492,6 +497,16 @@ export const MainCanvasPage = () => {
   });
 
   const [activeWheel, setActiveWheel] = useState(null);
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  const [toolbarTooltip, setToolbarTooltip] = useState(null);
+  const [messCleanupPreview, setMessCleanupPreview] = useState({
+    isOpen: false,
+    workspaceModel: null,
+    organizationPlan: null,
+    layoutProposal: null,
+    loading: false,
+    error: ''
+  });
   const [wheelAnchorPos, setWheelAnchorPos] = useState({ x: 120, y: 300 });
 
   const fabricCanvasRef = useRef(null);
@@ -647,6 +662,85 @@ export const MainCanvasPage = () => {
     }
   ], [addToast]);
 
+  const skribeFeatureItems = [
+    {
+      id: 'mess-cleanup',
+      label: 'Mess Cleanup',
+      icon: 'auto_awesome',
+      tooltip: 'Clean up rough drawings and messy geometry'
+    }
+  ];
+
+  const handleSkribeFeatureClick = (feature) => {
+    if (feature.id !== 'mess-cleanup') return;
+
+    setMessCleanupPreview({
+      isOpen: true,
+      workspaceModel: null,
+      organizationPlan: null,
+      layoutProposal: null,
+      loading: true,
+      error: ''
+    });
+
+    try {
+      const canvas = fabricCanvasRef.current?.getCanvas();
+      const workspaceModel = extractWorkspaceModel(canvas);
+      const organizationPlan = analyzeWorkspace(workspaceModel);
+      const layoutProposal = createLayoutProposal(organizationPlan, workspaceModel);
+
+      setMessCleanupPreview({
+        isOpen: true,
+        workspaceModel,
+        organizationPlan,
+        layoutProposal,
+        loading: false,
+        error: ''
+      });
+    } catch (error) {
+      console.error('[MessCleanup] Preview preparation failed:', error);
+      setMessCleanupPreview({
+        isOpen: true,
+        workspaceModel: null,
+        organizationPlan: null,
+        layoutProposal: null,
+        loading: false,
+        error: "Couldn't prepare the cleanup preview. Your board hasn't been changed."
+      });
+    }
+  };
+
+  const handleCancelMessCleanupPreview = () => {
+    setMessCleanupPreview({
+      isOpen: false,
+      workspaceModel: null,
+      organizationPlan: null,
+      layoutProposal: null,
+      loading: false,
+      error: ''
+    });
+  };
+
+  const showToolbarTooltip = (button) => {
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const label = button.dataset.toolbarTooltip;
+    if (!label) return;
+
+    const tooltipWidth = 240;
+    const left = Math.min(
+      Math.max(12, rect.left + (rect.width / 2) - (tooltipWidth / 2)),
+      window.innerWidth - tooltipWidth - 12
+    );
+
+    setToolbarTooltip({
+      label,
+      detail: button.dataset.toolbarTooltipDetail || '',
+      left,
+      top: rect.bottom + 8
+    });
+  };
+
   const handleBackToBoards = useCallback(async () => {
     await flushViewportSave();
     if (
@@ -674,6 +768,15 @@ export const MainCanvasPage = () => {
 
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
+      <MessCleanupPreviewModal
+        isOpen={messCleanupPreview.isOpen}
+        workspaceModel={messCleanupPreview.workspaceModel}
+        layoutProposal={messCleanupPreview.layoutProposal}
+        loading={messCleanupPreview.loading}
+        error={messCleanupPreview.error}
+        onCancel={handleCancelMessCleanupPreview}
+      />
+
       <div
         className={`fixed top-20 z-40 transition-all duration-220 ease-out flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none overflow-hidden ${
           isSidebarExpanded
@@ -856,12 +959,39 @@ export const MainCanvasPage = () => {
 
       <div
         ref={paletteRef}
-        className={`fixed top-[136px] xl:top-20 -translate-x-1/2 z-40 bg-surface/95 backdrop-blur-md rounded-full px-2.5 sm:px-3.5 py-1.5 border border-outline-variant/80 shadow-md flex items-center gap-1 sm:gap-1.5 transition-all duration-220 ease-out pointer-events-auto select-none overflow-x-auto ${
+        onWheel={(e) => e.stopPropagation()}
+        onMouseOver={(e) => {
+          const button = e.target.closest('button[data-toolbar-tooltip]');
+          if (button && paletteRef.current?.contains(button)) showToolbarTooltip(button);
+        }}
+        onMouseLeave={() => setToolbarTooltip(null)}
+        onScroll={() => setToolbarTooltip(null)}
+        className={`fixed top-[136px] xl:top-20 -translate-x-1/2 z-40 bg-surface/95 backdrop-blur-md border border-outline-variant/80 shadow-md transition-all duration-220 ease-out pointer-events-auto select-none ${
+          isToolbarCollapsed
+            ? 'rounded-full p-1'
+            : 'rounded-full px-2.5 sm:px-3.5 py-1.5 flex items-center gap-1 sm:gap-1.5 max-w-[calc(100vw-90px)] overflow-x-auto overflow-y-hidden custom-scrollbar'
+        } ${
           isSidebarExpanded
             ? 'left-[calc(50vw+160px)] max-w-[calc(100vw-350px)]'
-            : 'left-1/2 max-w-[calc(100vw-90px)]'
+            : 'left-1/2'
         }`}
       >
+        {isToolbarCollapsed ? (
+          <button
+            onClick={() => setIsToolbarCollapsed(false)}
+            className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
+            data-toolbar-tooltip="Expand toolbar"
+            aria-label="Expand toolbar"
+            title="Expand toolbar"
+          >
+            <span className="material-symbols-outlined text-xl">chevron_right</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1 sm:gap-1.5 min-w-max">
+            <div className="px-1 text-[8px] font-black uppercase tracking-wider text-on-surface-variant/70" aria-hidden="true">
+              Core
+            </div>
+
         <button
           onClick={() => {
             if (activeTool === 'eraser') eraserManager.clearHoverPreview(fabricCanvasRef.current?.getCanvas());
@@ -873,12 +1003,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="Select (V)"
           title="Select Tool (V)"
         >
           <span className="material-symbols-outlined text-[20px]">near_me</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Select (V)
-          </span>
         </button>
 
         <button
@@ -892,12 +1020,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="Pan (H)"
           title="Pan Canvas (H)"
         >
           <span className="material-symbols-outlined text-[20px]">pan_tool</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Pan (H)
-          </span>
         </button>
 
         <button
@@ -911,12 +1037,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="Draw"
           title="Pen / Draw Tool"
         >
           <span className="material-symbols-outlined text-[20px]">edit</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Draw
-          </span>
         </button>
 
         <button
@@ -929,12 +1053,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="Smart Eraser (E)"
           title="Smart Eraser Tool (E)"
         >
           <span className="material-symbols-outlined text-[20px]">auto_fix_high</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Smart Eraser (E)
-          </span>
         </button>
 
         <button
@@ -948,12 +1070,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="Laser Pointer (L)"
           title="Laser Pointer Tool (L)"
         >
           <span className="material-symbols-outlined text-[20px]">flare</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Laser Pointer (L)
-          </span>
         </button>
 
         <div className="h-5 w-px bg-outline-variant/60 my-auto" />
@@ -966,12 +1086,10 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-md scale-105 ring-2 ring-primary ring-offset-1 font-bold'
               : 'bg-surface-container-high text-accent hover:bg-primary hover:text-on-primary hover:scale-105'
           }`}
+          data-toolbar-tooltip="AI Assistant"
           title="AI Assistant Wheel"
         >
           <span className="material-symbols-outlined text-[20px]">psychology</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            AI Assistant
-          </span>
         </button>
 
         <button
@@ -979,14 +1097,56 @@ export const MainCanvasPage = () => {
             addToast('Settings', 'Skribe Preferences & Shortcuts', 'settings', 'info');
           }}
           className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105 transition-all cursor-pointer relative group"
+          data-toolbar-tooltip="Settings"
           title="Settings"
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
-          <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-inverse-surface text-inverse-on-surface text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            Settings
-          </span>
         </button>
+
+        <div className="h-5 w-px bg-outline-variant/70 my-auto" aria-hidden="true" />
+        <div className="px-1 text-[8px] font-black uppercase tracking-wider text-primary/80" aria-hidden="true">
+          Skribe
+        </div>
+
+        {skribeFeatureItems.map((feature) => (
+          <button
+            key={feature.id}
+            onClick={() => handleSkribeFeatureClick(feature)}
+            className="w-9 h-9 rounded-full flex items-center justify-center text-primary bg-primary/10 hover:bg-primary hover:text-on-primary hover:scale-105 transition-all cursor-pointer relative group"
+            data-toolbar-tooltip={feature.label}
+            data-toolbar-tooltip-detail={feature.tooltip}
+            title={feature.tooltip}
+            aria-label={feature.label}
+          >
+            <span className="material-symbols-outlined text-[20px]">{feature.icon}</span>
+          </button>
+        ))}
+
+            <button
+              onClick={() => setIsToolbarCollapsed(true)}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
+              data-toolbar-tooltip="Collapse toolbar"
+              aria-label="Collapse toolbar"
+              title="Collapse toolbar"
+            >
+              <span className="material-symbols-outlined text-xl">chevron_left</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {toolbarTooltip && ReactDOM.createPortal(
+        <div
+          className="fixed z-9999 pointer-events-none w-60 rounded-lg bg-inverse-surface px-3 py-2 text-inverse-on-surface shadow-xl"
+          style={{ left: `${toolbarTooltip.left}px`, top: `${toolbarTooltip.top}px` }}
+        >
+          <div className="text-xs font-bold whitespace-nowrap">{toolbarTooltip.label}</div>
+          {toolbarTooltip.detail && (
+            <div className="mt-0.5 text-[11px] leading-tight text-inverse-on-surface/80">{toolbarTooltip.detail}</div>
+          )}
+        </div>,
+        document.body
+      )}
 
       <div
         className={`fixed -translate-x-1/2 bottom-[88px] md:bottom-20 z-50 transition-all duration-220 ease-out pointer-events-auto ${
