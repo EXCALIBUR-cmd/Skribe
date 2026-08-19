@@ -12,6 +12,9 @@
     "test:mess-cleanup-preview": "node --test src/features/messCleanup/previewModel.test.js",
     "test:mess-cleanup-apply": "node --test src/features/messCleanup/applyCleanup.test.js",
     "test:mess-cleanup-bulk-apply": "node --test src/features/messCleanup/fabricCanvasBulkApply.test.js",
+    "test:mess-cleanup-batch-collab": "node --test src/features/messCleanup/batchCollaboration.test.js",
+    "test:mess-cleanup-ui": "node --test src/features/messCleanup/messCleanupUiIntegration.test.js",
+    "test:shape-text-relationship": "node --test src/features/messCleanup/shapeTextRelationship.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

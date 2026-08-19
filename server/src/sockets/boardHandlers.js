@@ -178,6 +178,13 @@ export const registerBoardHandlers = (io, socket) => {
     socket.to(room).emit('canvas:object-modified', { boardId, objectId, objectData, senderSocketId: socket.id });
   });
 
+  socket.on('canvas:batch-modified', ({ boardId, transactionId, changes } = {}) => {
+    if (!boardId || !Array.isArray(changes) || changes.length === 0) return;
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return;
+    socket.to(room).emit('canvas:batch-modified', { boardId, transactionId, changes, senderSocketId: socket.id });
+  });
+
   socket.on('canvas:object-transform', ({ boardId, objectId, transform } = {}) => {
     if (!boardId || !objectId || !transform) return;
     const room = boardRoomName(boardId);

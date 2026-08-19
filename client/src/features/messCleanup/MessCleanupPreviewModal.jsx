@@ -41,7 +41,9 @@ export const MessCleanupPreviewModal = ({
   workspaceModel,
   layoutProposal,
   loading = false,
+  isApplying = false,
   error = '',
+  onApply,
   onCancel
 }) => {
   const renderModel = useMemo(
@@ -133,7 +135,7 @@ export const MessCleanupPreviewModal = ({
             <h2 id="mess-cleanup-preview-title" className="font-headline text-lg font-bold text-on-surface">Mess Cleanup Preview</h2>
             <p className="mt-1 text-xs text-on-surface-variant">This is a proposed organization. Your board has not been changed.</p>
           </div>
-          <button onClick={onCancel} className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-primary" aria-label="Close preview" title="Close preview">
+          <button onClick={onCancel} disabled={isApplying} className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-primary disabled:opacity-50" aria-label="Close preview" title="Close preview">
             <span className="material-symbols-outlined">close</span>
           </button>
         </header>
@@ -173,9 +175,23 @@ export const MessCleanupPreviewModal = ({
         </div>
 
         <footer className="flex items-center justify-end gap-3 border-t border-outline-variant/60 px-5 py-4">
-          <button onClick={onCancel} className="rounded-full px-4 py-2 text-sm font-bold text-on-surface-variant hover:bg-surface-container-high">Cancel</button>
-          <button disabled className="flex items-center gap-2 rounded-full bg-primary/40 px-4 py-2 text-sm font-bold text-on-primary/80" title="Apply is coming in the next phase">
-            Apply coming next
+          <button onClick={onCancel} disabled={isApplying} className="rounded-full px-4 py-2 text-sm font-bold text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50">Cancel</button>
+          <button
+            onClick={onApply}
+            disabled={loading || Boolean(error) || isApplying || !layoutProposal}
+            className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary shadow-md hover:bg-primary/90 disabled:bg-primary/40 disabled:text-on-primary/80 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {isApplying ? (
+              <>
+                <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
+                <span>Applying...</span>
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined text-base">auto_awesome</span>
+                <span>Apply Cleanup</span>
+              </>
+            )}
           </button>
         </footer>
       </section>

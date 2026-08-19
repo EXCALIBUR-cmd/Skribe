@@ -443,6 +443,42 @@ export const FabricCanvas = forwardRef(({
     }
   };
 
+  const applyRemoteBatchObjectsModified = ({ changes }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !Array.isArray(changes)) return;
+
+    try {
+      isRemoteOperationRef.current = true;
+      changes.forEach((change) => {
+        if (!change || !change.objectId || !change.newGeometry) return;
+        const existingObj = findCanvasObjectById(canvas, change.objectId);
+        if (existingObj) {
+          const { left, top, angle, scaleX, scaleY } = change.newGeometry;
+          const propsToSet = {};
+          if (typeof left === 'number' && Number.isFinite(left)) propsToSet.left = left;
+          if (typeof top === 'number' && Number.isFinite(top)) propsToSet.top = top;
+          if (typeof angle === 'number' && Number.isFinite(angle)) propsToSet.angle = angle;
+          if (typeof scaleX === 'number' && Number.isFinite(scaleX)) propsToSet.scaleX = scaleX;
+          if (typeof scaleY === 'number' && Number.isFinite(scaleY)) propsToSet.scaleY = scaleY;
+
+          if (typeof existingObj.set === 'function') {
+            existingObj.set(propsToSet);
+          } else {
+            Object.assign(existingObj, propsToSet);
+          }
+          if (typeof existingObj.setCoords === 'function') {
+            existingObj.setCoords();
+          }
+        }
+      });
+      canvas.requestRenderAll();
+    } catch (err) {
+      console.error('[FabricCanvas] applyRemoteBatchObjectsModified error:', err);
+    } finally {
+      isRemoteOperationRef.current = false;
+    }
+  };
+
   const applyRemoteObjectTransform = ({ objectId, transform }) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !objectId || !transform) return;
@@ -910,6 +946,83 @@ export const FabricCanvas = forwardRef(({
         }
       }
     }
+  };
+
+  const isEligibleContainerShape = (obj) => {
+    if (!obj) return false;
+    if (obj.isTemporaryDrawPath || obj.isVectorStroke || obj.isStraightLine || obj.isConnector || obj.skribeLine) return false;
+    if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text' || obj.type === 'path' || obj.type === 'line') return false;
+    if (obj.isStickyNote || obj.isChecklistNote || obj.isCalloutNote) return true;
+    return ['rect', 'circle', 'triangle', 'diamond', 'polygon', 'group'].includes(obj.type) || Boolean(obj.elementId);
+  };
+
+  const isShapeUnattached = (canvas, shape) => {
+    if (!shape) return false;
+    if (!shape.attachedTextId) return true;
+    const activeAttachedObj = canvas.getObjects().find((o) => o.id === shape.attachedTextId);
+    return !activeAttachedObj;
+  };
+
+  const tryAttachTextToShape = (textObj) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas || !textObj) return null;
+    const isText = textObj.type === 'textbox' || textObj.type === 'i-text' || textObj.type === 'text';
+    if (!isText) return null;
+
+    if (textObj.parentShapeId) {
+      const activeParent = canvas.getObjects().find((o) => o.id === textObj.parentShapeId);
+      if (activeParent) return activeParent;
+    }
+
+    const textCenter = textObj.getCenterPoint ? textObj.getCenterPoint() : { x: textObj.left, y: textObj.top };
+    const allObjects = canvas.getObjects();
+    const candidateShapes = [];
+
+    allObjects.forEach((shape) => {
+      if (shape === textObj || !isEligibleContainerShape(shape)) return;
+      if (!isShapeUnattached(canvas, shape)) return;
+
+      const scaleX = shape.scaleX || 1;
+      const scaleY = shape.scaleY || 1;
+      const width = (shape.width || 100) * scaleX;
+      const height = (shape.height || 100) * scaleY;
+      const shapeCenter = shape.getCenterPoint ? shape.getCenterPoint() : { x: shape.left, y: shape.top };
+
+      const dx = textCenter.x - shapeCenter.x;
+      const dy = textCenter.y - shapeCenter.y;
+      const rad = -((shape.angle || 0) * Math.PI) / 180;
+      const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+      const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+
+      if (Math.abs(localX) <= width / 2 && Math.abs(localY) <= height / 2) {
+        const area = width * height;
+        candidateShapes.push({ shape, area });
+      }
+    });
+
+    if (candidateShapes.length === 0) return null;
+
+    candidateShapes.sort((a, b) => a.area - b.area);
+    if (candidateShapes.length >= 2 && candidateShapes[0].area === candidateShapes[1].area) {
+      return null;
+    }
+
+    const bestShape = candidateShapes[0].shape;
+
+    ensureObjectId(bestShape);
+    ensureObjectId(textObj);
+
+    const sharedElementId = bestShape.elementId || ('elem_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
+    bestShape.elementId = sharedElementId;
+    bestShape.attachedTextId = textObj.id;
+    textObj.elementId = sharedElementId;
+    textObj.parentShapeId = bestShape.id;
+
+    ensureLinkedTextStacking(bestShape);
+    notifyLocalObjectModified(bestShape);
+    notifyLocalObjectModified(textObj);
+
+    return bestShape;
   };
 
   const createRuledPaperFill = (bgColor) => {
@@ -1574,6 +1687,7 @@ export const FabricCanvas = forwardRef(({
 
     ensureObjectId(text);
     canvas.add(text);
+    tryAttachTextToShape(text);
     notifyLocalObjectAdded(text);
     canvas.setActiveObject(text);
     saveState();
@@ -2132,6 +2246,7 @@ export const FabricCanvas = forwardRef(({
     applyRemoteObjectAdded: (data) => applyRemoteObjectAdded(data),
     applyRemotePathCreated: (data) => applyRemoteObjectAdded(data),
     applyRemoteObjectModified: (data) => applyRemoteObjectModified(data),
+    applyRemoteBatchObjectsModified: (data) => applyRemoteBatchObjectsModified(data),
     applyRemoteObjectTransform: (data) => applyRemoteObjectTransform(data),
     applyRemoteDrawStream: (data) => applyRemoteDrawStream(data),
     applyRemoteObjectRemoved: (data) => applyRemoteObjectRemoved(data),
@@ -2928,6 +3043,12 @@ export const FabricCanvas = forwardRef(({
               prevItems,
               nextItems: parentShape.checklistItems
             });
+          }
+        }
+
+        if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') {
+          if (!obj.parentShapeId) {
+            tryAttachTextToShape(obj);
           }
         }
 

@@ -359,6 +359,12 @@ export const MainCanvasPage = () => {
       }
     };
 
+    const handleRemoteBatchModified = ({ boardId: id, transactionId, changes }) => {
+      if (id === boardId && fabricCanvasRef.current) {
+        fabricCanvasRef.current.applyRemoteBatchObjectsModified({ transactionId, changes });
+      }
+    };
+
     const handleRemoteObjectTransform = ({ boardId: id, objectId, transform }) => {
       if (id === boardId && fabricCanvasRef.current) {
         fabricCanvasRef.current.applyRemoteObjectTransform({ objectId, transform });
@@ -381,6 +387,7 @@ export const MainCanvasPage = () => {
     socketService.on('canvas:object-added', handleRemoteObjectAdded);
     socketService.on('canvas:path-created', handleRemotePathCreated);
     socketService.on('canvas:object-modified', handleRemoteObjectModified);
+    socketService.on('canvas:batch-modified', handleRemoteBatchModified);
     socketService.on('canvas:object-transform', handleRemoteObjectTransform);
     socketService.on('canvas:draw-stream', handleRemoteDrawStream);
     socketService.on('canvas:object-removed', handleRemoteObjectRemoved);
@@ -389,6 +396,7 @@ export const MainCanvasPage = () => {
       socketService.off('canvas:object-added', handleRemoteObjectAdded);
       socketService.off('canvas:path-created', handleRemotePathCreated);
       socketService.off('canvas:object-modified', handleRemoteObjectModified);
+      socketService.off('canvas:batch-modified', handleRemoteBatchModified);
       socketService.off('canvas:object-transform', handleRemoteObjectTransform);
       socketService.off('canvas:draw-stream', handleRemoteDrawStream);
       socketService.off('canvas:object-removed', handleRemoteObjectRemoved);
@@ -505,6 +513,7 @@ export const MainCanvasPage = () => {
     organizationPlan: null,
     layoutProposal: null,
     loading: false,
+    isApplying: false,
     error: ''
   });
   const [wheelAnchorPos, setWheelAnchorPos] = useState({ x: 120, y: 300 });
@@ -680,6 +689,7 @@ export const MainCanvasPage = () => {
       organizationPlan: null,
       layoutProposal: null,
       loading: true,
+      isApplying: false,
       error: ''
     });
 
@@ -695,6 +705,7 @@ export const MainCanvasPage = () => {
         organizationPlan,
         layoutProposal,
         loading: false,
+        isApplying: false,
         error: ''
       });
     } catch (error) {
@@ -705,6 +716,7 @@ export const MainCanvasPage = () => {
         organizationPlan: null,
         layoutProposal: null,
         loading: false,
+        isApplying: false,
         error: "Couldn't prepare the cleanup preview. Your board hasn't been changed."
       });
     }
@@ -717,8 +729,61 @@ export const MainCanvasPage = () => {
       organizationPlan: null,
       layoutProposal: null,
       loading: false,
+      isApplying: false,
       error: ''
     });
+  };
+
+  const handleApplyMessCleanup = () => {
+    const { layoutProposal, workspaceModel, isApplying } = messCleanupPreview;
+    if (isApplying || !layoutProposal || !workspaceModel) return;
+
+    setMessCleanupPreview((prev) => ({ ...prev, isApplying: true, error: '' }));
+
+    try {
+      const result = fabricCanvasRef.current?.applyMessCleanup(layoutProposal, workspaceModel);
+
+      if (result?.success) {
+        if (socketService.connected && boardId && result.transactionId && result.changes) {
+          socketService.emit('canvas:batch-modified', {
+            boardId,
+            transactionId: result.transactionId,
+            changes: result.changes
+          });
+        }
+
+        handleCanvasChange();
+
+        setMessCleanupPreview({
+          isOpen: false,
+          workspaceModel: null,
+          organizationPlan: null,
+          layoutProposal: null,
+          loading: false,
+          isApplying: false,
+          error: ''
+        });
+
+        addToast('Mess Cleanup Applied', `Organized ${result.appliedCount || 0} objects`, 'auto_awesome', 'success');
+      } else {
+        const failureReason = result?.reason || result?.error || 'Failed to apply Mess Cleanup proposal';
+        setMessCleanupPreview((prev) => ({
+          ...prev,
+          isApplying: false,
+          error: failureReason
+        }));
+        addToast('Cleanup Failed', failureReason, 'error_outline', 'error');
+      }
+    } catch (error) {
+      console.error('[MessCleanup] Apply exception:', error);
+      const failureReason = error?.message || 'Unexpected exception during cleanup apply';
+      setMessCleanupPreview((prev) => ({
+        ...prev,
+        isApplying: false,
+        error: failureReason
+      }));
+      addToast('Cleanup Exception', failureReason, 'error_outline', 'error');
+    }
   };
 
   const showToolbarTooltip = (button) => {
@@ -773,7 +838,9 @@ export const MainCanvasPage = () => {
         workspaceModel={messCleanupPreview.workspaceModel}
         layoutProposal={messCleanupPreview.layoutProposal}
         loading={messCleanupPreview.loading}
+        isApplying={messCleanupPreview.isApplying}
         error={messCleanupPreview.error}
+        onApply={handleApplyMessCleanup}
         onCancel={handleCancelMessCleanupPreview}
       />
 
