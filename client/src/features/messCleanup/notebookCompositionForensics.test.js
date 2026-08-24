@@ -68,7 +68,6 @@ const stroke = (id, x = 50, y = 50, w = 40, h = 40, extra = {}) => ({
 
 const getPlacement = (proposal, id) => proposal.placements.find((p) => p.objectId === id);
 
-// TEST 1: Multiple shapes originally side-by-side remain side-by-side
 test('TEST 1: Multiple shapes originally side-by-side remain side-by-side', () => {
   const model = {
     board: {
@@ -91,7 +90,6 @@ test('TEST 1: Multiple shapes originally side-by-side remain side-by-side', () =
   assert.ok(p2.position.x < p3.position.x);
 });
 
-// TEST 2: Multiple shapes originally separated vertically remain in different rows
 test('TEST 2: Multiple shapes originally separated vertically remain in different rows', () => {
   const model = {
     board: {
@@ -110,7 +108,6 @@ test('TEST 2: Multiple shapes originally separated vertically remain in differen
   assert.ok(pTop.position.y < pBottom.position.y);
 });
 
-// TEST 3: Shape + attached text remains atomic
 test('TEST 3: Shape + attached text remains atomic', () => {
   const model = {
     board: {
@@ -130,7 +127,6 @@ test('TEST 3: Shape + attached text remains atomic', () => {
   assert.equal(pS.position.y, pT.position.y);
 });
 
-// TEST 4: Flowchart topology is preserved
 test('TEST 4: Flowchart topology is preserved', () => {
   const model = {
     board: {
@@ -154,7 +150,6 @@ test('TEST 4: Flowchart topology is preserved', () => {
   assert.ok(pA.position.x < pB.position.x);
 });
 
-// TEST 5: Horizontal flowchart remains horizontal
 test('TEST 5: Horizontal flowchart remains horizontal', () => {
   const model = {
     board: {
@@ -174,7 +169,6 @@ test('TEST 5: Horizontal flowchart remains horizontal', () => {
   assert.ok(pA.position.x < pB.position.x);
 });
 
-// TEST 6: Vertical flowchart remains vertical
 test('TEST 6: Vertical flowchart remains vertical', () => {
   const model = {
     board: {
@@ -194,7 +188,6 @@ test('TEST 6: Vertical flowchart remains vertical', () => {
   assert.ok(pA.position.y < pB.position.y);
 });
 
-// TEST 7: Freehand strokes remain atomic
 test('TEST 7: Freehand strokes remain atomic', () => {
   const strokes = [
     stroke('st1', 100, 100, 20, 20),
@@ -215,7 +208,6 @@ test('TEST 7: Freehand strokes remain atomic', () => {
   assert.equal(p2.position.y - p1.position.y, 10);
 });
 
-// TEST 8: Sticky notes form a reasonable cluster
 test('TEST 8: Sticky notes form a reasonable cluster', () => {
   const model = {
     board: {
@@ -233,7 +225,6 @@ test('TEST 8: Sticky notes form a reasonable cluster', () => {
   assert.ok(p1.position.x < p2.position.x);
 });
 
-// TEST 9: Standalone text does not automatically become a vertical column
 test('TEST 9: Standalone text does not automatically become a vertical column', () => {
   const model = {
     board: {
@@ -251,7 +242,6 @@ test('TEST 9: Standalone text does not automatically become a vertical column', 
   assert.ok(pS.bounds.x < pT.bounds.x);
 });
 
-// TEST 10: Outliers do not distort page dimensions
 test('TEST 10: Outliers do not distort page dimensions', () => {
   const model = {
     board: {
@@ -267,7 +257,6 @@ test('TEST 10: Outliers do not distort page dimensions', () => {
   assert.ok(proposal.canvasBounds.height <= 1000);
 });
 
-// TEST 11: Collision resolution moves atomic units only
 test('TEST 11: Collision resolution moves atomic units only', () => {
   const model = {
     board: {
@@ -289,7 +278,6 @@ test('TEST 11: Collision resolution moves atomic units only', () => {
   assert.equal(pS2.position.x, pT2.position.x);
 });
 
-// TEST 12: No detached labels
 test('TEST 12: No detached labels (detachedLinkedObjects is empty)', () => {
   const model = {
     board: {
@@ -303,7 +291,6 @@ test('TEST 12: No detached labels (detachedLinkedObjects is empty)', () => {
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
 });
 
-// TEST 13: No orphan connectors
 test('TEST 13: No orphan connectors (orphanConnectors is empty)', () => {
   const model = {
     board: {
@@ -319,7 +306,6 @@ test('TEST 13: No orphan connectors (orphanConnectors is empty)', () => {
   assert.deepEqual(proposal.metadata.diagnostics.orphanConnectors, []);
 });
 
-// TEST 14: No detached annotations
 test('TEST 14: No detached annotations (detachedAnnotations is empty)', () => {
   const model = {
     board: {
@@ -330,7 +316,6 @@ test('TEST 14: No detached annotations (detachedAnnotations is empty)', () => {
   assert.deepEqual(proposal.metadata.diagnostics.detachedAnnotations, []);
 });
 
-// TEST 15: 10 mixed objects produce a readable page
 test('TEST 15: 10 mixed objects produce a readable page (aspectRatio >= 1.0)', () => {
   const objects = [
     shape('s1', 100, 100), shape('s2', 300, 100), shape('s3', 500, 100),
@@ -345,7 +330,6 @@ test('TEST 15: 10 mixed objects produce a readable page (aspectRatio >= 1.0)', (
   assert.ok(proposal.metadata.diagnostics.aspectRatio >= 0.9);
 });
 
-// TEST 16: 20 mixed objects produce a readable page
 test('TEST 16: 20 mixed objects produce a readable page', () => {
   const objects = [];
   for (let i = 0; i < 5; i++) objects.push(shape(`s_${i}`, 100 + i * 200, 100));
@@ -361,7 +345,6 @@ test('TEST 16: 20 mixed objects produce a readable page', () => {
   assert.ok(proposal.metadata.diagnostics.aspectRatio >= 0.9);
 });
 
-// TEST 17: 40 mixed objects do not collapse into a narrow column
 test('TEST 17: 40 mixed objects do not collapse into a narrow column (width >= 800px)', () => {
   const objects = [];
   for (let i = 0; i < 40; i++) {
@@ -374,21 +357,19 @@ test('TEST 17: 40 mixed objects do not collapse into a narrow column (width >= 8
   assert.ok(proposal.metadata.diagnostics.columns >= 3);
 });
 
-// TEST 18: Page width remains within configured limits
-test('TEST 18: Page width remains within configured limits (800 - 1400px)', () => {
+test('TEST 18: Page fits content width and never exceeds the max page width', () => {
   const model = {
     board: {
       objects: [shape('s1', 100, 100), shape('s2', 300, 100), shape('s3', 500, 100)]
     }
   };
   const proposal = createNotebookLayoutProposal(model, model);
-  assert.ok(proposal.canvasBounds.width >= 800);
-  assert.ok(proposal.canvasBounds.width <= 1400);
+  const contentRight = Math.max(...proposal.placements.map((p) => p.bounds.x + p.bounds.width));
+  assert.ok(proposal.canvasBounds.x + proposal.canvasBounds.width >= contentRight); 
+  assert.ok(proposal.canvasBounds.width <= 1400); 
 });
 
-// TEST 19: Pathological aspect ratios trigger redistribution
 test('TEST 19: Pathological aspect ratios trigger horizontal redistribution', () => {
-  // 6 vertically stacked single items should be paired into rows
   const model = {
     board: {
       objects: [
@@ -406,7 +387,6 @@ test('TEST 19: Pathological aspect ratios trigger horizontal redistribution', ()
   assert.ok(proposal.metadata.diagnostics.horizontalRedistributions > 0);
 });
 
-// TEST 20: Output is deterministic
 test('TEST 20: Output is deterministic', () => {
   const model = {
     board: {
@@ -419,7 +399,6 @@ test('TEST 20: Output is deterministic', () => {
   assert.equal(JSON.stringify(p1), JSON.stringify(p2));
 });
 
-// TEST 21: Original WorkspaceModel remains immutable
 test('TEST 21: Original WorkspaceModel remains immutable', () => {
   const model = {
     board: {
@@ -432,7 +411,6 @@ test('TEST 21: Original WorkspaceModel remains immutable', () => {
   assert.equal(JSON.stringify(model), snapshot);
 });
 
-// TEST 22: LayoutProposal contract remains compatible with preview/apply
 test('TEST 22: LayoutProposal contract remains compatible with preview/apply', () => {
   const model = {
     board: {
@@ -449,7 +427,6 @@ test('TEST 22: LayoutProposal contract remains compatible with preview/apply', (
   assert.equal(proposal.metadata.diagnostics.compositionMode, 'semantic-notebook');
 });
 
-// TEST 23: Real messy board produces a spacious landscape notebook page
 test('TEST 23: Real messy board produces a spacious landscape notebook page (aspectRatio >= 1.0)', () => {
   const objects = [
     shape('hex_1', 100, 100, 140, 100, { elementId: 'elem_hex', relationshipMetadata: { attachedTextId: 'txt_hex' } }),
@@ -484,7 +461,9 @@ test('TEST 23: Real messy board produces a spacious landscape notebook page (asp
 
   const proposal = createNotebookLayoutProposal(nemotronResponse, model);
 
-  assert.ok(proposal.canvasBounds.width >= 800);
+  
+  const contentRight = Math.max(...proposal.placements.map((p) => p.bounds.x + p.bounds.width));
+  assert.ok(proposal.canvasBounds.x + proposal.canvasBounds.width >= contentRight); 
   assert.ok(proposal.canvasBounds.width <= 1400);
   assert.ok(proposal.metadata.diagnostics.aspectRatio >= 1.0);
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);

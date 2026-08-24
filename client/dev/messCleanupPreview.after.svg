@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="838" height="568" viewBox="0 0 838 568">
+  <rect width="100%" height="100%" fill="#e2e8f0"/>
+  <text x="20" y="30" font-family="Nunito Sans, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Mess Cleanup — rendered preview (measured from real browser, after fix)</text>
+  <g transform="translate(20,50)">
+    <rect x="0" y="0" width="798" height="498" rx="12" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="24.8" y="254.8" width="150" height="80" rx="8" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    <rect x="254.8" y="254.8" width="150" height="80" rx="8" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    <rect x="177.8" y="384.8" width="160" height="90" rx="8" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    <rect x="594.8" y="24.8" width="180" height="180" rx="2" fill="#fef08a" stroke="#eab308" stroke-width="2"/>
+    <ellipse cx="284.8" cy="84.8" rx="60" ry="60" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    <polygon points="59.8,24.8 129.8,24.8 164.8,74.8 129.8,124.8 59.8,124.8 24.8,74.8" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    <polygon points="469.8,24.8 534.8,134.8 404.8,134.8" fill="#bae6fd" stroke="#334155" stroke-width="2"/>
+    
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="#334155"/></marker></defs>
+  <line x1="99" y1="294" x2="329" y2="294" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="24" y1="404" x2="54" y2="404" stroke="#64748b" stroke-width="2" stroke-dasharray="5 4"/>
+  <line x1="62" y1="409" x2="86" y2="409" stroke="#64748b" stroke-width="2" stroke-dasharray="5 4"/>
+  <line x1="89" y1="406" x2="117" y2="406" stroke="#64748b" stroke-width="2" stroke-dasharray="5 4"/>
+    <rect x="54.8" y="60.8" width="80" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="94.8" y="78.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Process</text>
+    <rect x="249.8" y="70.8" width="70" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="284.8" y="88.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Circle</text>
+    <rect x="429.8" y="65.8" width="80" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="469.8" y="83.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Triangle</text>
+    <rect x="614.8" y="42.8" width="140" height="40" rx="4" fill="#ffffff" opacity="0.35"/><text x="684.8" y="66.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">New Sticky Note</text>
+    <rect x="39.8" y="280.8" width="120" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="99.8" y="298.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">This is a testing phase</text>
+    <rect x="269.8" y="280.8" width="120" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="329.8" y="298.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Test will be over</text>
+    <rect x="202.8" y="415.8" width="110" height="28" rx="4" fill="#ffffff" opacity="0.35"/><text x="257.8" y="433.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Contained note</text>
+    <text x="487.8" y="402.8" font-family="Nunito Sans, sans-serif" font-size="13" font-weight="600" fill="#1e293b" text-anchor="middle">Random floating note</text>
+  </g>
+</svg>

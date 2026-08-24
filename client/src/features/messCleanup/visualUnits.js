@@ -1,23 +1,8 @@
-/**
- * Visual Unit Reconstruction & Geometry Integrity
- *
- * Phase 4F.11: Visual Unit Reconstruction
- *
- * Reconstructs faithful visual units from WorkspaceModel before layout composition:
- * - Reconstructs Shape + Label + Explanation units
- * - Reconstructs Graph / Flowchart units with dynamically routed connectors
- * - Reconstructs Rigid Freehand Stroke units
- * - Normalizes standalone text to horizontal readable orientation
- * - Verifies geometry integrity on every shape, text, and connector
- */
+
 
 import { getSemanticType, getShapeType } from './cleanupTypes.js';
 import { getObjectDimensions, getPlacementBounds, unionBounds } from './layoutStrategies.js';
 
-/**
- * Diagnostic inspector for WorkspaceModel visual units.
- * Produces a safe, compact diagnostic summary without dumping large image/vector payloads.
- */
 export const inspectWorkspaceVisualUnits = (workspaceModel) => {
   const objects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
 
@@ -41,17 +26,11 @@ export const inspectWorkspaceVisualUnits = (workspaceModel) => {
   }));
 };
 
-/**
- * Normalizes an angle into standard [0, 360) range.
- */
 export const normalizeAngle = (angle = 0) => {
   const a = angle % 360;
   return a < 0 ? a + 360 : a;
 };
 
-/**
- * Builds a clean VisualObjectModel from WorkspaceModel objects.
- */
 export const buildVisualObjectModel = (workspaceModel) => {
   const rawObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const visualObjects = [];
@@ -80,12 +59,12 @@ export const buildVisualObjectModel = (workspaceModel) => {
       y: bounds.y + bounds.height / 2
     };
 
-    // Text rotation normalization: standalone text becomes horizontal unless intentionally styled
+    
     let rotation = rawRotation;
     if (kind === 'text') {
       const isAttached = Boolean(obj.relationshipMetadata?.parentShapeId);
       if (!isAttached && (Math.abs(rawRotation - 90) < 5 || Math.abs(rawRotation - 270) < 5)) {
-        rotation = 0; // Normalize vertical rotated text into readable horizontal text
+        rotation = 0; 
       }
     }
 
@@ -117,9 +96,6 @@ export const buildVisualObjectModel = (workspaceModel) => {
   return visualObjects;
 };
 
-/**
- * Geometric containment check: returns true if point is inside box.
- */
 const isPointInside = (point, box, tolerance = 10) => (
   point.x >= box.x - tolerance &&
   point.x <= box.x + box.width + tolerance &&
@@ -127,9 +103,80 @@ const isPointInside = (point, box, tolerance = 10) => (
   point.y <= box.y + box.height + tolerance
 );
 
-/**
- * Asserts the geometry integrity of an atomic unit.
- */
+const resolveContainerOwnership = (visualObjects, objectMap) => {
+  const isContainer = (vo) => !!vo && (vo.kind === 'shape' || vo.kind === 'sticky-note');
+  const isText = (vo) => !!vo && vo.kind === 'text';
+  const areaOf = (vo) => Math.max(1, vo.bounds.width) * Math.max(1, vo.bounds.height);
+
+  
+  const claims = new Map(); 
+  const claim = (textId, ownerId, tier, area) => {
+    if (!textId || !ownerId || textId === ownerId) return;
+    const prev = claims.get(textId);
+    if (!prev || tier < prev.tier || (tier === prev.tier && area < prev.area)) {
+      claims.set(textId, { ownerId, tier, area });
+    }
+  };
+
+  const containers = visualObjects.filter(isContainer);
+
+  
+  
+  containers.forEach((c) => {
+    const attached = c.attachedTextIds?.[0] || c.originalObject?.relationshipMetadata?.attachedTextId || null;
+    if (attached && isText(objectMap.get(attached))) claim(attached, c.objectId, 0, areaOf(c));
+  });
+  visualObjects.forEach((vo) => {
+    if (!isText(vo) || !vo.parentObjectId) return;
+    const parent = objectMap.get(vo.parentObjectId);
+    if (isContainer(parent)) claim(vo.objectId, parent.objectId, 0, areaOf(parent));
+  });
+
+  
+  const byElement = new Map();
+  visualObjects.forEach((vo) => {
+    const eid = vo.originalObject?.elementId;
+    if (!eid) return;
+    if (!byElement.has(eid)) byElement.set(eid, []);
+    byElement.get(eid).push(vo);
+  });
+  byElement.forEach((group) => {
+    const container = group.find(isContainer);
+    if (!container) return;
+    group.forEach((vo) => {
+      if (isText(vo)) claim(vo.objectId, container.objectId, 1, areaOf(container));
+    });
+  });
+
+  
+  
+  visualObjects.forEach((vo) => {
+    if (!isText(vo) || claims.has(vo.objectId)) return;
+    let best = null;
+    let bestArea = Infinity;
+    containers.forEach((c) => {
+      if (c.objectId === vo.objectId) return;
+      if (isPointInside(vo.center, c.bounds) && areaOf(c) < bestArea) {
+        best = c;
+        bestArea = areaOf(c);
+      }
+    });
+    if (best) claim(vo.objectId, best.objectId, 2, bestArea);
+  });
+
+  
+  const ownerByText = new Map();
+  const ownedByOwner = new Map();
+  claims.forEach((info, textId) => {
+    ownerByText.set(textId, info.ownerId);
+    if (!ownedByOwner.has(info.ownerId)) ownedByOwner.set(info.ownerId, []);
+    ownedByOwner.get(info.ownerId).push(textId);
+  });
+  ownedByOwner.forEach((ids) => ids.sort((a, b) => String(a).localeCompare(String(b))));
+
+  return { ownedByOwner, ownerByText };
+};
+
 export const assertShapeGeometryIntegrity = (unit) => {
   if (!unit) throw new Error('Atomic unit is null or undefined');
   if (!unit.unitId) throw new Error('Atomic unit is missing unitId');
@@ -159,7 +206,7 @@ export const assertPlacementsWithinCanvas = (proposal) => {
     const pMaxX = pBounds.x + pBounds.width;
     const pMaxY = pBounds.y + pBounds.height;
 
-    const tolerance = 2; // 2px rounding tolerance
+    const tolerance = 2; 
     if (
       pBounds.x < canvas.x - tolerance ||
       pBounds.y < canvas.y - tolerance ||
@@ -180,10 +227,6 @@ export const assertPlacementsWithinCanvas = (proposal) => {
   return true;
 };
 
-
-/**
- * Reconstructs complete atomic visual units from VisualObjectModel and SemanticScene.
- */
 export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
   const objectMap = new Map(visualObjects.map((vo) => [vo.objectId, vo]));
   const assignedIds = new Set();
@@ -194,7 +237,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
   const orphanConnectorIds = [];
   const rotationNormalizedTextIds = [];
 
-  // Helper to create placement record
+  
   const createPlacement = (vo, localPos, unitId, anchor = 'center') => {
     const size = vo.size;
     const rotation = vo.rotation;
@@ -205,14 +248,19 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       relationshipMetadata: vo.originalObject.relationshipMetadata || {},
       position: { x: localPos.x, y: localPos.y },
       rotation,
-      scale: { x: 1, y: 1 }, // Effective size is already baked into size
+      scale: { x: 1, y: 1 }, 
       anchor,
       size,
       bounds: getPlacementBounds(localPos, size, anchor, rotation)
     };
   };
 
-  // 1. Reconstruct Flowchart / Graph Units from SemanticScene or raw Connectors
+  
+  
+  
+  const { ownedByOwner, ownerByText } = resolveContainerOwnership(visualObjects, objectMap);
+
+  
   const connectorVos = visualObjects.filter((vo) => vo.kind === 'connector' && !assignedIds.has(vo.objectId));
   const graphClusters = [];
   const processedConnIds = new Set();
@@ -224,9 +272,14 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     (vo.attachedTextIds || []).forEach((tId) => set.add(tId));
     const parentShapeTextId = vo.originalObject.relationshipMetadata?.attachedTextId;
     if (parentShapeTextId && objectMap.has(parentShapeTextId)) set.add(parentShapeTextId);
+    
+    
+    (ownedByOwner.get(nodeId) || []).forEach((tId) => {
+      if (objectMap.has(tId)) set.add(tId);
+    });
   };
 
-  // Cluster connected nodes and connectors
+  
   connectorVos.forEach((connVo) => {
     if (processedConnIds.has(connVo.objectId)) return;
     const srcId = connVo.connectorMetadata?.sourceObjectId;
@@ -236,7 +289,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     addNodeWithLabels(srcId, clusterObjIds);
     addNodeWithLabels(tgtId, clusterObjIds);
 
-    // Expand cluster for chained connectors
+    
     connectorVos.forEach((otherConn) => {
       if (processedConnIds.has(otherConn.objectId)) return;
       const oSrc = otherConn.connectorMetadata?.sourceObjectId;
@@ -253,7 +306,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     graphClusters.push(Array.from(clusterObjIds));
   });
 
-  // Also include any semanticScene flowchart groups not already covered
+  
   const flowchartGroups = (semanticScene?.groups || []).filter((g) => g.type === 'flowchart');
   flowchartGroups.forEach((g) => {
     const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
@@ -276,7 +329,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       const cluster = [id];
       processedNodes.add(id);
 
-      // Check attached text
+      
       const attachedTextId = vo.attachedTextIds[0] || vo.originalObject.relationshipMetadata?.attachedTextId;
       if (attachedTextId && nodeIds.includes(attachedTextId) && !processedNodes.has(attachedTextId)) {
         cluster.push(attachedTextId);
@@ -285,7 +338,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       nodeClusters.push(cluster);
     });
 
-    // Check connector direction for graph orientation
+    
     let isVerticalGraph = false;
     if (connectorIds.length > 0) {
       const connVo = objectMap.get(connectorIds[0]);
@@ -328,7 +381,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       }
     });
 
-    // Route connectors between node centers
+    
     connectorIds.forEach((connId) => {
       const connVo = objectMap.get(connId);
       const srcId = connVo?.connectorMetadata?.sourceObjectId;
@@ -368,13 +421,13 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     gObjIds.forEach((id) => assignedIds.add(id));
   });
 
-  // 2. Reconstruct Rigid Freehand Stroke Units
+  
   const freeformGroups = (semanticScene?.groups || []).filter((g) => g.type === 'freeform');
   freeformGroups.forEach((g) => {
     const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
     if (gObjIds.length === 0) return;
 
-    // Skip if pure text group
+    
     if (gObjIds.every((id) => objectMap.get(id)?.kind === 'text')) return;
 
     const unitId = `unit_freeform_${g.id}`;
@@ -410,7 +463,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     gObjIds.forEach((id) => assignedIds.add(id));
   });
 
-  // 3. Reconstruct Shape + Attached Label + Explanation Units
+  
   const conceptGroups = (semanticScene?.groups || []).filter((g) => g.type === 'concept');
   conceptGroups.forEach((g) => {
     const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
@@ -429,23 +482,35 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const unitObjIds = [shapeId];
     assignedIds.add(shapeId);
 
-    // Identify attached label vs explanation text
-    const attachedTextId = shapeVo.attachedTextIds[0] || shapeVo.originalObject.relationshipMetadata?.attachedTextId;
-    const textIds = gObjIds.filter((id) => id !== shapeId && objectMap.get(id)?.kind === 'text');
+    
+    
+    const ownedTextIds = (ownedByOwner.get(shapeId) || []).filter(
+      (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
+    );
+    ownedTextIds.forEach((tId) => {
+      localPlacements.push(createPlacement(objectMap.get(tId), centerPos, unitId, 'center'));
+      unitObjIds.push(tId);
+      assignedIds.add(tId);
+    });
+
+    
+    
+    const explanationTextIds = gObjIds.filter(
+      (id) => id !== shapeId
+        && objectMap.get(id)?.kind === 'text'
+        && !assignedIds.has(id)
+        && !ownerByText.has(id)
+        && (!g.id?.includes('unassigned') || Math.abs(objectMap.get(id).center.x - shapeVo.center.x) <= Math.max(shapeVo.size.width, 120))
+    );
 
     let curBottomY = shapeSize.height + 16;
 
-    textIds.forEach((tId) => {
+    explanationTextIds.forEach((tId) => {
       const textVo = objectMap.get(tId);
-      if (tId === attachedTextId || textVo.parentObjectId === shapeId || isPointInside(textVo.center, shapeVo.bounds)) {
-        // Centered label inside shape
-        localPlacements.push(createPlacement(textVo, centerPos, unitId, 'center'));
-      } else {
-        // Explanation text positioned underneath shape
-        const explPos = { x: shapeSize.width / 2, y: curBottomY + textVo.size.height / 2 };
-        localPlacements.push(createPlacement(textVo, explPos, unitId, 'center'));
-        curBottomY += textVo.size.height + 12;
-      }
+      
+      const explPos = { x: shapeSize.width / 2, y: curBottomY + textVo.size.height / 2 };
+      localPlacements.push(createPlacement(textVo, explPos, unitId, 'center'));
+      curBottomY += textVo.size.height + 12;
       unitObjIds.push(tId);
       assignedIds.add(tId);
     });
@@ -471,23 +536,9 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     atomicUnits.push(unit);
   });
 
-  // 3b. Reconstruct Remaining Standalone Shapes (not part of concept groups)
+  
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId) || vo.kind !== 'shape') return;
-
-    let labelTextId = vo.attachedTextIds[0] || null;
-    if (!labelTextId) {
-      const childText = visualObjects.find(
-        (o) => !assignedIds.has(o.objectId) && o.kind === 'text' && o.parentObjectId === vo.objectId
-      );
-      if (childText) labelTextId = childText.objectId;
-    }
-    if (!labelTextId) {
-      const containedText = visualObjects.find(
-        (o) => !assignedIds.has(o.objectId) && o.kind === 'text' && !o.parentObjectId && isPointInside(o.center, vo.bounds)
-      );
-      if (containedText) labelTextId = containedText.objectId;
-    }
 
     const unitId = `unit_shape_${vo.objectId}`;
     const shapeSize = vo.size;
@@ -498,13 +549,16 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const unitObjIds = [vo.objectId];
     assignedIds.add(vo.objectId);
 
-    if (labelTextId && objectMap.has(labelTextId) && !assignedIds.has(labelTextId)) {
-      const textVo = objectMap.get(labelTextId);
-      const pText = createPlacement(textVo, centerPos, unitId, 'center');
-      localPlacements.push(pText);
-      unitObjIds.push(labelTextId);
-      assignedIds.add(labelTextId);
-    }
+    
+    
+    const ownedTextIds = (ownedByOwner.get(vo.objectId) || []).filter(
+      (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
+    );
+    ownedTextIds.forEach((tId) => {
+      localPlacements.push(createPlacement(objectMap.get(tId), centerPos, unitId, 'center'));
+      unitObjIds.push(tId);
+      assignedIds.add(tId);
+    });
 
     const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
     const origBounds = unionBounds(unitObjIds.map((id) => objectMap.get(id).bounds));
@@ -527,14 +581,14 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     atomicUnits.push(unit);
   });
 
-  // 4. Reconstruct Sticky Notes (background + attached text = one atomic note-unit)
-  //
-  // A sticky note is authored as two objects: a colored background (rect,
-  // isStickyNote) and a separate text object linked back to it. They MUST be
-  // reconstructed as a single rigid unit, or the text detaches and drifts away
-  // during layout. The link is resolved from explicit relationship metadata
-  // only (attachedTextId, then the reverse parentShapeId), never from proximity.
-  const NOTE_TEXT_PADDING = 18; // matches sticky-note text padding in FabricCanvas
+  
+  
+  
+  
+  
+  
+  
+  const NOTE_TEXT_PADDING = 18; 
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId) || vo.kind !== 'sticky-note') return;
 
@@ -544,31 +598,27 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const localPlacements = [pNote];
     const unitObjIds = [vo.objectId];
 
-    // Resolve the note's text child via explicit metadata (highest priority first).
-    let noteTextId = vo.attachedTextIds[0] || null;
-    if (!(noteTextId && objectMap.has(noteTextId) && !assignedIds.has(noteTextId))) {
-      noteTextId = null;
-    }
-    if (!noteTextId) {
-      const childText = visualObjects.find(
-        (o) => !assignedIds.has(o.objectId) && o.kind === 'text' && o.parentObjectId === vo.objectId
-      );
-      if (childText) noteTextId = childText.objectId;
-    }
+    
+    
+    
+    const noteTextIds = (ownedByOwner.get(vo.objectId) || []).filter(
+      (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
+    );
 
-    if (noteTextId && objectMap.has(noteTextId) && !assignedIds.has(noteTextId)) {
-      const textVo = objectMap.get(noteTextId);
-      // Re-seat the text neatly inside the note at the authored top-left padding.
-      // Horizontally centering the text box reproduces the note's symmetric side
-      // padding; vertically anchoring near the top keeps notes reading top-down.
+    
+    
+    let noteTextTop = NOTE_TEXT_PADDING;
+    noteTextIds.forEach((tId) => {
+      const textVo = objectMap.get(tId);
       const textLocalPos = {
         x: vo.size.width / 2,
-        y: NOTE_TEXT_PADDING + textVo.size.height / 2
+        y: noteTextTop + textVo.size.height / 2
       };
       localPlacements.push(createPlacement(textVo, textLocalPos, unitId, 'center'));
-      unitObjIds.push(noteTextId);
-      assignedIds.add(noteTextId);
-    }
+      noteTextTop += textVo.size.height + 6;
+      unitObjIds.push(tId);
+      assignedIds.add(tId);
+    });
 
     const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
     const origBounds = unionBounds(unitObjIds.map((id) => objectMap.get(id).bounds));
@@ -592,7 +642,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     assignedIds.add(vo.objectId);
   });
 
-  // 5. Reconstruct Remaining Standalone Text, Shapes, and Strokes
+  
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId)) return;
 
@@ -608,7 +658,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const unit = {
       unitId,
       type: vo.kind === 'text' ? 'text-unit' : (vo.kind === 'freehand' ? 'freeform-unit' : 'shape-unit'),
-      role: vo.kind === 'text' ? 'text' : 'concept',
+      role: vo.kind === 'text' ? (vo.originalObject?.metadata?.isHeading ? 'heading' : 'text') : 'concept',
       objectIds: [vo.objectId],
       localPlacements: [placement],
       localBounds,
@@ -622,6 +672,18 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     assertShapeGeometryIntegrity(unit);
     atomicUnits.push(unit);
     assignedIds.add(vo.objectId);
+  });
+
+  
+  
+  
+  
+  const unitIdByObject = new Map();
+  atomicUnits.forEach((u) => u.localPlacements.forEach((p) => unitIdByObject.set(p.objectId, u.unitId)));
+  ownerByText.forEach((ownerId, textId) => {
+    const tUnit = unitIdByObject.get(textId);
+    const oUnit = unitIdByObject.get(ownerId);
+    if (tUnit && oUnit && tUnit !== oUnit) detachedTextIds.push(textId);
   });
 
   const visualIntegrity = {

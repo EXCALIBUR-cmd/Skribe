@@ -1,17 +1,4 @@
-/**
- * SemanticScene Adapter
- *
- * Phase 4F.10 Step 2: Adapts raw Nemotron Omni responses and WorkspaceModel
- * into the clean SemanticScene intermediate representation.
- *
- * RULES:
- * - Nemotron determines semantic meaning and relationships.
- * - Skribe layout engine determines physical coordinates.
- * - SemanticScene MUST NOT contain any physical layout geometry (x, y, width, height, etc.).
- * - Explicit Fabric relationships have Priority 1 over AI inference.
- * - Unknown object IDs are rejected / filtered safely without inventing new objects.
- * - Immutable treatment of inputs. Output is strictly JSON-serializable and deterministic.
- */
+
 
 import {
   SEMANTIC_WORKSPACE_TYPES,
@@ -29,13 +16,6 @@ const FORBIDDEN_COORDINATE_KEYS = new Set([
   'layoutCoordinates', 'bounds', 'position'
 ]);
 
-/**
- * Validates a SemanticScene object against the schema and workspaceModel.
- *
- * @param {object} scene - The SemanticScene object to validate
- * @param {object} workspaceModel - The WorkspaceModel source of truth for object IDs
- * @returns {{ valid: boolean, errors: string[] }}
- */
 export const validateSemanticScene = (scene, workspaceModel = null) => {
   const errors = [];
 
@@ -56,7 +36,7 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
   const validObjectIds = new Set(modelObjects.map((o) => o?.id).filter(Boolean));
   const hasWorkspaceModel = validObjectIds.size > 0;
 
-  // Validate objects array
+  
   if (!Array.isArray(scene.objects)) {
     errors.push('objects must be an array');
   } else {
@@ -77,7 +57,7 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
     });
   }
 
-  // Validate groups array
+  
   const groupIds = new Set();
   const validGroupTypes = new Set(Object.values(SEMANTIC_GROUP_TYPES));
   if (!Array.isArray(scene.groups)) {
@@ -111,7 +91,7 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
     });
   }
 
-  // Validate relationships array
+  
   const validRelTypes = new Set(Object.values(SEMANTIC_RELATIONSHIP_TYPES));
   if (!Array.isArray(scene.relationships)) {
     errors.push('relationships must be an array');
@@ -137,7 +117,7 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
     });
   }
 
-  // Validate annotations array
+  
   if (!Array.isArray(scene.annotations)) {
     errors.push('annotations must be an array');
   } else {
@@ -159,17 +139,17 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
     });
   }
 
-  // Validate readingOrder
+  
   if (!Array.isArray(scene.readingOrder)) {
     errors.push('readingOrder must be an array');
   }
 
-  // Validate hierarchy
+  
   if (!scene.hierarchy || typeof scene.hierarchy !== 'object') {
     errors.push('hierarchy must be an object');
   }
 
-  // Strict check: No physical coordinates anywhere in the scene
+  
   const checkForCoordinates = (obj, path = '') => {
     if (!obj || typeof obj !== 'object') return;
     Object.keys(obj).forEach((key) => {
@@ -189,9 +169,6 @@ export const validateSemanticScene = (scene, workspaceModel = null) => {
   };
 };
 
-/**
- * Infers initial semantic role from WorkspaceModel object properties.
- */
 const inferObjectRole = (object) => {
   if (!object) return SEMANTIC_OBJECT_ROLES.UNKNOWN;
   if (object.type === 'connector') return SEMANTIC_OBJECT_ROLES.CONNECTOR;
@@ -207,28 +184,18 @@ const inferObjectRole = (object) => {
   return SEMANTIC_OBJECT_ROLES.UNKNOWN;
 };
 
-/**
- * Normalizes a raw relationship type string via the vocabulary map.
- */
 export const normalizeRelationshipType = (rawType) => {
   if (typeof rawType !== 'string') return null;
   const key = rawType.trim().toLowerCase();
   return RELATIONSHIP_VOCABULARY_MAP[key] || null;
 };
 
-/**
- * Builds a validated, normalized SemanticScene from WorkspaceModel and raw Nemotron output.
- *
- * @param {object} workspaceModel - Source of truth for objects and explicit Fabric metadata
- * @param {object} rawPlan - Raw JSON from Nemotron Omni or legacy formats
- * @returns {object} Normalized SemanticScene
- */
 export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
   const modelObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const validObjectIds = new Set(modelObjects.map((o) => o?.id).filter(Boolean));
   const objectMap = new Map(modelObjects.filter((o) => o?.id).map((o) => [o.id, o]));
 
-  // 1. Collect explicit Fabric relationships (Priority 1)
+  
   const explicitRelationships = [];
   const linkedShapeToText = new Map();
   const linkedTextToShape = new Map();
@@ -277,14 +244,14 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     }
   });
 
-  // 2. Parse workspaceType
+  
   const validWorkspaceTypes = new Set(Object.values(SEMANTIC_WORKSPACE_TYPES));
   let workspaceType = SEMANTIC_WORKSPACE_TYPES.MIXED;
   if (rawPlan?.workspaceType && validWorkspaceTypes.has(rawPlan.workspaceType)) {
     workspaceType = rawPlan.workspaceType;
   }
 
-  // 3. Extract and normalize groups
+  
   let rawGroupList = [];
   if (Array.isArray(rawPlan?.groups)) {
     rawGroupList = rawPlan.groups;
@@ -292,6 +259,8 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     rawGroupList = rawPlan.document.sections;
   } else if (Array.isArray(rawPlan?.sections)) {
     rawGroupList = rawPlan.sections;
+  } else if (Array.isArray(rawPlan?.blocks)) {
+    rawGroupList = rawPlan.blocks;
   }
 
   const assignedObjectIds = new Set();
@@ -309,7 +278,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
 
     validGroupIds.forEach((id) => assignedObjectIds.add(id));
 
-    // Determine group type
+    
     let groupType = SEMANTIC_GROUP_TYPES.CONCEPT;
     const rawType = String(rawGroup.type || '').toLowerCase();
     if (rawType === 'flowchart') {
@@ -349,7 +318,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     });
   });
 
-  // 4. Enforce group integrity: colocate linked shape/text pairs
+  
   const groupMapByObjId = new Map();
   groups.forEach((grp) => {
     grp.objectIds.forEach((oid) => groupMapByObjId.set(oid, grp));
@@ -383,7 +352,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     }
   });
 
-  // 5. Group unassigned objects into semantic groups
+  
   const unassignedIds = [...validObjectIds].filter((id) => !assignedObjectIds.has(id));
   if (unassignedIds.length > 0) {
     const unassignedStrokes = unassignedIds.filter((id) => objectMap.get(id)?.type === 'stroke');
@@ -421,13 +390,13 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     }
   }
 
-  // Refresh group map
+  
   groupMapByObjId.clear();
   groups.forEach((grp) => {
     grp.objectIds.forEach((oid) => groupMapByObjId.set(oid, grp));
   });
 
-  // 6. Normalize relationships
+  
   const allRelationships = [...explicitRelationships];
   const rawRelationships = Array.isArray(rawPlan?.relationships) ? rawPlan.relationships : [];
 
@@ -458,7 +427,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     });
   });
 
-  // Deduplicate relationships
+  
   const relSeen = new Set();
   const uniqueRelationships = [];
   allRelationships.forEach((rel) => {
@@ -469,7 +438,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     }
   });
 
-  // 7. Normalize annotations
+  
   const annotations = [];
   const rawAnnotations = Array.isArray(rawPlan?.annotations) ? rawPlan.annotations : [];
   rawAnnotations.forEach((rawAnn) => {
@@ -492,7 +461,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     });
   });
 
-  // 8. Build objects list with semantic roles and group associations
+  
   const semanticObjects = modelObjects
     .filter((o) => o?.id)
     .map((obj) => {
@@ -510,13 +479,13 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     })
     .sort((a, b) => a.objectId.localeCompare(b.objectId));
 
-  // 9. Determine reading order
+  
   let readingOrder = [];
   if (Array.isArray(rawPlan?.readingOrder) && rawPlan.readingOrder.length > 0) {
     readingOrder = rawPlan.readingOrder.filter((id) => groups.some((g) => g.id === id) || validObjectIds.has(id));
   }
   if (readingOrder.length === 0) {
-    // Default semantic reading order: title -> concept -> flowchart -> diagram -> notes -> freeform
+    
     const typePriority = {
       [SEMANTIC_GROUP_TYPES.CONCEPT]: 1,
       [SEMANTIC_GROUP_TYPES.FLOWCHART]: 2,
@@ -530,10 +499,11 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
       .map((g) => g.id);
   }
 
-  // 10. Extract hierarchy
-  const rootTitleObjectId = rawPlan?.document?.titleObjectId && validObjectIds.has(String(rawPlan.document.titleObjectId))
-    ? String(rawPlan.document.titleObjectId)
-    : (rawPlan?.hierarchy?.rootTitleObjectId && validObjectIds.has(String(rawPlan.hierarchy.rootTitleObjectId)) ? String(rawPlan.hierarchy.rootTitleObjectId) : null);
+  const rootTitleObjectId = (rawPlan?.title?.objectId && validObjectIds.has(String(rawPlan.title.objectId)))
+    ? String(rawPlan.title.objectId)
+    : (rawPlan?.document?.titleObjectId && validObjectIds.has(String(rawPlan.document.titleObjectId))
+      ? String(rawPlan.document.titleObjectId)
+      : (rawPlan?.hierarchy?.rootTitleObjectId && validObjectIds.has(String(rawPlan.hierarchy.rootTitleObjectId)) ? String(rawPlan.hierarchy.rootTitleObjectId) : null));
 
   const mainConceptIds = groups
     .filter((g) => g.type === SEMANTIC_GROUP_TYPES.CONCEPT || g.type === SEMANTIC_GROUP_TYPES.FLOWCHART)
@@ -555,7 +525,7 @@ export const buildSemanticScene = (workspaceModel, rawPlan = {}) => {
     hierarchy
   };
 
-  // Development diagnostic log
+  
   if (process.env.NODE_ENV !== 'production' && typeof console !== 'undefined') {
     console.log(`[SemanticScene] Objects: ${scene.objects.length}, Groups: ${scene.groups.length}, Relationships: ${scene.relationships.length}, Annotations: ${scene.annotations.length}, Reading order: [${scene.readingOrder.join(', ')}]`);
   }

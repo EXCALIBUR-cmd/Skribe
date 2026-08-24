@@ -73,7 +73,6 @@ const stroke = (id, x = 50, y = 50, w = 40, h = 40, extra = {}) => ({
 
 const getPlacement = (proposal, id) => proposal.placements.find((p) => p.objectId === id);
 
-// TEST 1: Shape dimensions preserved
 test('TEST 1: Shape dimensions preserved', () => {
   const s = shape('s1', 100, 100, 220, 110);
   const model = { board: { objects: [s] } };
@@ -84,7 +83,6 @@ test('TEST 1: Shape dimensions preserved', () => {
   assert.equal(p.size.height, 110);
 });
 
-// TEST 2: Shape rotation preserved
 test('TEST 2: Shape rotation preserved', () => {
   const s = shape('s1', 100, 100, 140, 90, { rotation: 45 });
   const model = { board: { objects: [s] } };
@@ -94,7 +92,6 @@ test('TEST 2: Shape rotation preserved', () => {
   assert.equal(p.rotation, 45);
 });
 
-// TEST 3: Shape + attached label remains atomic
 test('TEST 3: Shape + attached label remains atomic', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Hello', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
@@ -106,7 +103,6 @@ test('TEST 3: Shape + attached label remains atomic', () => {
   assert.equal(pS.unitId, pT.unitId);
 });
 
-// TEST 4: Label remains centered inside shape
 test('TEST 4: Label remains centered inside shape', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Hello', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
@@ -120,7 +116,6 @@ test('TEST 4: Label remains centered inside shape', () => {
   assert.equal(pT.anchor, 'center');
 });
 
-// TEST 5: Explanation remains associated with concept
 test('TEST 5: Explanation remains associated with concept', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Process', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
@@ -135,7 +130,6 @@ test('TEST 5: Explanation remains associated with concept', () => {
   assert.ok(proposal.sections.some((sec) => sec.objectIds.includes('s1') && sec.objectIds.includes('t_expl')));
 });
 
-// TEST 6: Connector source preserved
 test('TEST 6: Connector source preserved', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 400, 100);
@@ -148,7 +142,6 @@ test('TEST 6: Connector source preserved', () => {
   assert.equal(pC.relationshipMetadata.sourceShapeId, 'b1');
 });
 
-// TEST 7: Connector target preserved
 test('TEST 7: Connector target preserved', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 400, 100);
@@ -161,7 +154,6 @@ test('TEST 7: Connector target preserved', () => {
   assert.equal(pC.relationshipMetadata.targetShapeId, 'b2');
 });
 
-// TEST 8: Horizontal connector remains horizontal when graph is horizontal
 test('TEST 8: Horizontal connector remains horizontal when graph is horizontal', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 400, 100);
@@ -176,7 +168,6 @@ test('TEST 8: Horizontal connector remains horizontal when graph is horizontal',
   assert.ok(p1.position.x < p2.position.x);
 });
 
-// TEST 9: Vertical connector remains vertical when graph is vertical
 test('TEST 9: Vertical connector remains vertical when graph is vertical', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 100, 400);
@@ -191,7 +182,6 @@ test('TEST 9: Vertical connector remains vertical when graph is vertical', () =>
   assert.ok(p1.position.y < p2.position.y);
 });
 
-// TEST 10: Connector never becomes an independent layout block
 test('TEST 10: Connector never becomes an independent layout block', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 400, 100);
@@ -200,12 +190,11 @@ test('TEST 10: Connector never becomes an independent layout block', () => {
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
   const proposal = createNotebookLayoutProposal(scene, model);
 
-  // Proposal sections should NOT contain a 1-object section with only connector
+  
   const standaloneConnSection = proposal.sections.find((s) => s.objectIds.length === 1 && s.objectIds.includes('c1'));
   assert.equal(standaloneConnSection, undefined);
 });
 
-// TEST 11: Multiple graph nodes remain connected
 test('TEST 11: Multiple graph nodes remain connected', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 300, 100);
@@ -222,7 +211,6 @@ test('TEST 11: Multiple graph nodes remain connected', () => {
   assert.ok(p1.position.x < p2.position.x && p2.position.x < p3.position.x);
 });
 
-// TEST 12: Freehand strokes remain atomic
 test('TEST 12: Freehand strokes remain atomic', () => {
   const strokes = [
     stroke('st1', 100, 100, 20, 20),
@@ -241,17 +229,15 @@ test('TEST 12: Freehand strokes remain atomic', () => {
   assert.equal(p2.unitId, p3.unitId);
 });
 
-// TEST 13: Standalone text remains readable horizontally
 test('TEST 13: Standalone text remains readable horizontally', () => {
   const t = text('txt_rot', 'Hello World', 100, 100, 140, 28, { rotation: 90 });
   const model = { board: { objects: [t] } };
   const proposal = createNotebookLayoutProposal(model, model);
 
   const p = getPlacement(proposal, 'txt_rot');
-  assert.equal(p.rotation, 0); // Normalized to horizontal
+  assert.equal(p.rotation, 0); 
 });
 
-// TEST 14: Attached text remains readable
 test('TEST 14: Attached text remains readable', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Step 1', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
@@ -262,7 +248,6 @@ test('TEST 14: Attached text remains readable', () => {
   assert.equal(p.rotation, 0);
 });
 
-// TEST 15: Text dimensions remain valid
 test('TEST 15: Text dimensions remain valid', () => {
   const t = text('t1', 'Some content', 100, 100, 140, 28);
   const model = { board: { objects: [t] } };
@@ -272,7 +257,6 @@ test('TEST 15: Text dimensions remain valid', () => {
   assert.ok(p.size.width > 0 && p.size.height > 0);
 });
 
-// TEST 16: No zero-width shapes
 test('TEST 16: No zero-width shapes', () => {
   const s = shape('s1', 100, 100, 140, 90);
   const model = { board: { objects: [s] } };
@@ -283,7 +267,6 @@ test('TEST 16: No zero-width shapes', () => {
   });
 });
 
-// TEST 17: No zero-height shapes
 test('TEST 17: No zero-height shapes', () => {
   const s = shape('s1', 100, 100, 140, 90);
   const model = { board: { objects: [s] } };
@@ -294,7 +277,6 @@ test('TEST 17: No zero-height shapes', () => {
   });
 });
 
-// TEST 18: No orphan connectors
 test('TEST 18: No orphan connectors', () => {
   const b1 = shape('b1', 100, 100);
   const b2 = shape('b2', 400, 100);
@@ -306,7 +288,6 @@ test('TEST 18: No orphan connectors', () => {
   assert.deepEqual(proposal.metadata.diagnostics.orphanConnectors, []);
 });
 
-// TEST 19: No detached labels
 test('TEST 19: No detached labels', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Process', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
@@ -316,7 +297,6 @@ test('TEST 19: No detached labels', () => {
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
 });
 
-// TEST 20: No duplicate object membership
 test('TEST 20: No duplicate object membership', () => {
   const objects = [shape('s1', 100, 100), text('t1', 'A', 100, 100), note('n1', 'N', 300, 100)];
   const model = { board: { objects } };
@@ -327,7 +307,6 @@ test('TEST 20: No duplicate object membership', () => {
   assert.equal(placedIds.length, uniquePlacedIds.size);
 });
 
-// TEST 21: All WorkspaceModel objects accounted for
 test('TEST 21: All WorkspaceModel objects accounted for', () => {
   const objects = [shape('s1', 100, 100), text('t1', 'A', 100, 100), note('n1', 'N', 300, 100)];
   const model = { board: { objects } };
@@ -338,7 +317,6 @@ test('TEST 21: All WorkspaceModel objects accounted for', () => {
   });
 });
 
-// TEST 22: Original WorkspaceModel immutable
 test('TEST 22: Original WorkspaceModel immutable', () => {
   const model = { board: { objects: [shape('s1', 100, 100)] } };
   const snapshot = JSON.stringify(model);
@@ -347,7 +325,6 @@ test('TEST 22: Original WorkspaceModel immutable', () => {
   assert.equal(JSON.stringify(model), snapshot);
 });
 
-// TEST 23: Deterministic reconstruction
 test('TEST 23: Deterministic reconstruction', () => {
   const model = {
     board: { objects: [shape('s1', 100, 100), note('n1', 'Note', 300, 100)] }
@@ -358,7 +335,6 @@ test('TEST 23: Deterministic reconstruction', () => {
   assert.equal(JSON.stringify(p1), JSON.stringify(p2));
 });
 
-// TEST 24: Real-board mixed scene reconstruction
 test('TEST 24: Real-board mixed scene reconstruction', () => {
   const objects = [
     shape('hex_1', 100, 100, 140, 100, { relationshipMetadata: { attachedTextId: 'txt_hex' } }),
@@ -380,12 +356,24 @@ test('TEST 24: Real-board mixed scene reconstruction', () => {
   const model = { board: { objects } };
   const proposal = createNotebookLayoutProposal(model, model);
 
-  assert.ok(proposal.canvasBounds.width >= 800);
+  
+  
+  
+  
+  const contentRight = Math.max(...proposal.placements.map((p) => p.bounds.x + p.bounds.width));
+  assert.ok(proposal.canvasBounds.x + proposal.canvasBounds.width >= contentRight);
   assert.ok(proposal.canvasBounds.width <= 1400);
   assert.ok(proposal.metadata.diagnostics.visualIntegrity.geometryIntegrityPassed);
+
+  
+  
+  
+  const unitOf = (id) => proposal.placements.find((p) => p.objectId === id)?.unitId;
+  [['hex_1', 'txt_hex'], ['circle_1', 'txt_circle'], ['box_1', 'txt_b1'], ['box_2', 'txt_b2'], ['triangle_1', 'txt_tri']]
+    .forEach(([s, t]) => assert.equal(unitOf(t), unitOf(s), `${t} must stay welded to ${s}`));
+  assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
 });
 
-// TEST 25: LayoutProposal remains compatible
 test('TEST 25: LayoutProposal remains compatible', () => {
   const model = { board: { objects: [shape('s1', 100, 100)] } };
   const proposal = createNotebookLayoutProposal(model, model);
@@ -396,10 +384,6 @@ test('TEST 25: LayoutProposal remains compatible', () => {
   assert.ok(Array.isArray(proposal.placements));
 });
 
-// TEST 26: Real two-object sticky note (background + linked text) stays atomic.
-// Real notes are a text-less background object plus a separate text object
-// linked by attachedTextId/parentShapeId — unlike the single-object `note()`
-// fixtures elsewhere, which is why detached note text slipped past the suite.
 test('TEST 26: Sticky note text stays attached to the note background', () => {
   const noteBg = note('note_bg', null, 900, 120, 180, 180, {
     relationshipMetadata: { attachedTextId: 'note_txt' }
@@ -414,14 +398,14 @@ test('TEST 26: Sticky note text stays attached to the note background', () => {
   const pTxt = getPlacement(proposal, 'note_txt');
   assert.ok(pBg && pTxt, 'both note objects must be placed');
 
-  // Atomic: text shares the note background's reconstructed unit.
+  
   assert.equal(pTxt.unitId, pBg.unitId, 'note text must share the note background unit');
 
-  // The unit's section lists both objects together.
+  
   const section = proposal.sections.find((s) => s.objectIds.includes('note_bg'));
   assert.ok(section && section.objectIds.includes('note_txt'), 'note text must be in the note section');
 
-  // Text renders inside the note background, not drifting away.
+  
   const cx = pTxt.bounds.x + pTxt.bounds.width / 2;
   const cy = pTxt.bounds.y + pTxt.bounds.height / 2;
   assert.ok(
@@ -430,17 +414,15 @@ test('TEST 26: Sticky note text stays attached to the note background', () => {
     'note text center must fall within the note background bounds'
   );
 
-  // No stray standalone section for the note text.
+  
   const strayTextSections = proposal.sections.filter(
     (s) => s.objectIds.length === 1 && s.objectIds.includes('note_txt')
   );
   assert.equal(strayTextSections.length, 0, 'note text must not become its own section');
 });
 
-// TEST 27: Note text attaches via the reverse parentShapeId link when the
-// background has no attachedTextId (still explicit metadata, not proximity).
 test('TEST 27: Sticky note text attaches via reverse parentShapeId link', () => {
-  const noteBg = note('note_bg', null, 300, 300, 180, 180); // no attachedTextId
+  const noteBg = note('note_bg', null, 300, 300, 180, 180); 
   const noteTxt = text('note_txt', 'Reminder', 318, 318, 144, 30, {
     relationshipMetadata: { parentShapeId: 'note_bg' }
   });

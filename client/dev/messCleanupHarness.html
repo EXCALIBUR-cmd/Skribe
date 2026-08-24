@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  DEV-ONLY harness for visually verifying Mess Cleanup preview layout.
+  NOT part of the production app router or bundle — it is served by Vite in dev only
+  (http://localhost:5173/dev/messCleanupHarness.html) and imported by the e2e spec
+  and/or the preview MCP tools. It renders the REAL MessCleanupPreviewModal driven by
+  the REAL createLayoutProposal against the shared realMessyBoard fixture, so the only
+  non-production input is the board data; the render path is production code.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mess Cleanup Preview Harness</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #e2e8f0; min-height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="harness-root"></div>
+    <script type="module" src="/dev/messCleanupHarness.jsx"></script>
+  </body>
+</html>
