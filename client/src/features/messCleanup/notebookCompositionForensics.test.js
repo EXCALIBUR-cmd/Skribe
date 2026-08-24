@@ -68,6 +68,7 @@ const stroke = (id, x = 50, y = 50, w = 40, h = 40, extra = {}) => ({
 
 const getPlacement = (proposal, id) => proposal.placements.find((p) => p.objectId === id);
 
+
 test('TEST 1: Multiple shapes originally side-by-side remain side-by-side', () => {
   const model = {
     board: {
@@ -208,6 +209,7 @@ test('TEST 7: Freehand strokes remain atomic', () => {
   assert.equal(p2.position.y - p1.position.y, 10);
 });
 
+// TEST 8: Sticky notes form a reasonable cluster
 test('TEST 8: Sticky notes form a reasonable cluster', () => {
   const model = {
     board: {
@@ -225,6 +227,7 @@ test('TEST 8: Sticky notes form a reasonable cluster', () => {
   assert.ok(p1.position.x < p2.position.x);
 });
 
+// TEST 9: Standalone text does not automatically become a vertical column
 test('TEST 9: Standalone text does not automatically become a vertical column', () => {
   const model = {
     board: {
@@ -357,6 +360,7 @@ test('TEST 17: 40 mixed objects do not collapse into a narrow column (width >= 8
   assert.ok(proposal.metadata.diagnostics.columns >= 3);
 });
 
+
 test('TEST 18: Page fits content width and never exceeds the max page width', () => {
   const model = {
     board: {
@@ -387,6 +391,7 @@ test('TEST 19: Pathological aspect ratios trigger horizontal redistribution', ()
   assert.ok(proposal.metadata.diagnostics.horizontalRedistributions > 0);
 });
 
+// TEST 20: Output is deterministic
 test('TEST 20: Output is deterministic', () => {
   const model = {
     board: {
@@ -465,6 +470,7 @@ test('TEST 23: Real messy board produces a spacious landscape notebook page (asp
   const contentRight = Math.max(...proposal.placements.map((p) => p.bounds.x + p.bounds.width));
   assert.ok(proposal.canvasBounds.x + proposal.canvasBounds.width >= contentRight); 
   assert.ok(proposal.canvasBounds.width <= 1400);
+  
   assert.ok(proposal.metadata.diagnostics.aspectRatio >= 1.0);
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
   assert.deepEqual(proposal.metadata.diagnostics.orphanConnectors, []);
