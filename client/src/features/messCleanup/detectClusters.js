@@ -26,6 +26,10 @@ const distanceBetween = (first, second) => {
 
 const isSticky = (object) => object.metadata?.isStickyNote === true;
 
+const getObjectColor = (object) => object.metadata?.noteColor || object.visual?.fill || null;
+
+const DEFAULT_YELLOW_NOTE_COLORS = new Set(['#fff3a0', '#ffff00', '#fef08a', '#ffff80']);
+
 export const detectSpatialClusters = (objects, threshold = DEFAULT_SPATIAL_THRESHOLD) => {
   const sortedObjects = [...objects].sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
   const adjacency = new Map(sortedObjects.map((object) => [object.id, new Set()]));
@@ -62,15 +66,27 @@ export const detectSpatialClusters = (objects, threshold = DEFAULT_SPATIAL_THRES
       });
     }
 
-    const memberObjects = members.map((id) => sortedObjects.find((item) => item.id === id));
+    const memberObjects = members.map((id) => sortedObjects.find((item) => item.id === id)).filter(Boolean);
     const stickyCount = memberObjects.filter(isSticky).length;
+    const colors = memberObjects.map(getObjectColor).filter(Boolean);
+    const uniqueColors = new Set(colors);
+    const hasColorMatch = colors.length >= 2 && uniqueColors.size === 1;
+
     const evidence = ['spatial-cluster'];
     if (stickyCount >= 2) evidence.push('sticky-note-group');
+    if (hasColorMatch) evidence.push('color-match');
+
+    const firstColor = colors[0] ? String(colors[0]).toLowerCase() : '';
+    const isDefaultYellow = DEFAULT_YELLOW_NOTE_COLORS.has(firstColor);
+
+    let strength = 'weak';
+    if (stickyCount >= 2 && hasColorMatch && !isDefaultYellow) strength = 'strong';
+    else if (stickyCount >= 2 || hasColorMatch) strength = 'medium';
 
     clusters.push({
       objectIds: members.sort(),
       evidence,
-      strength: stickyCount >= 2 ? 'medium' : 'weak',
+      strength,
       isCandidate: members.length > 1
     });
   });

@@ -17,6 +17,9 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || 'dummy_google_client_id',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || 'dummy_google_client_secret',
   googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/v1/auth/google/callback',
+  nvidiaApiKey: process.env.NVIDIA_API_KEY || '',
+  nvidiaApiUrl: process.env.NVIDIA_API_URL || 'https://integrate.api.nvidia.com/v1/chat/completions',
+  nemotronModel: process.env.NEMOTRON_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 };

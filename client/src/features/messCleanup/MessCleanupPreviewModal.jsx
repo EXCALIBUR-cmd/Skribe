@@ -31,7 +31,7 @@ const getContentStyle = (object, bounds, renderBounds, scale, padding) => {
     top: `${(top - renderBounds.y) * scale + padding}px`,
     width: `${object.size.width * scale}px`,
     height: `${object.size.height * scale}px`,
-    transform: `rotate(${object.rotation || 0}deg) scale(${object.scale?.x || 1}, ${object.scale?.y || 1})`,
+    transform: `rotate(${object.rotation || 0}deg)`,
     transformOrigin: object.anchor === 'center' ? 'center center' : 'left top'
   };
 };
@@ -71,12 +71,13 @@ export const MessCleanupPreviewModal = ({
     y: (point.y - renderBounds.y) * scale + padding
   });
 
-  const renderObject = (object) => {
+  const renderObject = (object, index) => {
     if (object.type === 'connector' || object.type === 'line' || object.type === 'stroke') return null;
+    const uniqueKey = `${object.type}_${object.originalObjectId || 'item'}_${index}`;
     if (object.type === 'text') {
       return (
         <div
-          key={object.originalObjectId}
+          key={uniqueKey}
           data-original-object-id={object.originalObjectId}
           className="absolute overflow-hidden rounded px-1 text-center font-semibold text-slate-800"
           style={{
@@ -95,7 +96,7 @@ export const MessCleanupPreviewModal = ({
     if (object.type === 'image') {
       return (
         <div
-          key={object.originalObjectId}
+          key={uniqueKey}
           data-original-object-id={object.originalObjectId}
           className="absolute flex items-center justify-center rounded border-2 border-dashed border-slate-400 bg-slate-100 text-center text-[10px] text-slate-500"
           style={getContentStyle(object, renderBounds, renderBounds, scale, padding)}
@@ -109,7 +110,7 @@ export const MessCleanupPreviewModal = ({
 
     return (
       <div
-        key={object.originalObjectId}
+        key={uniqueKey}
         data-original-object-id={object.originalObjectId}
         className="absolute border-2 border-slate-700/70 bg-sky-200/80 shadow-sm"
         style={{
@@ -147,7 +148,7 @@ export const MessCleanupPreviewModal = ({
             <div className="flex min-h-80 items-center justify-center">
               <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-white shadow-inner" style={{ width: `${contentWidth}px`, height: `${contentHeight}px` }}>
                 <svg className="absolute inset-0" width={contentWidth} height={contentHeight} aria-hidden="true">
-                  {renderModel.objects.filter((object) => object.type === 'connector').map((connector) => {
+                  {renderModel.objects.filter((object) => object.type === 'connector').map((connector, idx) => {
                     const sourceId = connector.relationshipMetadata.sourceShapeId;
                     const targetId = connector.relationshipMetadata.targetShapeId;
                     const source = placementById.get(sourceId);
@@ -155,12 +156,12 @@ export const MessCleanupPreviewModal = ({
                     if (!source || !target) return null;
                     const start = mapPoint(source.position);
                     const end = mapPoint(target.position);
-                    return <line key={connector.originalObjectId} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#334155" strokeWidth="2" markerEnd="url(#mess-cleanup-arrow)" />;
+                    return <line key={`conn_${connector.originalObjectId || 'c'}_${idx}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#334155" strokeWidth="2" markerEnd="url(#mess-cleanup-arrow)" />;
                   })}
-                  {renderModel.objects.filter((object) => object.type === 'line' || object.type === 'stroke').map((line) => {
+                  {renderModel.objects.filter((object) => object.type === 'line' || object.type === 'stroke').map((line, idx) => {
                     const start = mapPoint({ x: line.bounds.x, y: line.bounds.y + line.bounds.height / 2 });
                     const end = mapPoint({ x: line.bounds.x + line.bounds.width, y: line.bounds.y + line.bounds.height / 2 });
-                    return <line key={line.originalObjectId} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#64748b" strokeWidth="2" strokeDasharray={line.type === 'stroke' ? '5 4' : undefined} />;
+                    return <line key={`line_${line.originalObjectId || 'l'}_${idx}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#64748b" strokeWidth="2" strokeDasharray={line.type === 'stroke' ? '5 4' : undefined} />;
                   })}
                   <defs>
                     <marker id="mess-cleanup-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">

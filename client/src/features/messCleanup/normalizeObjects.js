@@ -13,6 +13,13 @@ const getNumber = (value, fallback = 0) => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
 
+const getColorString = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value.color) return String(value.color);
+  return null;
+};
+
 const getMetadata = (object, semanticType) => {
   const metadata = cloneJsonValue(object.metadata);
   const result = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
@@ -37,6 +44,8 @@ const getVectorSummary = (object) => {
   ['color', 'width', 'opacity', 'style'].forEach((property) => {
     if (vectorData[property] !== undefined) summary[property] = vectorData[property];
   });
+  if (object.stroke !== undefined) summary.stroke = getColorString(object.stroke);
+  if (object.strokeWidth !== undefined) summary.strokeWidth = getNumber(object.strokeWidth);
   return Object.keys(summary).length > 0 ? summary : undefined;
 };
 
@@ -60,8 +69,15 @@ const getLineGeometry = (object) => {
   };
 };
 
-export const normalizeObject = (object) => {
+export const normalizeObject = (object, zIndex = 0) => {
   const semanticType = getSemanticType(object);
+  const width = getNumber(object.width);
+  const height = getNumber(object.height);
+  const scaleX = getNumber(object.scaleX, 1);
+  const scaleY = getNumber(object.scaleY, 1);
+  const left = getNumber(object.left);
+  const top = getNumber(object.top);
+
   const normalized = {
     id: object.id,
     elementId: object.elementId,
@@ -69,18 +85,23 @@ export const normalizeObject = (object) => {
     type: semanticType,
     text: isTextObject(object) ? String(object.text || '') : null,
     position: {
-      x: getNumber(object.left),
-      y: getNumber(object.top)
+      x: left,
+      y: top
     },
     size: {
-      width: getNumber(object.width),
-      height: getNumber(object.height)
+      width,
+      height
     },
     rotation: getNumber(object.angle),
     scale: {
-      x: getNumber(object.scaleX, 1),
-      y: getNumber(object.scaleY, 1)
+      x: scaleX,
+      y: scaleY
     },
+    center: {
+      x: left + (width * scaleX) / 2,
+      y: top + (height * scaleY) / 2
+    },
+    zIndex: getNumber(zIndex, 0),
     relationshipMetadata: {
       attachedTextId: object.attachedTextId ?? null,
       parentShapeId: object.parentShapeId ?? null,
@@ -88,6 +109,12 @@ export const normalizeObject = (object) => {
       targetShapeId: object.targetShapeId ?? null
     },
     relationships: [],
+    visual: {
+      fill: getColorString(object.fill),
+      stroke: getColorString(object.stroke),
+      strokeWidth: object.strokeWidth !== undefined && object.strokeWidth !== null ? getNumber(object.strokeWidth) : null,
+      opacity: object.opacity !== undefined && object.opacity !== null ? getNumber(object.opacity, 1) : 1
+    },
     metadata: getMetadata(object, semanticType)
   };
 
@@ -103,7 +130,11 @@ export const normalizeObject = (object) => {
     normalized.style = {
       fontSize: getNumber(object.fontSize),
       fontFamily: object.fontFamily || null,
-      textAlign: object.textAlign || null
+      fontWeight: object.fontWeight ? String(object.fontWeight) : null,
+      fontStyle: object.fontStyle ? String(object.fontStyle) : null,
+      textAlign: object.textAlign ? String(object.textAlign) : null,
+      lineHeight: object.lineHeight !== undefined && object.lineHeight !== null ? getNumber(object.lineHeight, 1) : null,
+      color: getColorString(object.fill) || (object.color ? String(object.color) : null)
     };
   }
 
@@ -117,7 +148,9 @@ export const normalizeObject = (object) => {
     normalized.connector = {
       sourceShapeId: object.sourceShapeId ?? null,
       targetShapeId: object.targetShapeId ?? null,
-      connectorType: object.connectorType || 'straight'
+      connectorType: object.connectorType || 'straight',
+      stroke: getColorString(object.stroke),
+      strokeWidth: object.strokeWidth !== undefined && object.strokeWidth !== null ? getNumber(object.strokeWidth) : null
     };
   }
 

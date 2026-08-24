@@ -6,7 +6,7 @@ export const extractWorkspaceModel = (canvas) => {
   const fabricObjects = canvas && typeof canvas.getObjects === 'function' ? canvas.getObjects() : [];
   const normalizedObjects = fabricObjects
     .filter((object) => !isTemporaryObject(object))
-    .map(normalizeObject);
+    .map((object, index) => normalizeObject(object, index));
 
   return {
     version: 1,

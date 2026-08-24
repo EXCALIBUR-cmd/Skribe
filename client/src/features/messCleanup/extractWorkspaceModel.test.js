@@ -125,7 +125,9 @@ test('preserves note metadata and connector endpoint relationships', () => {
   assert.deepEqual(connectorModel.connector, {
     sourceShapeId: 'shape_note',
     targetShapeId: 'shape_2',
-    connectorType: 'elbow'
+    connectorType: 'elbow',
+    stroke: null,
+    strokeWidth: null
   });
   assert.deepEqual(connectorModel.relationships, [
     { type: 'connects_from', targetId: 'shape_note' },

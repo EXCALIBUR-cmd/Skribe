@@ -14,6 +14,12 @@
     "test:mess-cleanup-bulk-apply": "node --test src/features/messCleanup/fabricCanvasBulkApply.test.js",
     "test:mess-cleanup-batch-collab": "node --test src/features/messCleanup/batchCollaboration.test.js",
     "test:mess-cleanup-ui": "node --test src/features/messCleanup/messCleanupUiIntegration.test.js",
+    "test:mess-cleanup-extraction": "node --test src/features/messCleanup/extractWorkspaceModelEnrichment.test.js",
+    "test:mess-cleanup-hierarchy": "node --test src/features/messCleanup/documentHierarchy.test.js",
+    "test:mess-cleanup-notebook": "node --test src/features/messCleanup/notebookComposition.test.js",
+    "test:mess-cleanup-validator": "node --test src/features/messCleanup/validateOrganizationPlan.test.js",
+    "test:mess-cleanup-v2": "node --test src/features/messCleanup/organizationPlanV2.test.js",
+    "test:mess-cleanup-omni-client": "node --test src/features/messCleanup/omniClient.test.js",
     "test:shape-text-relationship": "node --test src/features/messCleanup/shapeTextRelationship.test.js",
     "lint": "oxlint",
     "preview": "vite preview"

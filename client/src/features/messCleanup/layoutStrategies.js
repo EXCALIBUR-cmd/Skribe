@@ -9,7 +9,12 @@ export const getObjectDimensions = (object = {}) => ({
   height: Math.max(1, Math.abs((object.size?.height || LAYOUT_CONSTANTS.DEFAULT_HEIGHT) * (object.scale?.y || 1)))
 });
 
-export const getAnchor = (object = {}) => TEXT_TYPES.has(object.type) ? 'top-left' : 'center';
+export const getAnchor = (object = {}) => {
+  if (object.relationshipMetadata?.parentShapeId || object.relationshipMetadata?.attachedTextId) {
+    return 'center';
+  }
+  return TEXT_TYPES.has(object.type) ? 'top-left' : 'center';
+};
 
 const getRotatedSize = (width, height, rotation = 0) => {
   const radians = (rotation * Math.PI) / 180;
@@ -42,6 +47,8 @@ export const createObjectPlacement = (object, position, unitId, objectMap) => {
   return {
     objectId: object.id,
     unitId,
+    type: source.type || 'shape',
+    relationshipMetadata: source.relationshipMetadata || {},
     position: { x: position.x, y: position.y },
     rotation,
     scale: {
@@ -124,6 +131,27 @@ export const positionUnitsInGrid = (units, objectMap, origin, columns = LAYOUT_C
     const x = origin.x + columnOffsets[column] + columnWidths[column] / 2;
     const y = origin.y + rowOffsets[row] + rowHeights[row] / 2;
     placements.push(createUnitPlacement(unit, { x, y }, objectMap));
+  });
+
+  return { placements, fallback: null };
+};
+
+export const positionUnitsVertically = (units, objectMap, origin, gap = LAYOUT_CONSTANTS.CONTENT_GAP) => {
+  const placements = [];
+  let currentY = origin.y;
+
+  units.forEach((unit) => {
+    const representative = getRepresentative(unit, objectMap);
+    const size = getObjectDimensions(representative);
+    const anchor = getAnchor(representative);
+
+    const x = anchor === 'top-left' ? origin.x : origin.x + size.width / 2;
+    const y = anchor === 'top-left' ? currentY : currentY + size.height / 2;
+
+    const unitPlacement = createUnitPlacement(unit, { x, y }, objectMap);
+    placements.push(unitPlacement);
+
+    currentY = unitPlacement.bounds.y + unitPlacement.bounds.height + gap;
   });
 
   return { placements, fallback: null };
@@ -223,17 +251,31 @@ export const positionDiagramUnits = (section, units, objectMap, unitsByObjectId,
     levelGroups.get(level).push(unit);
   });
 
+  // Calculate max node dimensions across ALL levels for uniform spacing
+  let maxNodeWidth = 0;
+  let maxNodeHeight = 0;
+  nodeUnits.forEach((unit) => {
+    const representative = getRepresentative(unit, objectMap);
+    const size = getObjectDimensions(representative);
+    maxNodeWidth = Math.max(maxNodeWidth, size.width);
+    maxNodeHeight = Math.max(maxNodeHeight, size.height);
+  });
+
   const placements = [];
-  [...levelGroups.keys()].sort((a, b) => a - b).forEach((level) => {
+  const sortedLevels = [...levelGroups.keys()].sort((a, b) => a - b);
+  sortedLevels.forEach((level) => {
     const group = levelGroups.get(level).sort((a, b) => a.id.localeCompare(b.id));
+    const groupHeight = group.length * (maxNodeHeight + LAYOUT_CONSTANTS.ROW_GAP) - LAYOUT_CONSTANTS.ROW_GAP;
     group.forEach((unit, index) => {
       const representative = getRepresentative(unit, objectMap);
       const size = getObjectDimensions(representative);
-      const primary = level * (size.width + LAYOUT_CONSTANTS.OBJECT_GAP);
-      const secondary = index * (size.height + LAYOUT_CONSTANTS.ROW_GAP);
+      const primary = level * (maxNodeWidth + LAYOUT_CONSTANTS.OBJECT_GAP);
+      // Center-align multi-node levels
+      const totalSecondary = group.length * (maxNodeHeight + LAYOUT_CONSTANTS.ROW_GAP) - LAYOUT_CONSTANTS.ROW_GAP;
+      const secondaryOffset = index * (maxNodeHeight + LAYOUT_CONSTANTS.ROW_GAP) - totalSecondary / 2 + maxNodeHeight / 2;
       const position = vertical
-        ? { x: origin.x + secondary + size.width / 2, y: origin.y + primary + size.height / 2 }
-        : { x: origin.x + primary + size.width / 2, y: origin.y + secondary + size.height / 2 };
+        ? { x: origin.x + secondaryOffset + size.width / 2, y: origin.y + primary + size.height / 2 }
+        : { x: origin.x + primary + size.width / 2, y: origin.y + secondaryOffset + size.height / 2 };
       placements.push(createUnitPlacement(unit, position, objectMap));
     });
   });
@@ -259,4 +301,98 @@ export const positionDiagramUnits = (section, units, objectMap, unitsByObjectId,
     });
 
   return { placements, fallback: null, edges, direction: vertical ? 'vertical' : 'horizontal' };
+};
+
+/**
+ * Detects axis-aligned bounding-box collisions between placements.
+ * Returns an array of [indexA, indexB] pairs.
+ */
+export const detectCollisions = (placements, annotations = []) => {
+  const annotationTargetMap = new Map();
+  if (Array.isArray(annotations)) {
+    annotations.forEach((ann) => {
+      if (ann && ann.objectId && Array.isArray(ann.targetObjectIds)) {
+        if (!annotationTargetMap.has(ann.objectId)) {
+          annotationTargetMap.set(ann.objectId, new Set());
+        }
+        ann.targetObjectIds.forEach((tid) => annotationTargetMap.get(ann.objectId).add(tid));
+      }
+    });
+  }
+
+  const collisions = [];
+  for (let i = 0; i < placements.length; i++) {
+    const a = placements[i].bounds;
+    if (!a) continue;
+    const idA = placements[i].objectId;
+    for (let j = i + 1; j < placements.length; j++) {
+      const b = placements[j].bounds;
+      if (!b) continue;
+      const idB = placements[j].objectId;
+
+      // Skip if same unit (linked shape+text overlap is intentional)
+      if (placements[i].unitId && placements[i].unitId === placements[j].unitId) continue;
+
+      // Skip if one is an annotation targeting the other
+      if (annotationTargetMap.get(idA)?.has(idB) || annotationTargetMap.get(idB)?.has(idA)) continue;
+
+      // Skip if one is a connector attached to the other shape
+      const sourceA = placements[i].relationshipMetadata?.sourceShapeId;
+      const targetA = placements[i].relationshipMetadata?.targetShapeId;
+      const sourceB = placements[j].relationshipMetadata?.sourceShapeId;
+      const targetB = placements[j].relationshipMetadata?.targetShapeId;
+      if (sourceA === idB || targetA === idB || sourceB === idA || targetB === idA) continue;
+
+      if (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      ) {
+        collisions.push([i, j]);
+      }
+    }
+  }
+  return collisions;
+};
+
+/**
+ * Resolves collisions by nudging the second object in each pair.
+ * Deterministic: sorted by objectId. Maximum MAX_COLLISION_PASSES iterations.
+ */
+export const resolveCollisions = (placements, annotations = []) => {
+  const nudge = LAYOUT_CONSTANTS.COLLISION_NUDGE;
+  const maxPasses = LAYOUT_CONSTANTS.MAX_COLLISION_PASSES;
+  let totalResolved = 0;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const collisions = detectCollisions(placements, annotations);
+    if (collisions.length === 0) break;
+
+    collisions.forEach(([i, j]) => {
+      const a = placements[i].bounds;
+      const b = placements[j].bounds;
+      if (!a || !b) return;
+
+      // Calculate minimum displacement to separate
+      const overlapX = Math.min(a.x + a.width - b.x, b.x + b.width - a.x);
+      const overlapY = Math.min(a.y + a.height - b.y, b.y + b.height - a.y);
+
+      if (overlapX <= 0 || overlapY <= 0) return;
+
+      // Nudge along the axis with smaller overlap
+      if (overlapX < overlapY) {
+        const dx = (a.x + a.width / 2 < b.x + b.width / 2) ? overlapX + nudge : -(overlapX + nudge);
+        placements[j].position.x += dx;
+        placements[j].bounds.x += dx;
+      } else {
+        const dy = (a.y + a.height / 2 < b.y + b.height / 2) ? overlapY + nudge : -(overlapY + nudge);
+        placements[j].position.y += dy;
+        placements[j].bounds.y += dy;
+      }
+      totalResolved++;
+    });
+  }
+
+  return totalResolved;
 };

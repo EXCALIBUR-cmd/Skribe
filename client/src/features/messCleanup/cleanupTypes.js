@@ -9,11 +9,11 @@ export const isTemporaryObject = (object) => (
 
 export const getSemanticType = (object) => {
   if (isTextObject(object)) return 'text';
-  if (object?.isConnector) return 'connector';
-  if (object?.isVectorStroke) return 'stroke';
+  if (object?.isConnector || object?.type === 'connector') return 'connector';
+  if (object?.isVectorStroke || object?.type === 'stroke') return 'stroke';
   if (object?.isSkribeLine || object?.skribeLine || object?.isStraightLine || object?.type === 'line') return 'line';
   if (object?.isStickyNote || object?.isChecklistNote || object?.isCalloutNote) return 'note';
-  if (['rect', 'circle', 'triangle', 'polygon', 'ellipse', 'path'].includes(object?.type)) return 'shape';
+  if (['rect', 'circle', 'triangle', 'polygon', 'ellipse', 'path', 'shape'].includes(object?.type)) return 'shape';
   if (object?.type === 'image') return 'image';
   return 'unsupported';
 };

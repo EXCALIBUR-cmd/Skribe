@@ -680,7 +680,7 @@ export const MainCanvasPage = () => {
     }
   ];
 
-  const handleSkribeFeatureClick = (feature) => {
+  const handleSkribeFeatureClick = async (feature) => {
     if (feature.id !== 'mess-cleanup') return;
 
     setMessCleanupPreview({
@@ -696,7 +696,19 @@ export const MainCanvasPage = () => {
     try {
       const canvas = fabricCanvasRef.current?.getCanvas();
       const workspaceModel = extractWorkspaceModel(canvas);
-      const organizationPlan = analyzeWorkspace(workspaceModel);
+      let screenshot = null;
+      if (canvas && typeof canvas.toDataURL === 'function') {
+        const width = canvas.width || 800;
+        const height = canvas.height || 600;
+        const multiplier = Math.min(1, Math.max(0.2, 800 / Math.max(width, height, 1)));
+        screenshot = canvas.toDataURL({
+          format: 'jpeg',
+          quality: 0.7,
+          multiplier
+        });
+      }
+
+      const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot);
       const layoutProposal = createLayoutProposal(organizationPlan, workspaceModel);
 
       setMessCleanupPreview({
@@ -710,6 +722,7 @@ export const MainCanvasPage = () => {
       });
     } catch (error) {
       console.error('[MessCleanup] Preview preparation failed:', error);
+      const errorMessage = error?.message || "Couldn't prepare the cleanup preview. Your board hasn't been changed.";
       setMessCleanupPreview({
         isOpen: true,
         workspaceModel: null,
@@ -717,7 +730,7 @@ export const MainCanvasPage = () => {
         layoutProposal: null,
         loading: false,
         isApplying: false,
-        error: "Couldn't prepare the cleanup preview. Your board hasn't been changed."
+        error: errorMessage
       });
     }
   };
