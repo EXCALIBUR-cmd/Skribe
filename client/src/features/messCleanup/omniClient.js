@@ -24,7 +24,7 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
     const response = await client.post('/mess-cleanup/analyze', {
       workspaceModel,
       image
-    }, { timeout: 90000 });
+    }, { timeout: 15000 });
 
     console.log(`[MessCleanup Diagnostic] Client request completed in ${Date.now() - clientReqStart}ms`);
     console.log(`[Nemotron Client Diagnostic] Response top-level keys: ${Object.keys(response || {}).join(', ')}`);
@@ -38,7 +38,6 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
       throw error;
     }
 
-    // Validation: groups (SemanticScene) OR document.sections (v2) OR sections (v1)
     const groupsOrSections = plan.groups || plan.document?.sections || plan.sections;
     if (!Array.isArray(groupsOrSections)) {
       console.log('[Nemotron Client Diagnostic] Validation failed: no groups or sections array in plan');

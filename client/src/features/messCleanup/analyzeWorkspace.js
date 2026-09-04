@@ -31,30 +31,7 @@ const expandClusterToUnits = (cluster, unitsByObjectId) => {
   return [...expanded];
 };
 
-/**
- * Analyzes a workspace to produce an OrganizationPlan.
- *
- * PRIMARY PATH (with screenshot):
- *   WorkspaceModel + Screenshot → Nemotron Omni → validateOrganizationPlan → OrganizationPlan v2
- *   Nemotron is the sole semantic source of truth.
- *
- * @legacy FALLBACK PATH (without screenshot):
- *   WorkspaceModel → heuristic analysis (classifySections, detectClusters) → OrganizationPlan v1
- *   This path exists for backward compatibility when no screenshot is available.
- *   It will be removed in a future phase once Nemotron is the only analysis path.
- *   DO NOT merge heuristic output with Nemotron output — there is ONE source of truth.
- */
-export const analyzeWorkspace = (workspaceModel, screenshot = null) => {
-  // PRIMARY PATH: Nemotron-driven semantic analysis
-  if (screenshot && typeof screenshot === 'string' && screenshot.trim()) {
-    return (async () => {
-      const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot);
-      return validateOrganizationPlan(workspaceModel, rawPlan);
-    })();
-  }
-
-  // @legacy FALLBACK: Heuristic analysis (no screenshot available)
-  console.warn('[MessCleanup] Using legacy heuristic analysis (no screenshot available). Nemotron is the primary semantic engine.');
+export const runLocalSemanticAnalysis = (workspaceModel) => {
   const objects = [...(workspaceModel?.board?.objects || [])]
     .filter((object) => object && object.id)
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -385,6 +362,24 @@ export const analyzeWorkspace = (workspaceModel, screenshot = null) => {
     annotations: annotationsResult,
     unassignedObjectIds
   };
+};
+
+export const analyzeWorkspace = (workspaceModel, screenshot = null) => {
+  if (screenshot && typeof screenshot === 'string' && screenshot.trim()) {
+    return (async () => {
+      try {
+        const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot);
+        return validateOrganizationPlan(workspaceModel, rawPlan);
+      } catch (err) {
+        console.warn(
+          `[MessCleanup] External AI semantic analysis unavailable (${err.message}). Falling back gracefully to deterministic local semantic engine.`
+        );
+        return runLocalSemanticAnalysis(workspaceModel);
+      }
+    })();
+  }
+
+  return runLocalSemanticAnalysis(workspaceModel);
 };
 
 export default analyzeWorkspace;

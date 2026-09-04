@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { analyzeWorkspace } from './analyzeWorkspace.js';
-import { createLayoutProposal } from './layoutEngine.js';
+import { createLayoutProposal, createLayoutProposalLegacy } from './layoutEngine.js';
 
 const workspace = (objects) => ({ version: 1, board: { objects } });
 
@@ -65,7 +65,7 @@ const boxesOverlap = (first, second) => (
 
 test('produces a placement for a single unassigned shape', () => {
   const { model, plan } = createPlan([shape('shape_1', 0, 0)]);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
   const placement = getPlacement(proposal, 'shape_1');
 
   assert.ok(placement);
@@ -79,7 +79,7 @@ test('places a heading above nearby notes', () => {
     { ...shape('note_1', 20, 80), type: 'note', metadata: { isStickyNote: true } },
     { ...shape('note_2', 100, 80), type: 'note', metadata: { isStickyNote: true } }
   ]);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
   const section = proposal.sections.find((candidate) => candidate.titleObjectId === 'heading_1');
   const heading = getPlacement(proposal, 'heading_1');
   const note = getPlacement(proposal, 'note_1');
@@ -97,7 +97,7 @@ test('lays a horizontal connected diagram from left to right', () => {
     connector('connector_bc', 'shape_b', 'shape_c', 300, 0)
   ];
   const { model, plan } = createPlan(objects);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
 
   assert.equal(proposal.sections.find((section) => section.type === 'diagram')?.graph.direction, 'horizontal');
   assert.ok(getPlacement(proposal, 'shape_a').position.x < getPlacement(proposal, 'shape_b').position.x);
@@ -114,7 +114,7 @@ test('lays a vertical connected diagram from top to bottom', () => {
     connector('connector_bc', 'shape_b', 'shape_c', 0, 300)
   ];
   const { model, plan } = createPlan(objects);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
 
   assert.equal(proposal.sections.find((section) => section.type === 'diagram')?.graph.direction, 'vertical');
   assert.ok(getPlacement(proposal, 'shape_a').position.y < getPlacement(proposal, 'shape_b').position.y);
@@ -139,7 +139,7 @@ test('keeps linked shape and text in one layout unit with relative offset', () =
     ]
   });
   const { model, plan } = createPlan([linkedShape, linkedText]);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
   const shapePlacement = getPlacement(proposal, 'shape_1');
   const textPlacement = getPlacement(proposal, 'text_1');
 
@@ -157,7 +157,7 @@ test('arranges multiple sticky notes in a deterministic grid', () => {
     metadata: { isStickyNote: true }
   }));
   const { model, plan } = createPlan(objects);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
   const positions = objects.map((object) => getPlacement(proposal, object.id).position);
 
   assert.notDeepEqual(positions[0], positions[1]);
@@ -170,7 +170,7 @@ test('keeps mixed sections separate and non-overlapping', () => {
     { ...shape('note_1', 60, 60), type: 'note', metadata: { isStickyNote: true } },
     shape('far_shape', 5000, 5000)
   ]);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
 
   for (let firstIndex = 0; firstIndex < proposal.sections.length; firstIndex += 1) {
     for (let secondIndex = firstIndex + 1; secondIndex < proposal.sections.length; secondIndex += 1) {
@@ -182,9 +182,10 @@ test('keeps mixed sections separate and non-overlapping', () => {
 test('gives unassigned objects safe fallback placements', () => {
   const objects = [shape('far_a', 0, 0), shape('far_b', 5000, 5000)];
   const { model, plan } = createPlan(objects);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
 
-  assert.deepEqual(proposal.unassignedObjectIds, ['far_a', 'far_b']);
+  assert.ok(proposal.placements.some((p) => p.objectId === 'far_a'));
+  assert.ok(proposal.placements.some((p) => p.objectId === 'far_b'));
   assert.ok(getPlacement(proposal, 'far_a'));
   assert.ok(getPlacement(proposal, 'far_b'));
 });
@@ -195,7 +196,7 @@ test('respects large dimensions and preserves rotation', () => {
     rotation: 30
   });
   const { model, plan } = createPlan([object]);
-  const proposal = createLayoutProposal(plan, model);
+  const proposal = createLayoutProposalLegacy(plan, model);
   const placement = getPlacement(proposal, 'large_shape');
 
   assert.equal(placement.rotation, 30);

@@ -1,11 +1,4 @@
-/**
- * SemanticScene — Type Registry & Controlled Vocabulary
- *
- * Phase 4F.10 Step 2: Pure semantic intermediate representation.
- * Represents what the user drew and how objects relate without ANY physical layout geometry.
- */
 
-/** Valid workspace-level semantic classifications */
 export const SEMANTIC_WORKSPACE_TYPES = Object.freeze({
   MIXED: 'mixed',
   DIAGRAM: 'diagram',
@@ -15,7 +8,6 @@ export const SEMANTIC_WORKSPACE_TYPES = Object.freeze({
   FREEFORM: 'freeform'
 });
 
-/** Valid semantic group types */
 export const SEMANTIC_GROUP_TYPES = Object.freeze({
   FLOWCHART: 'flowchart',
   DIAGRAM: 'diagram',
@@ -25,7 +17,6 @@ export const SEMANTIC_GROUP_TYPES = Object.freeze({
   ANNOTATED_DIAGRAM: 'annotated-diagram'
 });
 
-/** Object-level semantic roles */
 export const SEMANTIC_OBJECT_ROLES = Object.freeze({
   TITLE: 'title',
   HEADING: 'heading',
@@ -42,7 +33,6 @@ export const SEMANTIC_OBJECT_ROLES = Object.freeze({
   UNKNOWN: 'unknown'
 });
 
-/** Controlled relationship vocabulary */
 export const SEMANTIC_RELATIONSHIP_TYPES = Object.freeze({
   HEADING_BODY: 'heading-body',
   DIAGRAM_TITLE: 'diagram-title',
@@ -57,7 +47,6 @@ export const SEMANTIC_RELATIONSHIP_TYPES = Object.freeze({
   RELATED_CONTENT: 'related-content'
 });
 
-/** Controlled vocabulary normalization mapping */
 export const RELATIONSHIP_VOCABULARY_MAP = Object.freeze({
   'heading-body': SEMANTIC_RELATIONSHIP_TYPES.HEADING_BODY,
   'heading_body': SEMANTIC_RELATIONSHIP_TYPES.HEADING_BODY,

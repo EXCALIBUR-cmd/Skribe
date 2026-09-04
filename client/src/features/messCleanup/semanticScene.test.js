@@ -58,7 +58,6 @@ const stroke = (id, x = 50, y = 50, extra = {}) => ({
   ...extra
 });
 
-// TEST 1: Basic mixed workspace produces valid SemanticScene
 test('TEST 1: Basic mixed workspace -> valid SemanticScene', () => {
   const model = {
     version: 1,
@@ -89,7 +88,6 @@ test('TEST 1: Basic mixed workspace -> valid SemanticScene', () => {
   assert.equal(scene.groups.length, 2);
 });
 
-// TEST 2: Shape + attached text remain one semantic unit and in same group
 test('TEST 2: Shape + attached text remain in same semantic group', () => {
   const model = {
     version: 1,
@@ -101,7 +99,6 @@ test('TEST 2: Shape + attached text remain in same semantic group', () => {
     }
   };
 
-  // Nemotron incorrectly places them in separate groups
   const rawPlan = {
     groups: [
       { id: 'g_shape', type: 'concept', objectIds: ['s1'] },
@@ -123,7 +120,6 @@ test('TEST 2: Shape + attached text remain in same semantic group', () => {
   assert.deepEqual(attachedRel.targetObjectIds, ['t1']);
 });
 
-// TEST 3: Recreated shape text relationship is preserved
 test('TEST 3: Recreated shape text relationship is preserved', () => {
   const model = {
     version: 1,
@@ -142,7 +138,6 @@ test('TEST 3: Recreated shape text relationship is preserved', () => {
   assert.deepEqual(rel.targetObjectIds, ['txt_recreated']);
 });
 
-// TEST 4: Flowchart nodes + connectors remain connected
 test('TEST 4: Flowchart nodes + connectors remain connected', () => {
   const model = {
     version: 1,
@@ -172,7 +167,6 @@ test('TEST 4: Flowchart nodes + connectors remain connected', () => {
   assert.equal(valid, true);
 });
 
-// TEST 5: Sticky notes form semantic note groups
 test('TEST 5: Sticky notes form semantic note groups', () => {
   const model = {
     version: 1,
@@ -199,7 +193,6 @@ test('TEST 5: Sticky notes form semantic note groups', () => {
   assert.equal(noteGroup.objectIds.length, 3);
 });
 
-// TEST 6: Multiple sticky-note groups remain separate
 test('TEST 6: Multiple sticky-note groups remain separate', () => {
   const model = {
     version: 1,
@@ -225,7 +218,6 @@ test('TEST 6: Multiple sticky-note groups remain separate', () => {
   assert.deepEqual(scene.groups[1].objectIds, ['n3', 'n4']);
 });
 
-// TEST 7: Multi-stroke freehand drawing becomes one freeform group
 test('TEST 7: Multi-stroke freehand drawing becomes one freeform group', () => {
   const model = {
     version: 1,
@@ -251,7 +243,6 @@ test('TEST 7: Multi-stroke freehand drawing becomes one freeform group', () => {
   assert.equal(freeformGrp.objectIds.length, 3);
 });
 
-// TEST 8: Freehand annotation attaches to correct semantic target
 test('TEST 8: Freehand annotation attaches to correct semantic target', () => {
   const model = {
     version: 1,
@@ -275,7 +266,6 @@ test('TEST 8: Freehand annotation attaches to correct semantic target', () => {
   assert.deepEqual(scene.annotations[0].targetObjectIds, ['card_1']);
 });
 
-// TEST 9: Heading + body relationship is preserved
 test('TEST 9: Heading + body relationship is preserved', () => {
   const model = {
     version: 1,
@@ -300,7 +290,6 @@ test('TEST 9: Heading + body relationship is preserved', () => {
   assert.deepEqual(rel.targetObjectIds, ['b1']);
 });
 
-// TEST 10: Diagram + explanatory text relationship is preserved
 test('TEST 10: Diagram + explanatory text relationship is preserved', () => {
   const model = {
     version: 1,

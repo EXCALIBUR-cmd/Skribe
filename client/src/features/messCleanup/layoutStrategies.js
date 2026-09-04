@@ -251,7 +251,6 @@ export const positionDiagramUnits = (section, units, objectMap, unitsByObjectId,
     levelGroups.get(level).push(unit);
   });
 
-  // Calculate max node dimensions across ALL levels for uniform spacing
   let maxNodeWidth = 0;
   let maxNodeHeight = 0;
   nodeUnits.forEach((unit) => {
@@ -270,7 +269,6 @@ export const positionDiagramUnits = (section, units, objectMap, unitsByObjectId,
       const representative = getRepresentative(unit, objectMap);
       const size = getObjectDimensions(representative);
       const primary = level * (maxNodeWidth + LAYOUT_CONSTANTS.OBJECT_GAP);
-      // Center-align multi-node levels
       const totalSecondary = group.length * (maxNodeHeight + LAYOUT_CONSTANTS.ROW_GAP) - LAYOUT_CONSTANTS.ROW_GAP;
       const secondaryOffset = index * (maxNodeHeight + LAYOUT_CONSTANTS.ROW_GAP) - totalSecondary / 2 + maxNodeHeight / 2;
       const position = vertical
@@ -303,10 +301,6 @@ export const positionDiagramUnits = (section, units, objectMap, unitsByObjectId,
   return { placements, fallback: null, edges, direction: vertical ? 'vertical' : 'horizontal' };
 };
 
-/**
- * Detects axis-aligned bounding-box collisions between placements.
- * Returns an array of [indexA, indexB] pairs.
- */
 export const detectCollisions = (placements, annotations = []) => {
   const annotationTargetMap = new Map();
   if (Array.isArray(annotations)) {
@@ -330,13 +324,10 @@ export const detectCollisions = (placements, annotations = []) => {
       if (!b) continue;
       const idB = placements[j].objectId;
 
-      // Skip if same unit (linked shape+text overlap is intentional)
       if (placements[i].unitId && placements[i].unitId === placements[j].unitId) continue;
 
-      // Skip if one is an annotation targeting the other
       if (annotationTargetMap.get(idA)?.has(idB) || annotationTargetMap.get(idB)?.has(idA)) continue;
 
-      // Skip if one is a connector attached to the other shape
       const sourceA = placements[i].relationshipMetadata?.sourceShapeId;
       const targetA = placements[i].relationshipMetadata?.targetShapeId;
       const sourceB = placements[j].relationshipMetadata?.sourceShapeId;
@@ -356,10 +347,6 @@ export const detectCollisions = (placements, annotations = []) => {
   return collisions;
 };
 
-/**
- * Resolves collisions by nudging the second object in each pair.
- * Deterministic: sorted by objectId. Maximum MAX_COLLISION_PASSES iterations.
- */
 export const resolveCollisions = (placements, annotations = []) => {
   const nudge = LAYOUT_CONSTANTS.COLLISION_NUDGE;
   const maxPasses = LAYOUT_CONSTANTS.MAX_COLLISION_PASSES;
@@ -374,13 +361,11 @@ export const resolveCollisions = (placements, annotations = []) => {
       const b = placements[j].bounds;
       if (!a || !b) return;
 
-      // Calculate minimum displacement to separate
       const overlapX = Math.min(a.x + a.width - b.x, b.x + b.width - a.x);
       const overlapY = Math.min(a.y + a.height - b.y, b.y + b.height - a.y);
 
       if (overlapX <= 0 || overlapY <= 0) return;
 
-      // Nudge along the axis with smaller overlap
       if (overlapX < overlapY) {
         const dx = (a.x + a.width / 2 < b.x + b.width / 2) ? overlapX + nudge : -(overlapX + nudge);
         placements[j].position.x += dx;

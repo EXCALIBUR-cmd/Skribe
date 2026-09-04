@@ -13,7 +13,9 @@ import {
   detectCollisions,
   resolveCollisions
 } from './layoutStrategies.js';
-import { createNotebookLayoutProposal } from './notebookLayoutEngine.js';
+import { buildCleanupPlan } from './buildCleanupPlan.js';
+import { executeCleanupPlan } from './executeCleanupPlan.js';
+import { buildCleanupResult } from './buildCleanupResult.js';
 
 const sortIds = (ids) => [...new Set(ids)].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -52,16 +54,6 @@ const getObjectMap = (organizationPlan, workspaceModel) => {
   return objectMap;
 };
 
-/**
- * Reconstructs structural units from WorkspaceModel relationshipMetadata.
- * Used when OrganizationPlan v2 does not include structuralUnits (Nemotron path).
- *
- * Uses union-find to group objects linked via:
- * - attachedTextId / parentShapeId (shape-text pairs)
- * - shared elementId (same logical element)
- * - explicit relationships (contains_text, contained_by, shared_element)
- * - freehand stroke clustering (strokes belonging to same section or in spatial proximity)
- */
 const resolveStructuralUnits = (objectMap, organizationPlan = null) => {
   const ids = [...objectMap.keys()];
   const parent = new Map(ids.map((id) => [id, id]));
@@ -79,7 +71,6 @@ const resolveStructuralUnits = (objectMap, organizationPlan = null) => {
     if (firstRoot !== secondRoot) parent.set(secondRoot, firstRoot);
   };
 
-  // 1. Union linked shape-text and shared element IDs
   objectMap.forEach((object, objectId) => {
     if (!object) return;
 
@@ -109,7 +100,6 @@ const resolveStructuralUnits = (objectMap, organizationPlan = null) => {
     });
   });
 
-  // 2. Union freehand strokes that belong to the same section or spatial cluster
   const strokeIds = ids.filter((id) => objectMap.get(id)?.type === 'stroke');
   if (strokeIds.length > 1) {
     if (organizationPlan) {
@@ -122,7 +112,6 @@ const resolveStructuralUnits = (objectMap, organizationPlan = null) => {
       });
     }
 
-    // Spatial proximity clustering for strokes (within 250px)
     for (let i = 0; i < strokeIds.length; i++) {
       const objA = objectMap.get(strokeIds[i]);
       if (!objA?.position) continue;
@@ -440,8 +429,15 @@ const applyAnnotationProximity = (allPlacements, organizationPlan, objectMap) =>
   });
 };
 
-export const createLayoutProposal = (organizationPlan, workspaceModel = null) => {
-  return createNotebookLayoutProposal(organizationPlan, workspaceModel);
+export const createLayoutProposal = (organizationPlan, workspaceModel = null, options = {}) => {
+  const cleanupPlan = buildCleanupPlan(organizationPlan, workspaceModel, options);
+  const proposal = executeCleanupPlan(cleanupPlan, workspaceModel, options);
+  if (proposal && proposal.metadata) {
+    proposal.metadata.cleanupExecutionEngine = 'conservative';
+    proposal.metadata.cleanupPlan = cleanupPlan;
+    proposal.metadata.cleanupResult = buildCleanupResult(cleanupPlan, proposal, workspaceModel, options);
+  }
+  return proposal;
 };
 
 export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = null) => {
@@ -484,7 +480,6 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     ? [...planSections]
     : [...planSections].sort((a, b) => getSectionMinY(a) - getSectionMinY(b));
 
-  // Pass 1: Layout each section locally at origin (0, 0)
   const localSections = [];
   orderedSections.forEach((section) => {
     const sectionObjectIds = section.objectIds.filter((id) => !plannedObjectIds.has(id));
@@ -508,13 +503,11 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     layout.objectIds.forEach((objectId) => plannedObjectIds.add(objectId));
   });
 
-  // Pass 2: Shelf-packing 2D composition
   const sections = [];
   const rows = [];
 
   if (localSections.length > 0) {
     if (isDocumentWorkspace) {
-      // Document mode: single vertical flow
       let cursorY = startY;
       localSections.forEach((section) => {
         const dx = LAYOUT_CONSTANTS.DOCUMENT_MARGIN - section.bounds.x;
@@ -536,7 +529,6 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
       });
       rows.push(localSections);
     } else {
-      // Whiteboard / Mixed / Diagram / Notes mode: Multi-column shelf packing
       const totalWidth = localSections.reduce((sum, s) => sum + s.bounds.width, 0);
       const maxWidth = Math.max(...localSections.map((s) => s.bounds.width));
       const numSections = localSections.length;
@@ -598,7 +590,6 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     }
   }
 
-  // Unassigned objects / Outlier containment
   const unassignedObjectIds = sortIds((organizationPlan?.unassignedObjectIds || []).filter((id) => objectMap.has(id)));
   const unassignedUnits = structuralUnits.filter((unit) => unit.objectIds.some((id) => unassignedObjectIds.includes(id)));
   if (unassignedUnits.length > 0) {
@@ -636,7 +627,6 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     applyAnnotationProximity(allPlacements, organizationPlan, objectMap);
   }
 
-  // Collision detection and resolution
   const annotations = organizationPlan?.annotations || [];
   const collisionsBefore = detectCollisions(allPlacements, annotations).length;
   const collisionsResolved = resolveCollisions(allPlacements, annotations);
@@ -676,7 +666,6 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     strategyMap[s.sectionId] = s.layoutHint || s.type;
   });
 
-  // Forensic diagnostics
   const placementMap = new Map(allPlacements.map((p) => [p.objectId, p]));
   const unitMapByObjId = new Map();
   structuralUnits.forEach((u) => {

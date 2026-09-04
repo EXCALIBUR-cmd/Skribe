@@ -37,9 +37,9 @@ export const WelcomePage = () => {
         </p>
       </div>
 
-      {/* Quick Actions (Bento Layout) */}
+      {}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-3xl mb-8">
-        {/* Action 1: Start Drawing */}
+        {}
         <button
           onClick={() => navigate(user ? '/boards' : '/canvas')}
           className="group flex flex-col items-center justify-center p-6 bg-primary text-on-primary rounded-xl border-2 border-primary sticker-shadow btn-pressed transition-all relative overflow-hidden cursor-pointer"
@@ -51,7 +51,7 @@ export const WelcomePage = () => {
           <span className="font-label text-base font-bold">Start Drawing</span>
         </button>
 
-        {/* Action 2: AI Sketch */}
+        {}
         <button
           onClick={() => navigate('/ai-assist')}
           className="group flex flex-col items-center justify-center p-6 bg-secondary-container text-on-secondary-container rounded-xl border-2 border-secondary sticker-shadow btn-pressed transition-all hover:bg-secondary-fixed-dim cursor-pointer"
@@ -60,7 +60,7 @@ export const WelcomePage = () => {
           <span className="font-label text-base font-bold">Try AI Sketch</span>
         </button>
 
-        {/* Action 3: Explore Templates */}
+        {}
         <button
           onClick={() => navigate('/boards')}
           className="group flex flex-col items-center justify-center p-6 bg-tertiary-container text-on-tertiary-container rounded-xl border-2 border-tertiary sticker-shadow btn-pressed transition-all hover:bg-tertiary-fixed cursor-pointer"
@@ -70,7 +70,7 @@ export const WelcomePage = () => {
         </button>
       </div>
 
-      {/* Contextual Nudges pointing to bottom */}
+      {}
       <div className="flex flex-col items-center animate-bounce text-primary hidden md:flex mt-2">
         <span className="font-label text-sm font-bold italic mb-2">Tools down here!</span>
         <svg

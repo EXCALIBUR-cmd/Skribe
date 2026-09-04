@@ -42,7 +42,7 @@ export const buildVisualObjectModel = (workspaceModel) => {
     const size = getObjectDimensions(obj);
     const pos = obj.position || { x: 0, y: 0 };
     const rawRotation = typeof obj.rotation === 'number' ? obj.rotation : 0;
-    const isSticky = obj.metadata?.isStickyNote === true || obj.type === 'note';
+    const isSticky = obj.metadata?.isStickyNote === true || obj.isStickyNote === true || obj.type === 'note' || semanticType === 'note';
 
     let kind = 'shape';
     if (semanticType === 'text') kind = 'text';
@@ -52,7 +52,7 @@ export const buildVisualObjectModel = (workspaceModel) => {
     else if (semanticType === 'line') kind = 'line';
     else if (semanticType === 'image') kind = 'image';
 
-    const anchor = (kind === 'text' && !obj.relationshipMetadata?.parentShapeId) ? 'top-left' : 'center';
+    const anchor = 'top-left';
     const bounds = getPlacementBounds(pos, size, anchor, rawRotation);
     const center = {
       x: bounds.x + bounds.width / 2,
@@ -62,9 +62,17 @@ export const buildVisualObjectModel = (workspaceModel) => {
     
     let rotation = rawRotation;
     if (kind === 'text') {
-      const isAttached = Boolean(obj.relationshipMetadata?.parentShapeId);
-      if (!isAttached && (Math.abs(rawRotation - 90) < 5 || Math.abs(rawRotation - 270) < 5)) {
-        rotation = 0; 
+      const parentId = obj.relationshipMetadata?.parentShapeId;
+      let isAttachedToRealContainer = false;
+      if (parentId) {
+        const parentObj = rawObjects.find((o) => o.id === parentId);
+        if (parentObj) {
+          const parentSemantic = getSemanticType(parentObj);
+          isAttachedToRealContainer = parentSemantic === 'shape' || parentSemantic === 'note';
+        }
+      }
+      if (!isAttachedToRealContainer) {
+        rotation = 0;
       }
     }
 
@@ -82,9 +90,9 @@ export const buildVisualObjectModel = (workspaceModel) => {
       parentObjectId: obj.relationshipMetadata?.parentShapeId || null,
       attachedTextIds: obj.relationshipMetadata?.attachedTextId ? [obj.relationshipMetadata.attachedTextId] : [],
       connectorMetadata: kind === 'connector' ? {
-        sourceObjectId: obj.relationshipMetadata?.sourceShapeId || null,
-        targetObjectId: obj.relationshipMetadata?.targetShapeId || null,
-        connectorType: obj.connector?.connectorType || 'straight'
+        sourceObjectId: obj.relationshipMetadata?.sourceShapeId || obj.connector?.sourceShapeId || obj.sourceShapeId || null,
+        targetObjectId: obj.relationshipMetadata?.targetShapeId || obj.connector?.targetShapeId || obj.targetShapeId || null,
+        connectorType: obj.connector?.connectorType || obj.metadata?.connectorType || obj.connectorType || 'straight'
       } : null,
       text: obj.text || null,
       metadata: obj.metadata || {},
@@ -103,25 +111,23 @@ const isPointInside = (point, box, tolerance = 10) => (
   point.y <= box.y + box.height + tolerance
 );
 
-const resolveContainerOwnership = (visualObjects, objectMap) => {
+export const resolveContainerOwnership = (visualObjects, objectMap) => {
   const isContainer = (vo) => !!vo && (vo.kind === 'shape' || vo.kind === 'sticky-note');
   const isText = (vo) => !!vo && vo.kind === 'text';
+  const isStroke = (vo) => !!vo && (vo.kind === 'freehand' || vo.semanticType === 'stroke');
   const areaOf = (vo) => Math.max(1, vo.bounds.width) * Math.max(1, vo.bounds.height);
 
-  
   const claims = new Map(); 
-  const claim = (textId, ownerId, tier, area) => {
-    if (!textId || !ownerId || textId === ownerId) return;
-    const prev = claims.get(textId);
+  const claim = (childId, ownerId, tier, area) => {
+    if (!childId || !ownerId || childId === ownerId) return;
+    const prev = claims.get(childId);
     if (!prev || tier < prev.tier || (tier === prev.tier && area < prev.area)) {
-      claims.set(textId, { ownerId, tier, area });
+      claims.set(childId, { ownerId, tier, area });
     }
   };
 
   const containers = visualObjects.filter(isContainer);
 
-  
-  
   containers.forEach((c) => {
     const attached = c.attachedTextIds?.[0] || c.originalObject?.relationshipMetadata?.attachedTextId || null;
     if (attached && isText(objectMap.get(attached))) claim(attached, c.objectId, 0, areaOf(c));
@@ -132,7 +138,6 @@ const resolveContainerOwnership = (visualObjects, objectMap) => {
     if (isContainer(parent)) claim(vo.objectId, parent.objectId, 0, areaOf(parent));
   });
 
-  
   const byElement = new Map();
   visualObjects.forEach((vo) => {
     const eid = vo.originalObject?.elementId;
@@ -144,37 +149,41 @@ const resolveContainerOwnership = (visualObjects, objectMap) => {
     const container = group.find(isContainer);
     if (!container) return;
     group.forEach((vo) => {
-      if (isText(vo)) claim(vo.objectId, container.objectId, 1, areaOf(container));
+      if (isText(vo) || isStroke(vo)) claim(vo.objectId, container.objectId, 1, areaOf(container));
     });
   });
 
-  
-  
   visualObjects.forEach((vo) => {
-    if (!isText(vo) || claims.has(vo.objectId)) return;
+    if ((!isText(vo) && !isStroke(vo)) || claims.has(vo.objectId)) return;
     let best = null;
     let bestArea = Infinity;
     containers.forEach((c) => {
       if (c.objectId === vo.objectId) return;
-      if (isPointInside(vo.center, c.bounds) && areaOf(c) < bestArea) {
+      if (isText(vo) && isPointInside(vo.center, c.bounds) && areaOf(c) < bestArea) {
         best = c;
         bestArea = areaOf(c);
+      } else if (isStroke(vo) && isPointInside(vo.center, c.bounds) && areaOf(c) < bestArea) {
+        if (vo.bounds.width <= c.bounds.width * 1.1 && vo.bounds.height <= c.bounds.height * 1.1) {
+          best = c;
+          bestArea = areaOf(c);
+        }
       }
     });
     if (best) claim(vo.objectId, best.objectId, 2, bestArea);
   });
 
-  
   const ownerByText = new Map();
   const ownedByOwner = new Map();
-  claims.forEach((info, textId) => {
-    ownerByText.set(textId, info.ownerId);
+  const ownerTierByText = new Map();
+  claims.forEach((info, childId) => {
+    ownerByText.set(childId, info.ownerId);
+    ownerTierByText.set(childId, info.tier);
     if (!ownedByOwner.has(info.ownerId)) ownedByOwner.set(info.ownerId, []);
-    ownedByOwner.get(info.ownerId).push(textId);
+    ownedByOwner.get(info.ownerId).push(childId);
   });
   ownedByOwner.forEach((ids) => ids.sort((a, b) => String(a).localeCompare(String(b))));
 
-  return { ownedByOwner, ownerByText };
+  return { ownedByOwner, ownerByText, ownerTierByText };
 };
 
 export const assertShapeGeometryIntegrity = (unit) => {
@@ -227,7 +236,7 @@ export const assertPlacementsWithinCanvas = (proposal) => {
   return true;
 };
 
-export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
+export const reconstructVisualUnits = (visualObjects, semanticScene = null, options = {}) => {
   const objectMap = new Map(visualObjects.map((vo) => [vo.objectId, vo]));
   const assignedIds = new Set();
   const atomicUnits = [];
@@ -237,197 +246,97 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
   const orphanConnectorIds = [];
   const rotationNormalizedTextIds = [];
 
-  
   const createPlacement = (vo, localPos, unitId, anchor = 'center') => {
     const size = vo.size;
     const rotation = vo.rotation;
+    const origObj = vo.originalObject || {};
     return {
       objectId: vo.objectId,
+      sourceObjectId: vo.sourceObjectId || origObj.sourceObjectId || vo.objectId,
+      elementId: origObj.elementId || vo.elementId || null,
       unitId,
       type: vo.semanticType || 'shape',
-      relationshipMetadata: vo.originalObject.relationshipMetadata || {},
+      semanticType: vo.semanticType || 'shape',
+      relationshipMetadata: origObj.relationshipMetadata || {},
       position: { x: localPos.x, y: localPos.y },
       rotation,
       scale: { x: 1, y: 1 }, 
       anchor,
       size,
-      bounds: getPlacementBounds(localPos, size, anchor, rotation)
+      bounds: getPlacementBounds(localPos, size, anchor, rotation),
+      path: origObj.path || null,
+      pathData: origObj.pathData || vo.pathData || null,
+      pathCommands: origObj.pathCommands || vo.pathCommands || null,
+      stroke: origObj.stroke || origObj.visual?.stroke || null,
+      strokeWidth: origObj.strokeWidth || origObj.visual?.strokeWidth || null,
+      strokeDashArray: origObj.strokeDashArray || null
     };
   };
 
-  
-  
-  
   const { ownedByOwner, ownerByText } = resolveContainerOwnership(visualObjects, objectMap);
 
-  
-  const connectorVos = visualObjects.filter((vo) => vo.kind === 'connector' && !assignedIds.has(vo.objectId));
-  const graphClusters = [];
-  const processedConnIds = new Set();
-
-  const addNodeWithLabels = (nodeId, set) => {
-    if (!nodeId || !objectMap.has(nodeId)) return;
-    set.add(nodeId);
-    const vo = objectMap.get(nodeId);
-    (vo.attachedTextIds || []).forEach((tId) => set.add(tId));
-    const parentShapeTextId = vo.originalObject.relationshipMetadata?.attachedTextId;
-    if (parentShapeTextId && objectMap.has(parentShapeTextId)) set.add(parentShapeTextId);
-    
-    
-    (ownedByOwner.get(nodeId) || []).forEach((tId) => {
-      if (objectMap.has(tId)) set.add(tId);
-    });
-  };
-
-  
-  connectorVos.forEach((connVo) => {
-    if (processedConnIds.has(connVo.objectId)) return;
-    const srcId = connVo.connectorMetadata?.sourceObjectId;
-    const tgtId = connVo.connectorMetadata?.targetObjectId;
-
-    const clusterObjIds = new Set([connVo.objectId]);
-    addNodeWithLabels(srcId, clusterObjIds);
-    addNodeWithLabels(tgtId, clusterObjIds);
-
-    
-    connectorVos.forEach((otherConn) => {
-      if (processedConnIds.has(otherConn.objectId)) return;
-      const oSrc = otherConn.connectorMetadata?.sourceObjectId;
-      const oTgt = otherConn.connectorMetadata?.targetObjectId;
-      if (clusterObjIds.has(oSrc) || clusterObjIds.has(oTgt)) {
-        clusterObjIds.add(otherConn.objectId);
-        addNodeWithLabels(oSrc, clusterObjIds);
-        addNodeWithLabels(oTgt, clusterObjIds);
-        processedConnIds.add(otherConn.objectId);
-      }
-    });
-
-    processedConnIds.add(connVo.objectId);
-    graphClusters.push(Array.from(clusterObjIds));
-  });
-
-  
   const flowchartGroups = (semanticScene?.groups || []).filter((g) => g.type === 'flowchart');
   flowchartGroups.forEach((g) => {
-    const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
-    if (gObjIds.length > 0 && !graphClusters.some((c) => gObjIds.some((id) => c.includes(id)))) {
-      graphClusters.push(gObjIds);
-    }
-  });
+    const rawIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
+    if (rawIds.length === 0) return;
 
-  graphClusters.forEach((gObjIds, clusterIdx) => {
-    const nodeIds = gObjIds.filter((id) => objectMap.get(id)?.kind !== 'connector' && !assignedIds.has(id));
-    const connectorIds = gObjIds.filter((id) => objectMap.get(id)?.kind === 'connector' && !assignedIds.has(id));
-    if (nodeIds.length === 0 && connectorIds.length === 0) return;
-
-    const nodeClusters = [];
-    const processedNodes = new Set();
-
-    nodeIds.forEach((id) => {
-      if (processedNodes.has(id)) return;
-      const vo = objectMap.get(id);
-      const cluster = [id];
-      processedNodes.add(id);
-
-      
-      const attachedTextId = vo.attachedTextIds[0] || vo.originalObject.relationshipMetadata?.attachedTextId;
-      if (attachedTextId && nodeIds.includes(attachedTextId) && !processedNodes.has(attachedTextId)) {
-        cluster.push(attachedTextId);
-        processedNodes.add(attachedTextId);
-      }
-      nodeClusters.push(cluster);
-    });
-
-    
-    let isVerticalGraph = false;
-    if (connectorIds.length > 0) {
-      const connVo = objectMap.get(connectorIds[0]);
-      const srcId = connVo?.connectorMetadata?.sourceObjectId;
-      const tgtId = connVo?.connectorMetadata?.targetObjectId;
-      if (srcId && tgtId && objectMap.has(srcId) && objectMap.has(tgtId)) {
-        const srcCenter = objectMap.get(srcId).center;
-        const tgtCenter = objectMap.get(tgtId).center;
-        isVerticalGraph = Math.abs(tgtCenter.y - srcCenter.y) > Math.abs(tgtCenter.x - srcCenter.x) * 1.3;
-      }
-    }
-
-    const unitId = `unit_graph_${clusterIdx + 1}`;
+    const unitId = `unit_graph_${g.id}`;
     const localPlacements = [];
-    const nodeCenters = new Map();
+    const unitObjIds = [];
+
+    const nodes = rawIds.filter((id) => objectMap.get(id)?.kind !== 'connector');
+    if (nodes.length === 0) return;
 
     let curX = 0;
-    let curY = 0;
+    nodes.forEach((id) => {
+      if (assignedIds.has(id)) return;
+      const vo = objectMap.get(id);
+      if (!vo) return;
 
-    nodeClusters.forEach((cluster) => {
-      const shapeId = cluster.find((id) => objectMap.get(id)?.kind !== 'text') || cluster[0];
-      const textId = cluster.find((id) => id !== shapeId);
+      const pPos = { x: curX + vo.size.width / 2, y: vo.size.height / 2 };
+      localPlacements.push(createPlacement(vo, pPos, unitId, 'center'));
+      unitObjIds.push(id);
+      assignedIds.add(id);
 
-      const shapeVo = objectMap.get(shapeId);
-      const shapePos = { x: curX + shapeVo.size.width / 2, y: curY + shapeVo.size.height / 2 };
+      const ownedTextIds = (ownedByOwner.get(id) || []).filter((tId) => objectMap.has(tId) && !assignedIds.has(tId));
+      ownedTextIds.forEach((tId) => {
+        const textVo = objectMap.get(tId);
+        localPlacements.push(createPlacement(textVo, pPos, unitId, 'center'));
+        unitObjIds.push(tId);
+        assignedIds.add(tId);
+      });
 
-      localPlacements.push(createPlacement(shapeVo, shapePos, unitId, 'center'));
-      nodeCenters.set(shapeId, shapePos);
-
-      if (textId) {
-        const textVo = objectMap.get(textId);
-        localPlacements.push(createPlacement(textVo, shapePos, unitId, 'center'));
-        nodeCenters.set(textId, shapePos);
-      }
-
-      if (isVerticalGraph) {
-        curY += shapeVo.size.height + 60;
-      } else {
-        curX += shapeVo.size.width + 80;
-      }
+      curX += vo.size.width + 80;
     });
 
-    
-    connectorIds.forEach((connId) => {
-      const connVo = objectMap.get(connId);
-      const srcId = connVo?.connectorMetadata?.sourceObjectId;
-      const tgtId = connVo?.connectorMetadata?.targetObjectId;
-      const srcCenter = srcId ? nodeCenters.get(srcId) : null;
-      const tgtCenter = tgtId ? nodeCenters.get(tgtId) : null;
+    if (unitObjIds.length > 0) {
+      const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
+      const origBounds = unionBounds(unitObjIds.map((id) => objectMap.get(id).bounds));
 
-      let connPos;
-      if (srcCenter && tgtCenter) {
-        connPos = { x: (srcCenter.x + tgtCenter.x) / 2, y: (srcCenter.y + tgtCenter.y) / 2 };
-      } else {
-        connPos = { x: 50, y: 50 };
-        orphanConnectorIds.push(connId);
-      }
-      localPlacements.push(createPlacement(connVo, connPos, unitId, 'center'));
-    });
+      const unit = {
+        unitId,
+        type: 'graph-unit',
+        role: 'flowchart',
+        objectIds: unitObjIds,
+        localPlacements,
+        localBounds,
+        originalBounds: origBounds,
+        centerX: origBounds.x + origBounds.width / 2,
+        centerY: origBounds.y + origBounds.height / 2,
+        width: localBounds.width,
+        height: localBounds.height
+      };
 
-    const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
-    const origBounds = unionBounds(gObjIds.map((id) => objectMap.get(id).bounds));
-
-    const unit = {
-      unitId,
-      type: 'graph-unit',
-      role: 'flowchart',
-      objectIds: gObjIds,
-      localPlacements,
-      localBounds,
-      originalBounds: origBounds,
-      centerX: origBounds.x + origBounds.width / 2,
-      centerY: origBounds.y + origBounds.height / 2,
-      width: localBounds.width,
-      height: localBounds.height
-    };
-
-    assertShapeGeometryIntegrity(unit);
-    atomicUnits.push(unit);
-    gObjIds.forEach((id) => assignedIds.add(id));
+      assertShapeGeometryIntegrity(unit);
+      atomicUnits.push(unit);
+    }
   });
 
-  
   const freeformGroups = (semanticScene?.groups || []).filter((g) => g.type === 'freeform');
   freeformGroups.forEach((g) => {
     const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
     if (gObjIds.length === 0) return;
 
-    
     if (gObjIds.every((id) => objectMap.get(id)?.kind === 'text')) return;
 
     const unitId = `unit_freeform_${g.id}`;
@@ -463,80 +372,65 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     gObjIds.forEach((id) => assignedIds.add(id));
   });
 
-  
   const conceptGroups = (semanticScene?.groups || []).filter((g) => g.type === 'concept');
   conceptGroups.forEach((g) => {
-    const gObjIds = (g.objectIds || []).filter((id) => objectMap.has(id) && !assignedIds.has(id));
-    if (gObjIds.length === 0) return;
+    const shapeIds = (g.objectIds || []).filter((id) => objectMap.get(id)?.kind === 'shape' && !assignedIds.has(id));
+    shapeIds.forEach((shapeId) => {
+      const shapeVo = objectMap.get(shapeId);
+      const unitId = `unit_concept_${g.id}_${shapeId}`;
+      const shapeSize = shapeVo.size;
+      const centerPos = { x: shapeSize.width / 2, y: shapeSize.height / 2 };
 
-    const shapeId = gObjIds.find((id) => objectMap.get(id)?.kind === 'shape');
-    if (!shapeId) return;
+      const pShape = createPlacement(shapeVo, centerPos, unitId, 'center');
+      const localPlacements = [pShape];
+      const unitObjIds = [shapeId];
+      assignedIds.add(shapeId);
 
-    const shapeVo = objectMap.get(shapeId);
-    const unitId = `unit_concept_${g.id}`;
-    const shapeSize = shapeVo.size;
-    const centerPos = { x: shapeSize.width / 2, y: shapeSize.height / 2 };
+      const ownedTextIds = (ownedByOwner.get(shapeId) || []).filter(
+        (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
+      );
+      ownedTextIds.forEach((tId) => {
+        localPlacements.push(createPlacement(objectMap.get(tId), centerPos, unitId, 'center'));
+        unitObjIds.push(tId);
+        assignedIds.add(tId);
+      });
 
-    const pShape = createPlacement(shapeVo, centerPos, unitId, 'center');
-    const localPlacements = [pShape];
-    const unitObjIds = [shapeId];
-    assignedIds.add(shapeId);
+      const ownedStrokeIds = (ownedByOwner.get(shapeId) || []).filter(
+        (id) => objectMap.get(id)?.kind === 'freehand' && !assignedIds.has(id)
+      );
+      ownedStrokeIds.forEach((sId) => {
+        const strokeVo = objectMap.get(sId);
+        const strokeLocalPos = {
+          x: strokeVo.bounds.x - shapeVo.bounds.x + strokeVo.size.width / 2,
+          y: strokeVo.bounds.y - shapeVo.bounds.y + strokeVo.size.height / 2
+        };
+        localPlacements.push(createPlacement(strokeVo, strokeLocalPos, unitId, 'center'));
+        unitObjIds.push(sId);
+        assignedIds.add(sId);
+      });
 
-    
-    
-    const ownedTextIds = (ownedByOwner.get(shapeId) || []).filter(
-      (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
-    );
-    ownedTextIds.forEach((tId) => {
-      localPlacements.push(createPlacement(objectMap.get(tId), centerPos, unitId, 'center'));
-      unitObjIds.push(tId);
-      assignedIds.add(tId);
+      const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
+      const origBounds = unionBounds(unitObjIds.map((id) => objectMap.get(id).bounds));
+
+      const unit = {
+        unitId,
+        type: 'shape-unit',
+        role: 'concept',
+        objectIds: unitObjIds,
+        localPlacements,
+        localBounds,
+        originalBounds: origBounds,
+        centerX: origBounds.x + origBounds.width / 2,
+        centerY: origBounds.y + origBounds.height / 2,
+        width: localBounds.width,
+        height: localBounds.height
+      };
+
+      assertShapeGeometryIntegrity(unit);
+      atomicUnits.push(unit);
     });
-
-    
-    
-    const explanationTextIds = gObjIds.filter(
-      (id) => id !== shapeId
-        && objectMap.get(id)?.kind === 'text'
-        && !assignedIds.has(id)
-        && !ownerByText.has(id)
-        && (!g.id?.includes('unassigned') || Math.abs(objectMap.get(id).center.x - shapeVo.center.x) <= Math.max(shapeVo.size.width, 120))
-    );
-
-    let curBottomY = shapeSize.height + 16;
-
-    explanationTextIds.forEach((tId) => {
-      const textVo = objectMap.get(tId);
-      
-      const explPos = { x: shapeSize.width / 2, y: curBottomY + textVo.size.height / 2 };
-      localPlacements.push(createPlacement(textVo, explPos, unitId, 'center'));
-      curBottomY += textVo.size.height + 12;
-      unitObjIds.push(tId);
-      assignedIds.add(tId);
-    });
-
-    const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
-    const origBounds = unionBounds(unitObjIds.map((id) => objectMap.get(id).bounds));
-
-    const unit = {
-      unitId,
-      type: 'shape-unit',
-      role: 'concept',
-      objectIds: unitObjIds,
-      localPlacements,
-      localBounds,
-      originalBounds: origBounds,
-      centerX: origBounds.x + origBounds.width / 2,
-      centerY: origBounds.y + origBounds.height / 2,
-      width: localBounds.width,
-      height: localBounds.height
-    };
-
-    assertShapeGeometryIntegrity(unit);
-    atomicUnits.push(unit);
   });
 
-  
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId) || vo.kind !== 'shape') return;
 
@@ -549,8 +443,6 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const unitObjIds = [vo.objectId];
     assignedIds.add(vo.objectId);
 
-    
-    
     const ownedTextIds = (ownedByOwner.get(vo.objectId) || []).filter(
       (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
     );
@@ -558,6 +450,20 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       localPlacements.push(createPlacement(objectMap.get(tId), centerPos, unitId, 'center'));
       unitObjIds.push(tId);
       assignedIds.add(tId);
+    });
+
+    const ownedStrokeIds = (ownedByOwner.get(vo.objectId) || []).filter(
+      (id) => objectMap.get(id)?.kind === 'freehand' && !assignedIds.has(id)
+    );
+    ownedStrokeIds.forEach((sId) => {
+      const strokeVo = objectMap.get(sId);
+      const strokeLocalPos = {
+        x: strokeVo.bounds.x - vo.bounds.x + strokeVo.size.width / 2,
+        y: strokeVo.bounds.y - vo.bounds.y + strokeVo.size.height / 2
+      };
+      localPlacements.push(createPlacement(strokeVo, strokeLocalPos, unitId, 'center'));
+      unitObjIds.push(sId);
+      assignedIds.add(sId);
     });
 
     const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
@@ -581,13 +487,6 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     atomicUnits.push(unit);
   });
 
-  
-  
-  
-  
-  
-  
-  
   const NOTE_TEXT_PADDING = 18; 
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId) || vo.kind !== 'sticky-note') return;
@@ -598,15 +497,10 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     const localPlacements = [pNote];
     const unitObjIds = [vo.objectId];
 
-    
-    
-    
     const noteTextIds = (ownedByOwner.get(vo.objectId) || []).filter(
       (id) => objectMap.get(id)?.kind === 'text' && !assignedIds.has(id)
     );
 
-    
-    
     let noteTextTop = NOTE_TEXT_PADDING;
     noteTextIds.forEach((tId) => {
       const textVo = objectMap.get(tId);
@@ -618,6 +512,20 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
       noteTextTop += textVo.size.height + 6;
       unitObjIds.push(tId);
       assignedIds.add(tId);
+    });
+
+    const noteStrokeIds = (ownedByOwner.get(vo.objectId) || []).filter(
+      (id) => objectMap.get(id)?.kind === 'freehand' && !assignedIds.has(id)
+    );
+    noteStrokeIds.forEach((sId) => {
+      const strokeVo = objectMap.get(sId);
+      const strokeLocalPos = {
+        x: strokeVo.bounds.x - vo.bounds.x + strokeVo.size.width / 2,
+        y: strokeVo.bounds.y - vo.bounds.y + strokeVo.size.height / 2
+      };
+      localPlacements.push(createPlacement(strokeVo, strokeLocalPos, unitId, 'center'));
+      unitObjIds.push(sId);
+      assignedIds.add(sId);
     });
 
     const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
@@ -642,7 +550,100 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
     assignedIds.add(vo.objectId);
   });
 
-  
+  const unassignedStrokes = visualObjects.filter(
+    (vo) => !assignedIds.has(vo.objectId) && (vo.kind === 'freehand' || vo.semanticType === 'stroke')
+  );
+
+  if (unassignedStrokes.length > 0) {
+    const strokeParent = new Map(unassignedStrokes.map((s) => [s.objectId, s.objectId]));
+    const findRoot = (id) => {
+      let curr = id;
+      while (strokeParent.get(curr) && strokeParent.get(curr) !== curr) curr = strokeParent.get(curr);
+      return curr;
+    };
+    const unionRoots = (idA, idB) => {
+      const rA = findRoot(idA);
+      const rB = findRoot(idB);
+      if (rA !== rB) strokeParent.set(rB, rA);
+    };
+
+    for (let i = 0; i < unassignedStrokes.length; i++) {
+      for (let j = i + 1; j < unassignedStrokes.length; j++) {
+        const sA = unassignedStrokes[i];
+        const sB = unassignedStrokes[j];
+
+        const sharedStrokeId = sA.originalObject?.strokeId && sA.originalObject.strokeId === sB.originalObject?.strokeId;
+        const sharedGroupId = sA.originalObject?.groupId && sA.originalObject.groupId === sB.originalObject?.groupId;
+        const sharedDrawingId = sA.originalObject?.drawingId && sA.originalObject.drawingId === sB.originalObject?.drawingId;
+
+        const sharedElem = sA.originalObject?.elementId && sA.originalObject.elementId === sB.originalObject?.elementId;
+
+        const dx = Math.max(0, sA.bounds.x - (sB.bounds.x + sB.bounds.width), sB.bounds.x - (sA.bounds.x + sA.bounds.width));
+        const dy = Math.max(0, sA.bounds.y - (sB.bounds.y + sB.bounds.height), sB.bounds.y - (sA.bounds.y + sA.bounds.height));
+        const dist = Math.hypot(dx, dy);
+
+        const scaleA = Math.max(sA.bounds.width, sA.bounds.height);
+        const scaleB = Math.max(sB.bounds.width, sB.bounds.height);
+        const maxCharScale = Math.max(scaleA, scaleB);
+        const strokeWidthA = sA.originalObject?.strokeWidth || sA.originalObject?.visual?.strokeWidth || 3;
+        const strokeWidthB = sB.originalObject?.strokeWidth || sB.originalObject?.visual?.strokeWidth || 3;
+        const derivedGeometricThreshold = Math.min(100, Math.max(35, maxCharScale * 0.85 + Math.max(strokeWidthA, strokeWidthB) * 2));
+
+        const maxAllowedGap = typeof options?.strokeClusteringThreshold === 'number'
+          ? options.strokeClusteringThreshold
+          : derivedGeometricThreshold;
+
+        if (sharedStrokeId || sharedGroupId || sharedDrawingId || sharedElem || dist <= maxAllowedGap) {
+          unionRoots(sA.objectId, sB.objectId);
+        }
+      }
+    }
+
+    const clustersByRoot = new Map();
+    unassignedStrokes.forEach((s) => {
+      const root = findRoot(s.objectId);
+      if (!clustersByRoot.has(root)) clustersByRoot.set(root, []);
+      clustersByRoot.get(root).push(s);
+    });
+
+    let autoFreeformCount = 0;
+    clustersByRoot.forEach((clusterStrokes) => {
+      if (clusterStrokes.length >= 2) {
+        autoFreeformCount++;
+        const unitId = `unit_auto_freeform_${autoFreeformCount}`;
+        const clusterObjIds = clusterStrokes.map((s) => s.objectId);
+        const origBounds = unionBounds(clusterStrokes.map((s) => s.bounds));
+
+        const localPlacements = clusterStrokes.map((vo) => {
+          const localPos = {
+            x: vo.bounds.x - origBounds.x + vo.size.width / 2,
+            y: vo.bounds.y - origBounds.y + vo.size.height / 2
+          };
+          return createPlacement(vo, localPos, unitId, 'center');
+        });
+
+        const localBounds = unionBounds(localPlacements.map((p) => p.bounds));
+        const unit = {
+          unitId,
+          type: 'freeform-unit',
+          role: 'freeform',
+          objectIds: clusterObjIds,
+          localPlacements,
+          localBounds,
+          originalBounds: origBounds,
+          centerX: origBounds.x + origBounds.width / 2,
+          centerY: origBounds.y + origBounds.height / 2,
+          width: localBounds.width,
+          height: localBounds.height
+        };
+
+        assertShapeGeometryIntegrity(unit);
+        atomicUnits.push(unit);
+        clusterObjIds.forEach((id) => assignedIds.add(id));
+      }
+    });
+  }
+
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId)) return;
 
@@ -657,8 +658,8 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null) => {
 
     const unit = {
       unitId,
-      type: vo.kind === 'text' ? 'text-unit' : (vo.kind === 'freehand' ? 'freeform-unit' : 'shape-unit'),
-      role: vo.kind === 'text' ? (vo.originalObject?.metadata?.isHeading ? 'heading' : 'text') : 'concept',
+      type: vo.kind === 'text' ? 'text-unit' : (vo.kind === 'freehand' ? 'freeform-unit' : (vo.kind === 'connector' ? 'connector-unit' : (vo.kind === 'line' ? 'line-unit' : 'shape-unit'))),
+      role: vo.kind === 'text' ? (vo.originalObject?.metadata?.isHeading ? 'heading' : 'text') : (vo.kind === 'connector' ? 'connector' : 'concept'),
       objectIds: [vo.objectId],
       localPlacements: [placement],
       localBounds,

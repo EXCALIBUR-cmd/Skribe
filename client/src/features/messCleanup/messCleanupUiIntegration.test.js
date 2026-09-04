@@ -285,3 +285,28 @@ test('TEST 14: Existing Mess Cleanup UI integration works cleanly', () => {
   assert.equal(controller.getToasts().length, 1);
   assert.equal(controller.getToasts()[0].type, 'success');
 });
+
+test('TEST 15: Production Mess Cleanup pipeline delegates exclusively to buildCleanupPlan -> executeCleanupPlan with zero legacy compositor invocation', async () => {
+  const { createLayoutProposal } = await import('./layoutEngine.js');
+  const { normalizeObject } = await import('./normalizeObjects.js');
+
+  const shapeObj = normalizeObject({ id: 'shape_p1', type: 'rect', left: 300, top: 200, width: 120, height: 80 });
+  const textObj = normalizeObject({ id: 'text_p1', type: 'text', text: 'Step 1', left: 320, top: 230, width: 60, height: 20 });
+  const strokeObj = normalizeObject({ id: 'stroke_p1', type: 'stroke', isVectorStroke: true, left: 600, top: 400, width: 50, height: 50 });
+
+  const workspaceModel = {
+    board: {
+      objects: [shapeObj, textObj, strokeObj]
+    }
+  };
+
+  const proposal = createLayoutProposal(null, workspaceModel);
+
+  assert.equal(proposal.valid, true);
+  assert.equal(proposal.metadata.cleanupExecutionEngine, 'conservative');
+  assert.equal(proposal.metadata.strategy, 'conservative_cleanup');
+
+  const pStroke = proposal.placements.find((p) => p.objectId === 'stroke_p1');
+  assert.equal(pStroke.bounds.x, 600);
+  assert.equal(pStroke.bounds.y, 400);
+});

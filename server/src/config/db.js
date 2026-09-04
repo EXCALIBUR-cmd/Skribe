@@ -11,7 +11,6 @@ export const connectDB = async () => {
 
     console.log(`[MongoDB] Atlas/Database Connected: ${conn.connection.host} | DB Name: ${conn.connection.name}`);
 
-    // Register Mongoose connection lifecycle listeners
     mongoose.connection.on('error', (err) => {
       console.error(`[MongoDB] Runtime Connection Error: ${err.message}`);
     });
@@ -23,7 +22,6 @@ export const connectDB = async () => {
     return conn;
   } catch (error) {
     console.error(`[MongoDB] Initial Connection Failed: ${error.message}`);
-    // In dev mode with local MongoDB fallback, do not crash immediately if Mongo is not running locally
     if (config.isProd) {
       process.exit(1);
     } else {
@@ -32,9 +30,6 @@ export const connectDB = async () => {
   }
 };
 
-/**
- * Gracefully close MongoDB connection on application termination.
- */
 export const disconnectDB = async () => {
   try {
     await mongoose.connection.close();

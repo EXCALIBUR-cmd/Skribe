@@ -155,11 +155,21 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
       let newLeft = targetObj.left;
       let newTop = targetObj.top;
 
-      if (targetObj.originX === 'center' || placement.anchor === 'center') {
-        if (placement.position && isFiniteNumber(placement.position.x)) {
-          newLeft = placement.position.x;
-        } else if (placement.bounds && isFiniteNumber(placement.bounds.x)) {
+      if (placement.anchor === 'center' && placement.position && isFiniteNumber(placement.position.x)) {
+        newLeft = placement.position.x;
+      } else if (targetObj.originX === 'center') {
+        if (placement.center && isFiniteNumber(placement.center.x)) {
+          newLeft = placement.center.x;
+        } else if (placement.bounds && isFiniteNumber(placement.bounds.x) && isFiniteNumber(placement.bounds.width)) {
           newLeft = placement.bounds.x + (placement.bounds.width / 2);
+        } else if (placement.position && isFiniteNumber(placement.position.x)) {
+          newLeft = placement.position.x + ((placement.size?.width ?? 0) / 2);
+        }
+      } else if (targetObj.originX === 'right') {
+        if (placement.bounds && isFiniteNumber(placement.bounds.x) && isFiniteNumber(placement.bounds.width)) {
+          newLeft = placement.bounds.x + placement.bounds.width;
+        } else if (placement.position && isFiniteNumber(placement.position.x)) {
+          newLeft = placement.position.x + (placement.size?.width ?? 0);
         }
       } else {
         if (placement.bounds && isFiniteNumber(placement.bounds.x)) {
@@ -169,11 +179,21 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
         }
       }
 
-      if (targetObj.originY === 'center' || placement.anchor === 'center') {
-        if (placement.position && isFiniteNumber(placement.position.y)) {
-          newTop = placement.position.y;
-        } else if (placement.bounds && isFiniteNumber(placement.bounds.y)) {
+      if (placement.anchor === 'center' && placement.position && isFiniteNumber(placement.position.y)) {
+        newTop = placement.position.y;
+      } else if (targetObj.originY === 'center') {
+        if (placement.center && isFiniteNumber(placement.center.y)) {
+          newTop = placement.center.y;
+        } else if (placement.bounds && isFiniteNumber(placement.bounds.y) && isFiniteNumber(placement.bounds.height)) {
           newTop = placement.bounds.y + (placement.bounds.height / 2);
+        } else if (placement.position && isFiniteNumber(placement.position.y)) {
+          newTop = placement.position.y + ((placement.size?.height ?? 0) / 2);
+        }
+      } else if (targetObj.originY === 'bottom') {
+        if (placement.bounds && isFiniteNumber(placement.bounds.y) && isFiniteNumber(placement.bounds.height)) {
+          newTop = placement.bounds.y + placement.bounds.height;
+        } else if (placement.position && isFiniteNumber(placement.position.y)) {
+          newTop = placement.position.y + (placement.size?.height ?? 0);
         }
       } else {
         if (placement.bounds && isFiniteNumber(placement.bounds.y)) {

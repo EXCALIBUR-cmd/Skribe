@@ -1,12 +1,3 @@
-/**
- * DEV-ONLY: emit a faithful SVG snapshot of the Mess Cleanup preview render.
- *
- * Coordinates below are copied verbatim from getBoundingClientRect() of the REAL
- * MessCleanupPreviewModal rendered in a real browser (Vite dev, Chromium via the
- * preview MCP), measured relative to the preview surface. This is not a mock — it
- * redraws exactly what the browser composited, so it can be viewed without the
- * Browser pane. Run: node dev/renderPreviewSnapshot.mjs
- */
 import { writeFileSync } from 'node:fs';
 
 const W = 798, H = 498;
@@ -14,7 +5,6 @@ const SHAPE_FILL = '#bae6fd', SHAPE_STROKE = '#334155';
 const NOTE_FILL = '#fef08a', NOTE_STROKE = '#eab308';
 const TEXT_FILL = '#1e293b';
 
-// shapes (measured, surface-relative)
 const rects = [
   { id: 'shape_b1', x: 24.8, y: 254.8, w: 150, h: 80, rx: 8, fill: SHAPE_FILL, stroke: SHAPE_STROKE },
   { id: 'shape_b2', x: 254.8, y: 254.8, w: 150, h: 80, rx: 8, fill: SHAPE_FILL, stroke: SHAPE_STROKE },
@@ -22,16 +12,13 @@ const rects = [
   { id: 'shape_note', x: 594.8, y: 24.8, w: 180, h: 180, rx: 2, fill: NOTE_FILL, stroke: NOTE_STROKE },
 ];
 const circle = { cx: 224.8 + 60, cy: 24.8 + 60, r: 60 };
-// hexagon polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%) on box (24.8,24.8,140,100)
 const hexBox = { x: 24.8, y: 24.8, w: 140, h: 100 };
 const hex = [[.25,0],[.75,0],[1,.5],[.75,1],[.25,1],[0,.5]]
   .map(([px,py]) => `${(hexBox.x+px*hexBox.w).toFixed(1)},${(hexBox.y+py*hexBox.h).toFixed(1)}`).join(' ');
-// triangle polygon(50% 0,100% 100%,0 100%) on box (404.8,24.8,130,110)
 const triBox = { x: 404.8, y: 24.8, w: 130, h: 110 };
 const tri = [[.5,0],[1,1],[0,1]]
   .map(([px,py]) => `${(triBox.x+px*triBox.w).toFixed(1)},${(triBox.y+py*triBox.h).toFixed(1)}`).join(' ');
 
-// text labels (measured boxes; drawn centered in-box)
 const texts = [
   { t: 'Process', x: 54.8, y: 60.8, w: 80, h: 28 },
   { t: 'Circle', x: 249.8, y: 70.8, w: 70, h: 28 },
@@ -43,7 +30,6 @@ const texts = [
   { t: 'Random floating note', x: 397.8, y: 384.8, w: 180, h: 28, standalone: true },
 ];
 
-// SVG connector + handwriting strokes, verbatim from the rendered <svg> layer
 const svgLayer = `
   <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" fill="#334155"/></marker></defs>
   <line x1="99" y1="294" x2="329" y2="294" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>

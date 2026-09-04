@@ -238,8 +238,12 @@ export const syncSkribeLineToFabric = (fabricObj) => {
     isSkribeLine: true
   });
 
-  fabricObj.setCoords();
-  logLineRenderVerification(fabricObj);
+  if (typeof fabricObj.setCoords === 'function') {
+    fabricObj.setCoords();
+  }
+  if (typeof logLineRenderVerification === 'function') {
+    logLineRenderVerification(fabricObj);
+  }
 };
 
 export const createSkribeLineFabricObject = (skribeLineModel) => {

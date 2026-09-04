@@ -31,7 +31,6 @@ const note = (id, extra = {}) => ({
   ...extra
 });
 
-// TEST 11: Reading order is deterministic
 test('TEST 11: Reading order is deterministic', () => {
   const model = {
     version: 1,
@@ -51,10 +50,9 @@ test('TEST 11: Reading order is deterministic', () => {
   const scene2 = buildSemanticScene(model, rawPlan);
 
   assert.deepEqual(scene1.readingOrder, scene2.readingOrder);
-  assert.equal(scene1.readingOrder[0], 'g_concept'); // concepts have higher reading priority than notes
+  assert.equal(scene1.readingOrder[0], 'g_concept');
 });
 
-// TEST 12: Unknown AI object IDs are rejected safely
 test('TEST 12: Unknown AI object IDs are filtered safely and flagged in validation', () => {
   const model = {
     version: 1,
@@ -74,15 +72,12 @@ test('TEST 12: Unknown AI object IDs are filtered safely and flagged in validati
 
   const scene = buildSemanticScene(model, rawPlanWithHallucinations);
 
-  // Group should contain only valid objects
   const g1 = scene.groups.find((g) => g.id === 'g1');
   assert.deepEqual(g1.objectIds, ['valid_1']);
 
-  // Validation against model should pass for the normalized scene
   const { valid, errors } = validateSemanticScene(scene, model);
   assert.equal(valid, true, `Errors: ${errors.join(', ')}`);
 
-  // Direct malformed scene with unknown ID should fail validation
   const malformedScene = {
     ...scene,
     objects: [...scene.objects, { objectId: 'hallucinated_obj_999', semanticRole: 'body' }]
@@ -92,7 +87,6 @@ test('TEST 12: Unknown AI object IDs are filtered safely and flagged in validati
   assert.ok(malformedValidation.errors.some((e) => e.includes('does not exist in WorkspaceModel')));
 });
 
-// TEST 13: AI cannot overwrite explicit Fabric relationships
 test('TEST 13: AI cannot overwrite explicit Fabric relationships', () => {
   const model = {
     version: 1,
@@ -104,7 +98,6 @@ test('TEST 13: AI cannot overwrite explicit Fabric relationships', () => {
     }
   };
 
-  // Nemotron omits relationships or provides unrelated relationship
   const rawPlan = {
     relationships: [
       { sourceObjectId: 's_parent', targetObjectIds: ['s_parent'], type: 'concept-explanation' }
@@ -118,7 +111,6 @@ test('TEST 13: AI cannot overwrite explicit Fabric relationships', () => {
   assert.deepEqual(attachedRel.targetObjectIds, ['t_child']);
 });
 
-// TEST 14: WorkspaceModel remains completely immutable
 test('TEST 14: WorkspaceModel remains completely immutable', () => {
   const model = {
     version: 1,
@@ -140,7 +132,6 @@ test('TEST 14: WorkspaceModel remains completely immutable', () => {
   assert.equal(JSON.stringify(rawPlan), rawPlanSnapshot);
 });
 
-// TEST 15: SemanticScene is JSON serializable
 test('TEST 15: SemanticScene is JSON serializable', () => {
   const model = {
     version: 1,
@@ -159,7 +150,6 @@ test('TEST 15: SemanticScene is JSON serializable', () => {
   assert.equal(parsed.groups.length, 1);
 });
 
-// TEST 16: Same input produces deterministic normalized output
 test('TEST 16: Same input produces deterministic normalized output', () => {
   const model = {
     version: 1,
@@ -181,7 +171,6 @@ test('TEST 16: Same input produces deterministic normalized output', () => {
   assert.equal(JSON.stringify(scene1), JSON.stringify(scene2));
 });
 
-// TEST 17: Nemotron response with document.sections converts correctly
 test('TEST 17: Nemotron response with document.sections converts correctly', () => {
   const model = {
     version: 1,
@@ -207,7 +196,6 @@ test('TEST 17: Nemotron response with document.sections converts correctly', () 
   assert.equal(scene.hierarchy.rootTitleObjectId, 't1');
 });
 
-// TEST 18: Nemotron response with hierarchy converts correctly
 test('TEST 18: Nemotron response with hierarchy converts correctly', () => {
   const model = {
     version: 1,
@@ -230,7 +218,6 @@ test('TEST 18: Nemotron response with hierarchy converts correctly', () => {
   assert.deepEqual(scene.hierarchy.mainConceptIds, ['g_main']);
 });
 
-// TEST 19: Unknown/unsupported semantic relationship is safely ignored
 test('TEST 19: Unknown/unsupported semantic relationship is safely ignored', () => {
   assert.equal(normalizeRelationshipType('completely-invented-type'), null);
   assert.equal(normalizeRelationshipType('heading_body'), 'heading-body');
@@ -253,7 +240,6 @@ test('TEST 19: Unknown/unsupported semantic relationship is safely ignored', () 
   assert.equal(scene.relationships.length, 0);
 });
 
-// TEST 20: SemanticScene contains NO physical coordinate properties
 test('TEST 20: SemanticScene contains NO physical coordinate properties', () => {
   const model = {
     version: 1,

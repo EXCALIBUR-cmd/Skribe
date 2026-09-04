@@ -329,7 +329,6 @@ test('TEST 20: Existing legacy top-level sections response is normalized cleanly
   assert.equal(plan.document.sections[0].id, 'sec1');
 });
 
-// --- Additional v2 contract tests ---
 
 test('TEST 21: Relationship evidence defaults to empty array when not provided', () => {
   const model = workspace([shape('s1'), shape('s2')]);
@@ -403,6 +402,5 @@ test('TEST 25: Bridge field sections matches document.sections', () => {
   };
 
   const plan = validateOrganizationPlan(model, rawPlan);
-  // Bridge field (deprecated) must match document.sections for layout engine compat
   assert.strictEqual(plan.sections, plan.document.sections);
 });

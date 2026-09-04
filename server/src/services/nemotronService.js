@@ -64,8 +64,28 @@ export const formatImageUrl = (image) => {
   return `data:image/png;base64,${trimmed}`;
 };
 
+export const cleanWorkspaceModelForNemotron = (model) => {
+  if (!model || typeof model !== 'object') return model;
+  const objects = (model.board?.objects || model.objects || []).map((obj) => {
+    const copy = { ...obj };
+    if (Array.isArray(copy.path) && copy.path.length > 8) {
+      delete copy.path;
+    }
+    if (copy.connector?.path && Array.isArray(copy.connector.path) && copy.connector.path.length > 8) {
+      delete copy.connector.path;
+    }
+    return copy;
+  });
+  return {
+    ...model,
+    ...(model.board ? { board: { ...model.board, objects } } : {}),
+    ...(model.objects ? { objects } : {})
+  };
+};
+
 export const buildMultimodalPayload = (workspaceModel, image, modelName = config.nemotronModel) => {
   const imageUrl = formatImageUrl(image);
+  const cleanModel = cleanWorkspaceModelForNemotron(workspaceModel);
 
   return {
     model: modelName,
@@ -79,7 +99,7 @@ export const buildMultimodalPayload = (workspaceModel, image, modelName = config
         content: [
           {
             type: 'text',
-            text: `Analyze the following whiteboard workspace. Use both the visual screenshot and the structured WorkspaceModel JSON.\n\nWorkspaceModel JSON:\n${JSON.stringify(workspaceModel)}`
+            text: `Analyze the following whiteboard workspace. Use both the visual screenshot and the structured WorkspaceModel JSON.\n\nWorkspaceModel JSON:\n${JSON.stringify(cleanModel)}`
           },
           {
             type: 'image_url',
@@ -138,7 +158,7 @@ export const analyzeWithNemotron = async (workspaceModel, image, options = {}) =
   const apiKey = options.apiKey || config.nvidiaApiKey;
   const apiUrl = options.apiUrl || config.nvidiaApiUrl;
   const modelName = options.model || config.nemotronModel;
-  const timeoutMs = options.timeoutMs || 90000;
+  const timeoutMs = options.timeoutMs || 15000;
   const fetchFn = options.fetch || globalThis.fetch;
 
   if (!apiKey) {
@@ -162,93 +182,115 @@ export const analyzeWithNemotron = async (workspaceModel, image, options = {}) =
     throw err;
   }
 
-  const payload = buildMultimodalPayload(workspaceModel, image, modelName);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const maxRetries = options.maxRetries ?? 3;
+  let lastError = null;
 
-  const reqStart = Date.now();
-  console.log('[Nemotron Diagnostic] NVIDIA request started');
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const payload = buildMultimodalPayload(workspaceModel, image, modelName);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const reqStart = Date.now();
 
-  try {
-    const response = await fetchFn(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
+    console.log(`[Nemotron Diagnostic] NVIDIA request started (attempt ${attempt}/${maxRetries})`);
 
-    clearTimeout(timer);
-    const duration = ((Date.now() - reqStart) / 1000).toFixed(2);
-
-    console.log(`[Nemotron Diagnostic] HTTP status: ${response.status}`);
-    console.log(`[Nemotron Diagnostic] Duration: ${duration}s`);
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      console.log(`[Nemotron Diagnostic] Response failed with status ${response.status}`);
-      console.log(`[Nemotron Diagnostic] Raw error response:\n${errorText.slice(0, 15000)}`);
-      const err = new Error(`NVIDIA API request failed with status ${response.status}: ${response.statusText}`);
-      err.code = 'NVIDIA_API_ERROR';
-      err.statusCode = response.status >= 500 ? 502 : response.status;
-      err.details = errorText;
-      throw err;
-    }
-
-    const data = await response.json();
-    console.log(`[Nemotron Diagnostic] Response keys: ${Object.keys(data || {}).join(', ')}`);
-    if (data?.model) console.log(`[Nemotron Diagnostic] Model: ${data.model}`);
-
-    const choice0 = data?.choices?.[0];
-    if (choice0?.finish_reason) console.log(`[Nemotron Diagnostic] Finish reason: ${choice0.finish_reason}`);
-
-    const content = choice0?.message?.content;
-
-    if (!content || typeof content !== 'string') {
-      console.log('[Nemotron Diagnostic] Parsing failure: choices[0].message.content is missing or empty');
-      const err = new Error('NVIDIA API returned an empty or missing completion payload');
-      err.code = 'EMPTY_COMPLETION';
-      err.statusCode = 502;
-      throw err;
-    }
-
-    const contentLen = content.length;
-    console.log(`[Nemotron Diagnostic] Completion length: ${contentLen}`);
-    const rawToLog = contentLen > 15000 ? `${content.slice(0, 15000)}\n[TRUNCATED AT 15000 CHARS]` : content;
-    console.log(`[Nemotron Diagnostic] Raw completion:\n${rawToLog}`);
-
-    let parsedPlan;
     try {
-      parsedPlan = extractJsonFromText(content);
-      console.log('[Nemotron Diagnostic] Parsed JSON successfully');
-      if (parsedPlan && typeof parsedPlan === 'object') {
-        console.log(`[Nemotron Diagnostic] Top-level keys: ${Object.keys(parsedPlan).join(', ')}`);
+      const response = await fetchFn(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
+      clearTimeout(timer);
+      const duration = ((Date.now() - reqStart) / 1000).toFixed(2);
+
+      console.log(`[Nemotron Diagnostic] HTTP status: ${response.status} (attempt ${attempt}/${maxRetries}, duration ${duration}s)`);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        console.log(`[Nemotron Diagnostic] Response failed with status ${response.status}`);
+        console.log(`[Nemotron Diagnostic] Raw error response:\n${errorText.slice(0, 15000)}`);
+
+        if ([429, 500, 502, 503, 504].includes(response.status) && attempt < maxRetries) {
+          const delayMs = attempt * 1500;
+          console.log(`[Nemotron Diagnostic] Transient status ${response.status} (Worker pool busy/exhausted). Retrying in ${delayMs}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        const err = new Error(`NVIDIA API request failed with status ${response.status}: ${response.statusText}`);
+        err.code = 'NVIDIA_API_ERROR';
+        err.statusCode = response.status >= 500 ? 502 : response.status;
+        err.details = errorText;
+        throw err;
       }
-    } catch (parseErr) {
-      console.log(`[Nemotron Diagnostic] Parsing failure: JSON.parse failed - ${parseErr.message}`);
-      const err = new Error('Failed to parse NVIDIA API JSON response');
-      err.code = 'MALFORMED_JSON_RESPONSE';
-      err.statusCode = 502;
-      err.rawContent = content;
+
+      const data = await response.json();
+      console.log(`[Nemotron Diagnostic] Response keys: ${Object.keys(data || {}).join(', ')}`);
+      if (data?.model) console.log(`[Nemotron Diagnostic] Model: ${data.model}`);
+
+      const choice0 = data?.choices?.[0];
+      if (choice0?.finish_reason) console.log(`[Nemotron Diagnostic] Finish reason: ${choice0.finish_reason}`);
+
+      const content = choice0?.message?.content;
+
+      if (!content || typeof content !== 'string') {
+        console.log('[Nemotron Diagnostic] Parsing failure: choices[0].message.content is missing or empty');
+        const err = new Error('NVIDIA API returned an empty or missing completion payload');
+        err.code = 'EMPTY_COMPLETION';
+        err.statusCode = 502;
+        throw err;
+      }
+
+      const contentLen = content.length;
+      console.log(`[Nemotron Diagnostic] Completion length: ${contentLen}`);
+      const rawToLog = contentLen > 15000 ? `${content.slice(0, 15000)}\n[TRUNCATED AT 15000 CHARS]` : content;
+      console.log(`[Nemotron Diagnostic] Raw completion:\n${rawToLog}`);
+
+      let parsedPlan;
+      try {
+        parsedPlan = extractJsonFromText(content);
+        console.log('[Nemotron Diagnostic] Parsed JSON successfully');
+        if (parsedPlan && typeof parsedPlan === 'object') {
+          console.log(`[Nemotron Diagnostic] Top-level keys: ${Object.keys(parsedPlan).join(', ')}`);
+        }
+      } catch (parseErr) {
+        console.log(`[Nemotron Diagnostic] Parsing failure: JSON.parse failed - ${parseErr.message}`);
+        const err = new Error('Failed to parse NVIDIA API JSON response');
+        err.code = 'MALFORMED_JSON_RESPONSE';
+        err.statusCode = 502;
+        err.rawContent = content;
+        throw err;
+      }
+
+      return parsedPlan;
+    } catch (err) {
+      clearTimeout(timer);
+      lastError = err;
+
+      if (err.name === 'AbortError') {
+        console.log(`[Nemotron Diagnostic] Request timed out after ${timeoutMs}ms`);
+        const timeoutError = new Error(`NVIDIA API request timed out after ${timeoutMs}ms`);
+        timeoutError.code = 'TIMEOUT';
+        timeoutError.statusCode = 504;
+        throw timeoutError;
+      }
+
+      if (attempt < maxRetries && [429, 500, 502, 503, 504].includes(err.statusCode)) {
+        const delayMs = attempt * 1500;
+        console.log(`[Nemotron Diagnostic] Retrying after error in ${delayMs}ms:`, err.message);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
       throw err;
     }
-
-    return parsedPlan;
-  } catch (err) {
-    clearTimeout(timer);
-
-    if (err.name === 'AbortError') {
-      console.log(`[Nemotron Diagnostic] Request timed out after ${timeoutMs}ms`);
-      const timeoutError = new Error(`NVIDIA API request timed out after ${timeoutMs}ms`);
-      timeoutError.code = 'TIMEOUT';
-      timeoutError.statusCode = 504;
-      throw timeoutError;
-    }
-
-    throw err;
   }
+
+  throw lastError || new Error('NVIDIA API request failed after retries');
 };
 
 export default {

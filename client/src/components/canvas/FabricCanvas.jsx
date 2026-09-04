@@ -21,6 +21,12 @@ import {
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
+import {
+  hydrateSkribeFabricObject,
+  hydrateCanvasObjects,
+  SKRIBE_SERIALIZABLE_PROPERTIES
+} from '../../utils/fabricHydration.js';
+import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -137,38 +143,9 @@ export const FabricCanvas = forwardRef(({
 
   const serializeFabricObject = (obj) => {
     if (!obj || typeof obj.toJSON !== 'function') return null;
+    ensureObjectId(obj);
     const canvas = fabricCanvasRef.current;
-    const data = obj.toJSON([
-      'id',
-      'elementId',
-      'strokeId',
-      'parentShapeId',
-      'attachedTextId',
-      'metadata',
-      'aiMetadata',
-      'isStickyNote',
-      'isChecklistNote',
-      'isCalloutNote',
-      'checklistItems',
-      'noteColor',
-      'contrastResolved',
-      'isConnector',
-      'connectorType',
-      'startArrow',
-      'endArrow',
-      'sourceShapeId',
-      'targetShapeId',
-      'skribeLine',
-      'locked',
-      'protected',
-      'system',
-      'isVectorStroke',
-      'vectorStrokeData',
-      'isStraightLine',
-      'isSkribeLine',
-      'angle',
-      'padding'
-    ]);
+    const data = obj.toJSON([...SKRIBE_SERIALIZABLE_PROPERTIES]);
 
     if (canvas && data) {
       const idx = canvas.getObjects().indexOf(obj);
@@ -178,14 +155,9 @@ export const FabricCanvas = forwardRef(({
     }
 
     if (data) {
-      if (obj.isStickyNote !== undefined) data.isStickyNote = obj.isStickyNote;
-      if (obj.isChecklistNote !== undefined) data.isChecklistNote = obj.isChecklistNote;
-      if (obj.isCalloutNote !== undefined) data.isCalloutNote = obj.isCalloutNote;
-      if (obj.noteColor !== undefined) data.noteColor = obj.noteColor;
-      if (obj.attachedTextId !== undefined) data.attachedTextId = obj.attachedTextId;
-      if (obj.parentShapeId !== undefined) data.parentShapeId = obj.parentShapeId;
-      if (obj.elementId !== undefined) data.elementId = obj.elementId;
-      if (obj.strokeId !== undefined) data.strokeId = obj.strokeId;
+      SKRIBE_SERIALIZABLE_PROPERTIES.forEach((prop) => {
+        if (obj[prop] !== undefined) data[prop] = obj[prop];
+      });
     }
 
     return data;
@@ -226,11 +198,8 @@ export const FabricCanvas = forwardRef(({
       const enlivened = await fabric.util.enlivenObjects([objData]);
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const obj = enlivened[0];
+        hydrateSkribeFabricObject(obj, objectData);
         if (targetId) obj.id = targetId;
-        if (objectData.attachedTextId) obj.attachedTextId = objectData.attachedTextId;
-        if (objectData.parentShapeId) obj.parentShapeId = objectData.parentShapeId;
-        if (objectData.elementId) obj.elementId = objectData.elementId;
-        if (objectData.strokeId) obj.strokeId = objectData.strokeId;
         ensureObjectId(obj);
         if (objectData.isStickyNote !== undefined) obj.isStickyNote = objectData.isStickyNote;
         if (objectData.isChecklistNote !== undefined) obj.isChecklistNote = objectData.isChecklistNote;
@@ -357,6 +326,7 @@ export const FabricCanvas = forwardRef(({
       const enlivened = await fabric.util.enlivenObjects([objData]);
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const newObj = enlivened[0];
+        hydrateSkribeFabricObject(existingObj, objectData);
 
         const propsToCopy = [
           'left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle',
@@ -890,11 +860,34 @@ export const FabricCanvas = forwardRef(({
 
   const ensureObjectId = (obj) => {
     if (!obj) return;
+
+    if (typeof obj.id === 'string') {
+      if (obj.id.startsWith('shape_line_')) {
+        obj.id = obj.id.replace(/^shape_line_/, 'line_');
+      } else if (obj.id.startsWith('shape_conn_')) {
+        obj.id = obj.id.replace(/^shape_conn_/, 'conn_');
+      } else if (obj.id.startsWith('shape_connector_')) {
+        obj.id = obj.id.replace(/^shape_connector_/, 'conn_');
+      } else if (obj.id.startsWith('shape_stroke_')) {
+        obj.id = obj.id.replace(/^shape_stroke_/, 'stroke_');
+      }
+    }
+
     if (!obj.id) {
-      if (obj.strokeId) {
-        obj.id = obj.strokeId;
+      if (obj.strokeId || (typeof obj.elementId === 'string' && obj.elementId.startsWith('stroke_'))) {
+        obj.id = obj.strokeId || obj.elementId;
+      } else if (obj.isConnector || obj.type === 'connector' || obj.connectorType || (typeof obj.elementId === 'string' && (obj.elementId.startsWith('conn_') || obj.elementId.startsWith('connector_'))) || isConnectorPath(obj)) {
+        obj.id = obj.elementId
+          ? (obj.elementId.startsWith('conn_') || obj.elementId.startsWith('connector_') ? (obj.elementId.startsWith('connector_') ? obj.elementId.replace(/^connector_/, 'conn_') : obj.elementId) : 'conn_' + obj.elementId)
+          : ('conn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
+      } else if (obj.isSkribeLine || obj.isStraightLine || obj.skribeLine || obj.type === 'line' || (typeof obj.elementId === 'string' && obj.elementId.startsWith('line_'))) {
+        obj.id = obj.elementId
+          ? (obj.elementId.startsWith('line_') ? obj.elementId : 'line_' + obj.elementId)
+          : ('line_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
       } else if (obj.elementId) {
-        obj.id = (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') ? 'text_' + obj.elementId : 'shape_' + obj.elementId;
+        obj.id = (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text' || obj.elementId.startsWith('text_'))
+          ? (obj.elementId.startsWith('text_') ? obj.elementId : 'text_' + obj.elementId)
+          : (obj.elementId.startsWith('shape_') ? obj.elementId : 'shape_' + obj.elementId);
       } else if (isLoadingFromJSONRef.current) {
         obj.id = getDeterministicObjectId(obj);
       } else {
@@ -902,17 +895,27 @@ export const FabricCanvas = forwardRef(({
       }
     }
     if (!obj.elementId) {
-      if (typeof obj.id === 'string' && (obj.id.startsWith('shape_') || obj.id.startsWith('text_'))) {
-        obj.elementId = obj.id.replace(/^(shape_|text_)/, '');
+      if (typeof obj.id === 'string' && (obj.id.startsWith('shape_') || obj.id.startsWith('text_') || obj.id.startsWith('conn_') || obj.id.startsWith('connector_') || obj.id.startsWith('line_') || obj.id.startsWith('stroke_'))) {
+        obj.elementId = obj.id.replace(/^(shape_|text_|conn_|connector_|line_|stroke_)/, '');
       } else {
         obj.elementId = obj.id;
       }
     }
     if (!obj.attachedTextId && typeof obj.id === 'string' && obj.id.startsWith('shape_')) {
-      obj.attachedTextId = 'text_' + obj.elementId;
+      const canvas = fabricCanvasRef.current;
+      const targetTextId = 'text_' + obj.elementId;
+      const hasMatchingText = canvas && canvas.getObjects().some((o) => o !== obj && (o.id === targetTextId || (o.elementId === obj.elementId && typeof o.id === 'string' && o.id.startsWith('text_'))));
+      if (hasMatchingText) {
+        obj.attachedTextId = targetTextId;
+      }
     }
     if (!obj.parentShapeId && typeof obj.id === 'string' && obj.id.startsWith('text_')) {
-      obj.parentShapeId = 'shape_' + obj.elementId;
+      const canvas = fabricCanvasRef.current;
+      const targetShapeId = 'shape_' + obj.elementId;
+      const hasMatchingShape = canvas && canvas.getObjects().some((o) => o !== obj && (o.id === targetShapeId || (o.elementId === obj.elementId && typeof o.id === 'string' && o.id.startsWith('shape_'))));
+      if (hasMatchingShape) {
+        obj.parentShapeId = targetShapeId;
+      }
     }
   };
 
@@ -1723,6 +1726,8 @@ export const FabricCanvas = forwardRef(({
 
     const prevJson = undoStackRef.current[undoStackRef.current.length - 1];
     Promise.resolve(canvas.loadFromJSON(JSON.parse(prevJson))).then(() => {
+      const loaded = hydrateCanvasObjects(canvas, JSON.parse(prevJson));
+      loaded.forEach((o) => ensureObjectId(o));
       canvas.requestRenderAll();
       isHistoryProcessingRef.current = false;
       if (onHistoryChange) {
@@ -1743,6 +1748,8 @@ export const FabricCanvas = forwardRef(({
     undoStackRef.current.push(nextJson);
 
     Promise.resolve(canvas.loadFromJSON(JSON.parse(nextJson))).then(() => {
+      const loaded = hydrateCanvasObjects(canvas, JSON.parse(nextJson));
+      loaded.forEach((o) => ensureObjectId(o));
       canvas.requestRenderAll();
       isHistoryProcessingRef.current = false;
       if (onHistoryChange) {
@@ -2270,6 +2277,86 @@ export const FabricCanvas = forwardRef(({
       if (onZoomChange) onZoomChange(Math.round(zoom * 100));
     },
 
+    fitToContent: (padding = 60) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas) return;
+      const objects = canvas.getObjects().filter((o) => !isTemporaryObject(o));
+      if (objects.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      objects.forEach((o) => {
+        const left = o.left ?? o.position?.x ?? 0;
+        const top = o.top ?? o.position?.y ?? 0;
+        const width = (o.width ?? 0) * (o.scaleX ?? 1);
+        const height = (o.height ?? 0) * (o.scaleY ?? 1);
+
+        const isOriginCenter = o.originX === 'center';
+        const objMinX = isOriginCenter ? left - width / 2 : left;
+        const objMaxX = isOriginCenter ? left + width / 2 : left + width;
+        const objMinY = isOriginCenter ? top - height / 2 : top;
+        const objMaxY = isOriginCenter ? top + height / 2 : top + height;
+
+        minX = Math.min(minX, objMinX);
+        minY = Math.min(minY, objMinY);
+        maxX = Math.max(maxX, objMaxX);
+        maxY = Math.max(maxY, objMaxY);
+      });
+
+      if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
+
+      const contentWidth = Math.max(20, maxX - minX);
+      const contentHeight = Math.max(20, maxY - minY);
+      const canvasWidth = canvas.getWidth() || window.innerWidth;
+      const canvasHeight = canvas.getHeight() || window.innerHeight;
+
+      const scaleX = (canvasWidth - padding * 2) / contentWidth;
+      const scaleY = (canvasHeight - padding * 2) / contentHeight;
+      const zoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.2), 1.5);
+
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const x = canvasWidth / 2 - centerX * zoom;
+      const y = canvasHeight / 2 - centerY * zoom;
+
+      canvas.setViewportTransform([zoom, 0, 0, zoom, x, y]);
+      canvas.requestRenderAll();
+      if (onZoomChange) onZoomChange(Math.round(zoom * 100));
+      notifyViewportChange();
+    },
+
+    hasVisibleObjects: () => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas) return false;
+      const objects = canvas.getObjects().filter((o) => !isTemporaryObject(o));
+      if (objects.length === 0) return true;
+
+      const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+      const zoom = vpt[0] || 1;
+      const vptX = vpt[4] || 0;
+      const vptY = vpt[5] || 0;
+      const canvasWidth = canvas.getWidth() || window.innerWidth;
+      const canvasHeight = canvas.getHeight() || window.innerHeight;
+
+      const viewLeft = -vptX / zoom;
+      const viewTop = -vptY / zoom;
+      const viewRight = (canvasWidth - vptX) / zoom;
+      const viewBottom = (canvasHeight - vptY) / zoom;
+
+      return objects.some((o) => {
+        const left = o.left ?? 0;
+        const top = o.top ?? 0;
+        const width = (o.width ?? 0) * (o.scaleX ?? 1);
+        const height = (o.height ?? 0) * (o.scaleY ?? 1);
+        const isCenter = o.originX === 'center';
+        const minX = isCenter ? left - width / 2 : left;
+        const maxX = isCenter ? left + width / 2 : left + width;
+        const minY = isCenter ? top - height / 2 : top;
+        const maxY = isCenter ? top + height / 2 : top + height;
+
+        return maxX >= viewLeft && minX <= viewRight && maxY >= viewTop && minY <= viewBottom;
+      });
+    },
+
     loadFromJSON: (canvasData, callback) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas || !canvasData) {
@@ -2285,21 +2372,9 @@ export const FabricCanvas = forwardRef(({
           return;
         }
         Promise.resolve(canvas.loadFromJSON(jsonPayload)).then(() => {
-          const loadedObjects = canvas.getObjects();
-
-          loadedObjects.forEach((o, index) => {
-            const persistedObject = jsonPayload.objects[index];
-            if (persistedObject) {
-              ['id', 'elementId', 'attachedTextId', 'parentShapeId'].forEach((property) => {
-                if (persistedObject[property] !== undefined) {
-                  o[property] = persistedObject[property];
-                }
-              });
-            }
+          const loadedObjects = hydrateCanvasObjects(canvas, jsonPayload);
+          loadedObjects.forEach((o) => {
             ensureObjectId(o);
-            if (o.skribeLine) {
-              syncSkribeLineToFabric(o);
-            }
           });
 
           loadedObjects.forEach((o) => {
@@ -2611,27 +2686,15 @@ export const FabricCanvas = forwardRef(({
       redoStack.push(currentState);
 
       const previousState = undoStack[undoStack.length - 1];
-      canvas.loadFromJSON(JSON.parse(previousState)).then(() => {
-        const allObjects = canvas.getObjects();
-
+      const parsedPrev = JSON.parse(previousState);
+      canvas.loadFromJSON(parsedPrev).then(() => {
+        const allObjects = hydrateCanvasObjects(canvas, parsedPrev);
         allObjects.forEach((o) => {
+          ensureObjectId(o);
           if (o.isStickyNote) {
             const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
             o.noteColor = paperColor;
             o.set('fill', createRuledPaperFill(paperColor));
-          }
-          if (o.isSkribeLine || o.skribeLine || o.isStraightLine || o.type === 'line') {
-            if (o.skribeLine && !(o.skribeLine instanceof SkribeLine)) {
-              o.skribeLine = new SkribeLine(o.skribeLine);
-            } else if (!o.skribeLine) {
-              const x1 = o.x1 !== undefined ? o.x1 : (o.left || 100);
-              const y1 = o.y1 !== undefined ? o.y1 : (o.top || 100);
-              const x2 = o.x2 !== undefined ? o.x2 : x1 + 140;
-              const y2 = o.y2 !== undefined ? o.y2 : y1;
-              o.skribeLine = new SkribeLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, stroke: o.stroke, strokeWidth: o.strokeWidth });
-            }
-            attachSkribeLineControls(o);
-            syncSkribeLineToFabric(o);
           }
         });
 
@@ -2668,27 +2731,15 @@ export const FabricCanvas = forwardRef(({
       const nextState = redoStack.pop();
       undoStack.push(nextState);
 
-      canvas.loadFromJSON(JSON.parse(nextState)).then(() => {
-        const allObjects = canvas.getObjects();
-
+      const parsedNext = JSON.parse(nextState);
+      canvas.loadFromJSON(parsedNext).then(() => {
+        const allObjects = hydrateCanvasObjects(canvas, parsedNext);
         allObjects.forEach((o) => {
+          ensureObjectId(o);
           if (o.isStickyNote) {
             const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
             o.noteColor = paperColor;
             o.set('fill', createRuledPaperFill(paperColor));
-          }
-          if (o.isSkribeLine || o.skribeLine || o.isStraightLine || o.type === 'line') {
-            if (o.skribeLine && !(o.skribeLine instanceof SkribeLine)) {
-              o.skribeLine = new SkribeLine(o.skribeLine);
-            } else if (!o.skribeLine) {
-              const x1 = o.x1 !== undefined ? o.x1 : (o.left || 100);
-              const y1 = o.y1 !== undefined ? o.y1 : (o.top || 100);
-              const x2 = o.x2 !== undefined ? o.x2 : x1 + 140;
-              const y2 = o.y2 !== undefined ? o.y2 : y1;
-              o.skribeLine = new SkribeLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, stroke: o.stroke, strokeWidth: o.strokeWidth });
-            }
-            attachSkribeLineControls(o);
-            syncSkribeLineToFabric(o);
           }
         });
 

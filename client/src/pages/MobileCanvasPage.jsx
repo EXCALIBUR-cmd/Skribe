@@ -55,11 +55,11 @@ export const MobileCanvasPage = () => {
             </div>
           </div>
 
-          {/* Drawn Shape Circle */}
+          {}
           <div className="absolute top-[18%] right-[8%] w-28 h-28 border-4 border-primary rounded-full opacity-60 transform rotate-12 pointer-events-none border-dashed" />
         </div>
 
-        {/* Mobile Bottom Bar Accent Indicator */}
+        {}
         <div className="w-32 h-1 bg-outline-variant rounded-full mt-3 z-30" />
       </div>
     </div>

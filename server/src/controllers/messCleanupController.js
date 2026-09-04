@@ -40,7 +40,6 @@ export const analyze = async (req, res, next) => {
       });
     }
 
-    // --- OrganizationPlan v2 contract validation ---
     console.log('[Nemotron Diagnostic] OrganizationPlan v2 validation checking...');
 
     if (!organizationPlan || typeof organizationPlan !== 'object') {
@@ -53,7 +52,6 @@ export const analyze = async (req, res, next) => {
     const planKeys = Object.keys(organizationPlan);
     console.log(`[Nemotron Diagnostic] OrganizationPlan top-level keys: ${planKeys.join(', ')}`);
 
-    // Valid plan structure: groups (SemanticScene) OR document.sections (v2) OR sections (v1)
     const groupsOrSections = organizationPlan.groups || organizationPlan.document?.sections || organizationPlan.sections;
     if (!Array.isArray(groupsOrSections)) {
       console.log('[Nemotron Diagnostic] OrganizationPlan validation failed: no groups or sections array found in document or top-level');
@@ -63,12 +61,10 @@ export const analyze = async (req, res, next) => {
       });
     }
 
-    // v2 contract: workspaceType should be present
     if (typeof organizationPlan.workspaceType !== 'string') {
       console.log('[Nemotron Diagnostic] Warning: workspaceType missing from Nemotron response, will default to mixed');
     }
 
-    // v2 diagnostics
     const relationshipCount = Array.isArray(organizationPlan.relationships) ? organizationPlan.relationships.length : 0;
     console.log(`[Nemotron Diagnostic] Validation passed: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${organizationPlan.workspaceType || 'unset'}`);
     console.log(`[Nemotron Diagnostic] Controller completed in ${Date.now() - ctrlStart}ms`);

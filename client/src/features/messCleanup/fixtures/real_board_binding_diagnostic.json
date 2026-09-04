@@ -1,0 +1,978 @@
+﻿{
+  "generatedAt": "2026-08-25T13:00:09.326Z",
+  "debugFlag": "?debugBinding",
+  "summary": {
+    "totalObjects": 17,
+    "textObjects": 9,
+    "containers": 8,
+    "connectors": 0,
+    "freeformUnits": 0,
+    "ownershipWinnerTally": {
+      "explicit-metadata": 6,
+      "shared-element-id": 0,
+      "geometric-containment": 0,
+      "standalone": 3,
+      "unresolved": 0
+    }
+  },
+  "textBindings": [
+    {
+      "textObjectId": "text_obj_1787528916730_nq49o",
+      "textContent": "Hello",
+      "textBounds": {
+        "x": 402,
+        "y": 134,
+        "w": 200,
+        "h": 25
+      },
+      "textCenter": {
+        "x": 502,
+        "y": 146
+      },
+      "rawPosition": {
+        "x": 502,
+        "y": 146
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_obj_1787528916730_nq49o",
+        "parentObjectId": "shape_obj_1787528916730_nq49o"
+      },
+      "tier2SharedElementId": {
+        "pass": false,
+        "reason": "no container shares elementId",
+        "textElementId": "obj_1787528916730_nq49o"
+      },
+      "tier3GeometricContainment": {
+        "pass": false,
+        "reason": "text center not inside any container bounds",
+        "textCenter": {
+          "x": 502,
+          "y": 146
+        },
+        "textBounds": {
+          "x": 402,
+          "y": 134,
+          "w": 200,
+          "h": 25
+        },
+        "rawPosition": {
+          "x": 502,
+          "y": 146
+        },
+        "nearestContainers": [
+          {
+            "id": "shape_elem_1787528950559_1ez2t",
+            "bounds": {
+              "x": 630,
+              "y": 244,
+              "w": 120,
+              "h": 120
+            }
+          },
+          {
+            "id": "shape_elem_1787528957582_56jq3",
+            "bounds": {
+              "x": 380,
+              "y": 427,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787528962171_mv2vs",
+            "bounds": {
+              "x": 880,
+              "y": 412,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787567585467_cv5dr",
+            "bounds": {
+              "x": 1103,
+              "y": 306,
+              "w": 120,
+              "h": 120
+            }
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "no-group",
+        "textGroupId": null,
+        "containerGroupId": null
+      },
+      "winningTier": "standalone",
+      "winningOwnerObjectId": null
+    },
+    {
+      "textObjectId": "text_obj_1787528931619_utwco",
+      "textContent": "Bye Bye",
+      "textBounds": {
+        "x": 916,
+        "y": 122,
+        "w": 200,
+        "h": 25
+      },
+      "textCenter": {
+        "x": 1016,
+        "y": 134
+      },
+      "rawPosition": {
+        "x": 1016,
+        "y": 134
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_obj_1787528931619_utwco",
+        "parentObjectId": "shape_obj_1787528931619_utwco"
+      },
+      "tier2SharedElementId": {
+        "pass": false,
+        "reason": "no container shares elementId",
+        "textElementId": "obj_1787528931619_utwco"
+      },
+      "tier3GeometricContainment": {
+        "pass": false,
+        "reason": "text center not inside any container bounds",
+        "textCenter": {
+          "x": 1016,
+          "y": 134
+        },
+        "textBounds": {
+          "x": 916,
+          "y": 122,
+          "w": 200,
+          "h": 25
+        },
+        "rawPosition": {
+          "x": 1016,
+          "y": 134
+        },
+        "nearestContainers": [
+          {
+            "id": "shape_elem_1787528950559_1ez2t",
+            "bounds": {
+              "x": 630,
+              "y": 244,
+              "w": 120,
+              "h": 120
+            }
+          },
+          {
+            "id": "shape_elem_1787528957582_56jq3",
+            "bounds": {
+              "x": 380,
+              "y": 427,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787528962171_mv2vs",
+            "bounds": {
+              "x": 880,
+              "y": 412,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787567585467_cv5dr",
+            "bounds": {
+              "x": 1103,
+              "y": 306,
+              "w": 120,
+              "h": 120
+            }
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "text-in-group-no-candidate",
+        "textGroupId": "group_notes_1"
+      },
+      "winningTier": "standalone",
+      "winningOwnerObjectId": null
+    },
+    {
+      "textObjectId": "text_elem_1787528950559_1ez2t",
+      "textContent": "Circle",
+      "textBounds": {
+        "x": 640,
+        "y": 295,
+        "w": 100,
+        "h": 18
+      },
+      "textCenter": {
+        "x": 690,
+        "y": 304
+      },
+      "rawPosition": {
+        "x": 690,
+        "y": 304
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787528950559_1ez2t",
+        "parentObjectId": "shape_elem_1787528950559_1ez2t"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787528950559_1ez2t",
+        "containerObjectId": "shape_elem_1787528950559_1ez2t"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 690,
+          "y": 304
+        },
+        "textBounds": {
+          "x": 640,
+          "y": 295,
+          "w": 100,
+          "h": 18
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787528950559_1ez2t",
+          "containerBounds": {
+            "x": 630,
+            "y": 244,
+            "w": 120,
+            "h": 120
+          },
+          "area": 14400
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787528950559_1ez2t",
+            "containerBounds": {
+              "x": 630,
+              "y": 244,
+              "w": 120,
+              "h": 120
+            },
+            "area": 14400
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "no-group",
+        "textGroupId": null,
+        "containerGroupId": "group_flow_1"
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787528950559_1ez2t"
+    },
+    {
+      "textObjectId": "text_elem_1787528957582_56jq3",
+      "textContent": "New Sticky Note",
+      "textBounds": {
+        "x": 328,
+        "y": 435,
+        "w": 144,
+        "h": 20
+      },
+      "textCenter": {
+        "x": 400,
+        "y": 445
+      },
+      "rawPosition": {
+        "x": 400,
+        "y": 445
+      },
+      "rotation": 0.9,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787528957582_56jq3",
+        "parentObjectId": "shape_elem_1787528957582_56jq3"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787528957582_56jq3",
+        "containerObjectId": "shape_elem_1787528957582_56jq3"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 400,
+          "y": 445
+        },
+        "textBounds": {
+          "x": 328,
+          "y": 435,
+          "w": 144,
+          "h": 20
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787528957582_56jq3",
+          "containerBounds": {
+            "x": 380,
+            "y": 427,
+            "w": 183,
+            "h": 183
+          },
+          "area": 33418
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787528957582_56jq3",
+            "containerBounds": {
+              "x": 380,
+              "y": 427,
+              "w": 183,
+              "h": 183
+            },
+            "area": 33418
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "different-groups",
+        "textGroupId": "group_notes_1",
+        "containerGroupId": "group_flow_1"
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787528957582_56jq3"
+    },
+    {
+      "textObjectId": "text_elem_1787528962171_mv2vs",
+      "textContent": "New Sticky Note",
+      "textBounds": {
+        "x": 809,
+        "y": 403,
+        "w": 144,
+        "h": 20
+      },
+      "textCenter": {
+        "x": 881,
+        "y": 413
+      },
+      "rawPosition": {
+        "x": 881,
+        "y": 413
+      },
+      "rotation": 0.9,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787528962171_mv2vs",
+        "parentObjectId": "shape_elem_1787528962171_mv2vs"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787528962171_mv2vs",
+        "containerObjectId": "shape_elem_1787528962171_mv2vs"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 881,
+          "y": 413
+        },
+        "textBounds": {
+          "x": 809,
+          "y": 403,
+          "w": 144,
+          "h": 20
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787528962171_mv2vs",
+          "containerBounds": {
+            "x": 880,
+            "y": 412,
+            "w": 183,
+            "h": 183
+          },
+          "area": 33418
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787528962171_mv2vs",
+            "containerBounds": {
+              "x": 880,
+              "y": 412,
+              "w": 183,
+              "h": 183
+            },
+            "area": 33418
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "different-groups",
+        "textGroupId": "group_notes_1",
+        "containerGroupId": null
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787528962171_mv2vs"
+    },
+    {
+      "textObjectId": "text_elem_1787567585467_cv5dr",
+      "textContent": "Circle",
+      "textBounds": {
+        "x": 1113,
+        "y": 357,
+        "w": 100,
+        "h": 18
+      },
+      "textCenter": {
+        "x": 1163,
+        "y": 366
+      },
+      "rawPosition": {
+        "x": 1163,
+        "y": 366
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787567585467_cv5dr",
+        "parentObjectId": "shape_elem_1787567585467_cv5dr"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787567585467_cv5dr",
+        "containerObjectId": "shape_elem_1787567585467_cv5dr"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 1163,
+          "y": 366
+        },
+        "textBounds": {
+          "x": 1113,
+          "y": 357,
+          "w": 100,
+          "h": 18
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787567585467_cv5dr",
+          "containerBounds": {
+            "x": 1103,
+            "y": 306,
+            "w": 120,
+            "h": 120
+          },
+          "area": 14400
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787567585467_cv5dr",
+            "containerBounds": {
+              "x": 1103,
+              "y": 306,
+              "w": 120,
+              "h": 120
+            },
+            "area": 14400
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "no-group",
+        "textGroupId": null,
+        "containerGroupId": "group_flow_1"
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787567585467_cv5dr"
+    },
+    {
+      "textObjectId": "text_elem_1787567611349_tsq6f",
+      "textContent": "Triangle",
+      "textBounds": {
+        "x": 847,
+        "y": 246,
+        "w": 90,
+        "h": 17
+      },
+      "textCenter": {
+        "x": 892,
+        "y": 254
+      },
+      "rawPosition": {
+        "x": 892,
+        "y": 254
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787567611349_tsq6f",
+        "parentObjectId": "shape_elem_1787567611349_tsq6f"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787567611349_tsq6f",
+        "containerObjectId": "shape_elem_1787567611349_tsq6f"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 892,
+          "y": 254
+        },
+        "textBounds": {
+          "x": 847,
+          "y": 246,
+          "w": 90,
+          "h": 17
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787567611349_tsq6f",
+          "containerBounds": {
+            "x": 822,
+            "y": 194,
+            "w": 140,
+            "h": 120
+          },
+          "area": 16800
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787567611349_tsq6f",
+            "containerBounds": {
+              "x": 822,
+              "y": 194,
+              "w": 140,
+              "h": 120
+            },
+            "area": 16800
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "no-group",
+        "textGroupId": null,
+        "containerGroupId": "group_flow_1"
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787567611349_tsq6f"
+    },
+    {
+      "textObjectId": "text_obj_1787567618787_a3zpv",
+      "textContent": "What is MESS cleanup?",
+      "textBounds": {
+        "x": 1325,
+        "y": 447,
+        "w": 54,
+        "h": 200
+      },
+      "textCenter": {
+        "x": 1352,
+        "y": 547
+      },
+      "rawPosition": {
+        "x": 1352,
+        "y": 547
+      },
+      "rotation": 90,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_obj_1787567618787_a3zpv",
+        "parentObjectId": "shape_obj_1787567618787_a3zpv"
+      },
+      "tier2SharedElementId": {
+        "pass": false,
+        "reason": "no container shares elementId",
+        "textElementId": "obj_1787567618787_a3zpv"
+      },
+      "tier3GeometricContainment": {
+        "pass": false,
+        "reason": "text center not inside any container bounds",
+        "textCenter": {
+          "x": 1352,
+          "y": 547
+        },
+        "textBounds": {
+          "x": 1325,
+          "y": 447,
+          "w": 54,
+          "h": 200
+        },
+        "rawPosition": {
+          "x": 1352,
+          "y": 547
+        },
+        "nearestContainers": [
+          {
+            "id": "shape_elem_1787528950559_1ez2t",
+            "bounds": {
+              "x": 630,
+              "y": 244,
+              "w": 120,
+              "h": 120
+            }
+          },
+          {
+            "id": "shape_elem_1787528957582_56jq3",
+            "bounds": {
+              "x": 380,
+              "y": 427,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787528962171_mv2vs",
+            "bounds": {
+              "x": 880,
+              "y": 412,
+              "w": 183,
+              "h": 183
+            }
+          },
+          {
+            "id": "shape_elem_1787567585467_cv5dr",
+            "bounds": {
+              "x": 1103,
+              "y": 306,
+              "w": 120,
+              "h": 120
+            }
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "text-in-group-no-candidate",
+        "textGroupId": "group_flow_1"
+      },
+      "winningTier": "standalone",
+      "winningOwnerObjectId": null
+    },
+    {
+      "textObjectId": "text_elem_1787567667450_ajcuj",
+      "textContent": "Rectangle",
+      "textBounds": {
+        "x": 325,
+        "y": 283,
+        "w": 140,
+        "h": 18
+      },
+      "textCenter": {
+        "x": 395,
+        "y": 292
+      },
+      "rawPosition": {
+        "x": 395,
+        "y": 292
+      },
+      "rotation": 0,
+      "rotationNormalized": false,
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "mechanism": "parentShapeId",
+        "parentShapeId": "shape_elem_1787567667450_ajcuj",
+        "parentObjectId": "shape_elem_1787567667450_ajcuj"
+      },
+      "tier2SharedElementId": {
+        "pass": true,
+        "textElementId": "elem_1787567667450_ajcuj",
+        "containerObjectId": "shape_elem_1787567667450_ajcuj"
+      },
+      "tier3GeometricContainment": {
+        "pass": true,
+        "textCenter": {
+          "x": 395,
+          "y": 292
+        },
+        "textBounds": {
+          "x": 325,
+          "y": 283,
+          "w": 140,
+          "h": 18
+        },
+        "bestContainer": {
+          "containerObjectId": "shape_elem_1787567667450_ajcuj",
+          "containerBounds": {
+            "x": 315,
+            "y": 237,
+            "w": 160,
+            "h": 110
+          },
+          "area": 17600
+        },
+        "allHits": [
+          {
+            "containerObjectId": "shape_elem_1787567667450_ajcuj",
+            "containerBounds": {
+              "x": 315,
+              "y": 237,
+              "w": 160,
+              "h": 110
+            },
+            "area": 17600
+          }
+        ]
+      },
+      "tier4SemanticGroup": {
+        "result": "no-group",
+        "textGroupId": null,
+        "containerGroupId": "group_flow_1"
+      },
+      "winningTier": "explicit-metadata",
+      "winningOwnerObjectId": "shape_elem_1787567667450_ajcuj"
+    }
+  ],
+  "containerOwnership": [
+    {
+      "containerObjectId": "shape_elem_1787528950559_1ez2t",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 630,
+        "y": 244,
+        "w": 120,
+        "h": 120
+      },
+      "containerCenter": {
+        "x": 690,
+        "y": 304
+      },
+      "rawPosition": {
+        "x": 690,
+        "y": 304
+      },
+      "elementId": "elem_1787528950559_1ez2t",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787528950559_1ez2t"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787528950559_1ez2t"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787528950559_1ez2t"
+      ]
+    },
+    {
+      "containerObjectId": "shape_elem_1787528957582_56jq3",
+      "containerKind": "sticky-note",
+      "containerShapeType": "note",
+      "containerBounds": {
+        "x": 380,
+        "y": 427,
+        "w": 183,
+        "h": 183
+      },
+      "containerCenter": {
+        "x": 471,
+        "y": 518
+      },
+      "rawPosition": {
+        "x": 471,
+        "y": 518
+      },
+      "elementId": "elem_1787528957582_56jq3",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787528957582_56jq3"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787528957582_56jq3"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787528957582_56jq3"
+      ]
+    },
+    {
+      "containerObjectId": "shape_elem_1787528962171_mv2vs",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 880,
+        "y": 412,
+        "w": 183,
+        "h": 183
+      },
+      "containerCenter": {
+        "x": 971,
+        "y": 503
+      },
+      "rawPosition": {
+        "x": 971,
+        "y": 503
+      },
+      "elementId": "elem_1787528962171_mv2vs",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787528962171_mv2vs"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787528962171_mv2vs"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787528962171_mv2vs"
+      ]
+    },
+    {
+      "containerObjectId": "shape_elem_1787567585467_cv5dr",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 1103,
+        "y": 306,
+        "w": 120,
+        "h": 120
+      },
+      "containerCenter": {
+        "x": 1163,
+        "y": 366
+      },
+      "rawPosition": {
+        "x": 1163,
+        "y": 366
+      },
+      "elementId": "elem_1787567585467_cv5dr",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787567585467_cv5dr"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787567585467_cv5dr"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787567585467_cv5dr"
+      ]
+    },
+    {
+      "containerObjectId": "shape_elem_1787567611349_tsq6f",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 822,
+        "y": 194,
+        "w": 140,
+        "h": 120
+      },
+      "containerCenter": {
+        "x": 892,
+        "y": 254
+      },
+      "rawPosition": {
+        "x": 892,
+        "y": 254
+      },
+      "elementId": "elem_1787567611349_tsq6f",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787567611349_tsq6f"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787567611349_tsq6f"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787567611349_tsq6f"
+      ]
+    },
+    {
+      "containerObjectId": "shape_obj_1787567653469_gywjn",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 658,
+        "y": 472,
+        "w": 146,
+        "h": 40
+      },
+      "containerCenter": {
+        "x": 730,
+        "y": 492
+      },
+      "rawPosition": {
+        "x": 730,
+        "y": 492
+      },
+      "elementId": "obj_1787567653469_gywjn",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_obj_1787567653469_gywjn"
+      },
+      "metadataAttachedTextIds": [
+        "text_obj_1787567653469_gywjn"
+      ],
+      "resolvedTextIds": []
+    },
+    {
+      "containerObjectId": "shape_elem_1787567667450_ajcuj",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 315,
+        "y": 237,
+        "w": 160,
+        "h": 110
+      },
+      "containerCenter": {
+        "x": 395,
+        "y": 292
+      },
+      "rawPosition": {
+        "x": 395,
+        "y": 292
+      },
+      "elementId": "elem_1787567667450_ajcuj",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_elem_1787567667450_ajcuj"
+      },
+      "metadataAttachedTextIds": [
+        "text_elem_1787567667450_ajcuj"
+      ],
+      "resolvedTextIds": [
+        "text_elem_1787567667450_ajcuj"
+      ]
+    },
+    {
+      "containerObjectId": "shape_line_1787661297756_bk89k",
+      "containerKind": "shape",
+      "containerShapeType": "shape",
+      "containerBounds": {
+        "x": 1402,
+        "y": 144,
+        "w": 2,
+        "h": 666
+      },
+      "containerCenter": {
+        "x": 1403,
+        "y": 477
+      },
+      "rawPosition": {
+        "x": 1403,
+        "y": 477
+      },
+      "elementId": "line_1787661297756_bk89k",
+      "tier1ExplicitMetadata": {
+        "pass": true,
+        "attachedTextId": "text_line_1787661297756_bk89k"
+      },
+      "metadataAttachedTextIds": [
+        "text_line_1787661297756_bk89k"
+      ],
+      "resolvedTextIds": []
+    }
+  ],
+  "connectors": [],
+  "freeformGroups": []
+}

@@ -16,7 +16,7 @@
     "test:mess-cleanup-ui": "node --test src/features/messCleanup/messCleanupUiIntegration.test.js",
     "test:mess-cleanup-extraction": "node --test src/features/messCleanup/extractWorkspaceModelEnrichment.test.js",
     "test:mess-cleanup-hierarchy": "node --test src/features/messCleanup/documentHierarchy.test.js",
-    "test:mess-cleanup-notebook": "node --test src/features/messCleanup/notebookComposition.test.js",
+    "test:mess-cleanup-executor": "node --test src/features/messCleanup/executeCleanupPlan.test.js src/features/messCleanup/cleanupPlan.test.js src/features/messCleanup/realBoardAtomicity.test.js",
     "test:mess-cleanup-validator": "node --test src/features/messCleanup/validateOrganizationPlan.test.js",
     "test:mess-cleanup-v2": "node --test src/features/messCleanup/organizationPlanV2.test.js",
     "test:mess-cleanup-omni-client": "node --test src/features/messCleanup/omniClient.test.js",

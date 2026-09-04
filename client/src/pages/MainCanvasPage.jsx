@@ -18,7 +18,10 @@ import { useAuth } from '../context/AuthContext';
 import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
 import { createLayoutProposal } from '../features/messCleanup/layoutEngine.js';
+import { buildPreviewRenderModel } from '../features/messCleanup/previewModel.js';
+import { auditCleanupPipeline } from '../features/messCleanup/auditCleanupPipeline.js';
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
+import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 
 const isValidViewport = (viewport) => (
   viewport &&
@@ -236,7 +239,10 @@ export const MainCanvasPage = () => {
           setCurrentBoard(res.data.board);
           setBoardTitle(res.data.board.title || 'Untitled Board');
           const canvasData = res.data.board.canvasData;
-          const savedViewport = res.data.board.viewportStates?.[0]?.viewport;
+          const userViewportState = res.data.board.viewportStates?.find(
+            (s) => String(s.userId) === String(user?._id || user?.id)
+          );
+          const savedViewport = userViewportState?.viewport || res.data.board.viewportStates?.[0]?.viewport;
           latestViewportRef.current = isValidViewport(savedViewport) ? savedViewport : null;
 
           console.log('[BOARD LOAD DEBUG] Board ID:', boardId);
@@ -255,6 +261,10 @@ export const MainCanvasPage = () => {
                 if (isMounted) {
                   if (isValidViewport(savedViewport)) {
                     fabricCanvasRef.current.setViewport(savedViewport);
+                  }
+                  if (!fabricCanvasRef.current.hasVisibleObjects?.()) {
+                    console.log('[BOARD LOAD DEBUG] Restored viewport has no visible objects. Auto-fitting content...');
+                    fabricCanvasRef.current.fitToContent?.();
                   }
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);
@@ -558,6 +568,12 @@ export const MainCanvasPage = () => {
         if (activeTool === 'eraser') eraserManager.clearHoverPreview(fabricCanvasRef.current?.getCanvas());
         setActiveTool('pan');
         setActiveWheel(null);
+      } else if (
+        ((e.ctrlKey || e.metaKey) && (e.key === '0' || e.key === '1')) ||
+        (e.shiftKey && e.key === '1')
+      ) {
+        e.preventDefault();
+        fabricCanvasRef.current?.fitToContent?.();
       }
     };
 
@@ -682,6 +698,7 @@ export const MainCanvasPage = () => {
 
   const handleSkribeFeatureClick = async (feature) => {
     if (feature.id !== 'mess-cleanup') return;
+    if (messCleanupPreview.loading) return;
 
     setMessCleanupPreview({
       isOpen: true,
@@ -696,6 +713,20 @@ export const MainCanvasPage = () => {
     try {
       const canvas = fabricCanvasRef.current?.getCanvas();
       const workspaceModel = extractWorkspaceModel(canvas);
+
+      if (!workspaceModel?.board?.objects || workspaceModel.board.objects.length === 0) {
+        setMessCleanupPreview({
+          isOpen: true,
+          workspaceModel: null,
+          organizationPlan: null,
+          layoutProposal: null,
+          loading: false,
+          isApplying: false,
+          error: 'Your canvas is currently empty. Draw shapes, add sticky notes, or write text on the canvas before running Mess Cleanup.'
+        });
+        return;
+      }
+
       let screenshot = null;
       if (canvas && typeof canvas.toDataURL === 'function') {
         const width = canvas.width || 800;
@@ -710,6 +741,13 @@ export const MainCanvasPage = () => {
 
       const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot);
       const layoutProposal = createLayoutProposal(organizationPlan, workspaceModel);
+      runBindingDiagnostic(workspaceModel, organizationPlan, null);
+
+      const previewRenderModel = buildPreviewRenderModel(workspaceModel, layoutProposal);
+      const cleanupPlan = layoutProposal?.metadata?.cleanupPlan || null;
+      const audit = auditCleanupPipeline(workspaceModel, cleanupPlan, layoutProposal, previewRenderModel);
+      console.log('=== [MESS CLEANUP FULL PRODUCTION AUDIT] ===', audit);
+      window.__messCleanupAudit = { workspaceModel, organizationPlan, layoutProposal, previewRenderModel, audit };
 
       setMessCleanupPreview({
         isOpen: true,

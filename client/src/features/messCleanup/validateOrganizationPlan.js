@@ -13,13 +13,6 @@ const VALID_RELATIONSHIP_TYPES = new Set(Object.values(RELATIONSHIP_TYPES));
 
 const sortIds = (ids) => [...new Set(ids)].sort((a, b) => String(a).localeCompare(String(b)));
 
-/**
- * Validates and sanitizes a raw Nemotron response into OrganizationPlan v2.
- *
- * @param {object} workspaceModel - The WorkspaceModel (source of truth for object IDs)
- * @param {object} rawPlan - Raw JSON from Nemotron or legacy heuristic
- * @returns {object} Validated OrganizationPlan v2
- */
 export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
   const modelObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const validObjectIds = new Set(modelObjects.map((o) => o?.id).filter(Boolean));
@@ -232,16 +225,8 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
       sections: sanitizedSections
     },
 
-    /**
-     * @deprecated Bridge field — layout engine reads organizationPlan.sections directly.
-     * Will be removed in Phase 4F.8 when layout engine is updated to read document.sections.
-     */
     sections: sanitizedSections,
 
-    /**
-     * @deprecated Bridge field — legacy hierarchy concept.
-     * Will be removed in Phase 4F.8.
-     */
     hierarchy: legacyHierarchy,
 
     relationships: sanitizedRelationships,

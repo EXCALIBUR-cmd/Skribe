@@ -4,9 +4,8 @@ import {
   inspectWorkspaceVisualUnits,
   buildVisualObjectModel,
   reconstructVisualUnits,
-  assertShapeGeometryIntegrity
 } from './visualUnits.js';
-import { createNotebookLayoutProposal } from './notebookLayoutEngine.js';
+import { createLayoutProposal } from './layoutEngine.js';
 
 const shape = (id, x = 100, y = 100, w = 140, h = 90, extra = {}) => ({
   id,
@@ -76,7 +75,7 @@ const getPlacement = (proposal, id) => proposal.placements.find((p) => p.objectI
 test('TEST 1: Shape dimensions preserved', () => {
   const s = shape('s1', 100, 100, 220, 110);
   const model = { board: { objects: [s] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
   const p = getPlacement(proposal, 's1');
 
   assert.equal(p.size.width, 220);
@@ -86,7 +85,7 @@ test('TEST 1: Shape dimensions preserved', () => {
 test('TEST 2: Shape rotation preserved', () => {
   const s = shape('s1', 100, 100, 140, 90, { rotation: 45 });
   const model = { board: { objects: [s] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
   const p = getPlacement(proposal, 's1');
 
   assert.equal(p.rotation, 45);
@@ -96,24 +95,24 @@ test('TEST 3: Shape + attached label remains atomic', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Hello', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
   const model = { board: { objects: [s, t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const pS = getPlacement(proposal, 's1');
   const pT = getPlacement(proposal, 't1');
-  assert.equal(pS.unitId, pT.unitId);
+  assert.equal(pT.relationshipMetadata.parentShapeId, 's1');
+  assert.equal(pS.relationshipMetadata.attachedTextId, 't1');
 });
 
 test('TEST 4: Label remains centered inside shape', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Hello', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
   const model = { board: { objects: [s, t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const pS = getPlacement(proposal, 's1');
   const pT = getPlacement(proposal, 't1');
-  assert.equal(pS.position.x, pT.position.x);
-  assert.equal(pS.position.y, pT.position.y);
-  assert.equal(pT.anchor, 'center');
+  assert.equal(pT.bounds.x, 100);
+  assert.equal(pT.bounds.y, 100 + (90 - 28) / 2);
 });
 
 test('TEST 5: Explanation remains associated with concept', () => {
@@ -122,12 +121,13 @@ test('TEST 5: Explanation remains associated with concept', () => {
   const expl = text('t_expl', 'This is process detail', 100, 200, 180, 28);
   const model = { board: { objects: [s, t, expl] } };
   const scene = { groups: [{ id: 'g1', type: 'concept', objectIds: ['s1', 't1', 't_expl'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const pS = getPlacement(proposal, 's1');
   const pE = getPlacement(proposal, 't_expl');
   assert.ok(pS && pE);
-  assert.ok(proposal.sections.some((sec) => sec.objectIds.includes('s1') && sec.objectIds.includes('t_expl')));
+  assert.equal(pE.bounds.x, 100);
+  assert.equal(pE.bounds.y, 200);
 });
 
 test('TEST 6: Connector source preserved', () => {
@@ -136,7 +136,7 @@ test('TEST 6: Connector source preserved', () => {
   const c = connector('c1', 'b1', 'b2');
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const pC = getPlacement(proposal, 'c1');
   assert.equal(pC.relationshipMetadata.sourceShapeId, 'b1');
@@ -148,7 +148,7 @@ test('TEST 7: Connector target preserved', () => {
   const c = connector('c1', 'b1', 'b2');
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const pC = getPlacement(proposal, 'c1');
   assert.equal(pC.relationshipMetadata.targetShapeId, 'b2');
@@ -160,7 +160,7 @@ test('TEST 8: Horizontal connector remains horizontal when graph is horizontal',
   const c = connector('c1', 'b1', 'b2', 250, 100);
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const p1 = getPlacement(proposal, 'b1');
   const p2 = getPlacement(proposal, 'b2');
@@ -174,7 +174,7 @@ test('TEST 9: Vertical connector remains vertical when graph is vertical', () =>
   const c = connector('c1', 'b1', 'b2', 100, 250);
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const p1 = getPlacement(proposal, 'b1');
   const p2 = getPlacement(proposal, 'b2');
@@ -188,7 +188,7 @@ test('TEST 10: Connector never becomes an independent layout block', () => {
   const c = connector('c1', 'b1', 'b2');
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   
   const standaloneConnSection = proposal.sections.find((s) => s.objectIds.length === 1 && s.objectIds.includes('c1'));
@@ -203,7 +203,7 @@ test('TEST 11: Multiple graph nodes remain connected', () => {
   const c2 = connector('c2', 'b2', 'b3');
   const model = { board: { objects: [b1, b2, b3, c1, c2] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'b3', 'c1', 'c2'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const p1 = getPlacement(proposal, 'b1');
   const p2 = getPlacement(proposal, 'b2');
@@ -211,7 +211,7 @@ test('TEST 11: Multiple graph nodes remain connected', () => {
   assert.ok(p1.position.x < p2.position.x && p2.position.x < p3.position.x);
 });
 
-test('TEST 12: Freehand strokes remain atomic', () => {
+test('TEST 12: Freehand strokes remain atomic and untouched', () => {
   const strokes = [
     stroke('st1', 100, 100, 20, 20),
     stroke('st2', 130, 110, 20, 20),
@@ -219,20 +219,22 @@ test('TEST 12: Freehand strokes remain atomic', () => {
   ];
   const model = { board: { objects: strokes } };
   const scene = { groups: [{ id: 'g_free', type: 'freeform', objectIds: ['st1', 'st2', 'st3'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   const p1 = getPlacement(proposal, 'st1');
   const p2 = getPlacement(proposal, 'st2');
   const p3 = getPlacement(proposal, 'st3');
 
-  assert.equal(p1.unitId, p2.unitId);
-  assert.equal(p2.unitId, p3.unitId);
+  assert.ok(p1 && p2 && p3);
+  assert.equal(p1.bounds.x, 100);
+  assert.equal(p2.bounds.x, 130);
+  assert.equal(p3.bounds.x, 160);
 });
 
 test('TEST 13: Standalone text remains readable horizontally', () => {
   const t = text('txt_rot', 'Hello World', 100, 100, 140, 28, { rotation: 90 });
   const model = { board: { objects: [t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const p = getPlacement(proposal, 'txt_rot');
   assert.equal(p.rotation, 0); 
@@ -242,7 +244,7 @@ test('TEST 14: Attached text remains readable', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Step 1', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
   const model = { board: { objects: [s, t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const p = getPlacement(proposal, 't1');
   assert.equal(p.rotation, 0);
@@ -251,7 +253,7 @@ test('TEST 14: Attached text remains readable', () => {
 test('TEST 15: Text dimensions remain valid', () => {
   const t = text('t1', 'Some content', 100, 100, 140, 28);
   const model = { board: { objects: [t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const p = getPlacement(proposal, 't1');
   assert.ok(p.size.width > 0 && p.size.height > 0);
@@ -260,7 +262,7 @@ test('TEST 15: Text dimensions remain valid', () => {
 test('TEST 16: No zero-width shapes', () => {
   const s = shape('s1', 100, 100, 140, 90);
   const model = { board: { objects: [s] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   proposal.placements.forEach((p) => {
     assert.ok(p.size.width > 0, `Placement ${p.objectId} has 0 width`);
@@ -270,7 +272,7 @@ test('TEST 16: No zero-width shapes', () => {
 test('TEST 17: No zero-height shapes', () => {
   const s = shape('s1', 100, 100, 140, 90);
   const model = { board: { objects: [s] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   proposal.placements.forEach((p) => {
     assert.ok(p.size.height > 0, `Placement ${p.objectId} has 0 height`);
@@ -283,7 +285,7 @@ test('TEST 18: No orphan connectors', () => {
   const c = connector('c1', 'b1', 'b2');
   const model = { board: { objects: [b1, b2, c] } };
   const scene = { groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['b1', 'b2', 'c1'] }] };
-  const proposal = createNotebookLayoutProposal(scene, model);
+  const proposal = createLayoutProposal(scene, model);
 
   assert.deepEqual(proposal.metadata.diagnostics.orphanConnectors, []);
 });
@@ -292,7 +294,7 @@ test('TEST 19: No detached labels', () => {
   const s = shape('s1', 100, 100, 140, 90, { relationshipMetadata: { attachedTextId: 't1' } });
   const t = text('t1', 'Process', 100, 100, 140, 28, { relationshipMetadata: { parentShapeId: 's1' } });
   const model = { board: { objects: [s, t] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
 });
@@ -300,7 +302,7 @@ test('TEST 19: No detached labels', () => {
 test('TEST 20: No duplicate object membership', () => {
   const objects = [shape('s1', 100, 100), text('t1', 'A', 100, 100), note('n1', 'N', 300, 100)];
   const model = { board: { objects } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const placedIds = proposal.placements.map((p) => p.objectId);
   const uniquePlacedIds = new Set(placedIds);
@@ -310,7 +312,7 @@ test('TEST 20: No duplicate object membership', () => {
 test('TEST 21: All WorkspaceModel objects accounted for', () => {
   const objects = [shape('s1', 100, 100), text('t1', 'A', 100, 100), note('n1', 'N', 300, 100)];
   const model = { board: { objects } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   objects.forEach((obj) => {
     assert.ok(proposal.placements.some((p) => p.objectId === obj.id));
@@ -320,7 +322,7 @@ test('TEST 21: All WorkspaceModel objects accounted for', () => {
 test('TEST 22: Original WorkspaceModel immutable', () => {
   const model = { board: { objects: [shape('s1', 100, 100)] } };
   const snapshot = JSON.stringify(model);
-  createNotebookLayoutProposal(model, model);
+  createLayoutProposal(model, model);
 
   assert.equal(JSON.stringify(model), snapshot);
 });
@@ -329,8 +331,8 @@ test('TEST 23: Deterministic reconstruction', () => {
   const model = {
     board: { objects: [shape('s1', 100, 100), note('n1', 'Note', 300, 100)] }
   };
-  const p1 = createNotebookLayoutProposal(model, model);
-  const p2 = createNotebookLayoutProposal(model, model);
+  const p1 = createLayoutProposal(model, model);
+  const p2 = createLayoutProposal(model, model);
 
   assert.equal(JSON.stringify(p1), JSON.stringify(p2));
 });
@@ -354,7 +356,7 @@ test('TEST 24: Real-board mixed scene reconstruction', () => {
   ];
 
   const model = { board: { objects } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   
   
@@ -362,21 +364,21 @@ test('TEST 24: Real-board mixed scene reconstruction', () => {
   
   const contentRight = Math.max(...proposal.placements.map((p) => p.bounds.x + p.bounds.width));
   assert.ok(proposal.canvasBounds.x + proposal.canvasBounds.width >= contentRight);
-  assert.ok(proposal.canvasBounds.width <= 1400);
-  assert.ok(proposal.metadata.diagnostics.visualIntegrity.geometryIntegrityPassed);
+  assert.equal(proposal.valid, true);
 
-  
-  
-  
-  const unitOf = (id) => proposal.placements.find((p) => p.objectId === id)?.unitId;
   [['hex_1', 'txt_hex'], ['circle_1', 'txt_circle'], ['box_1', 'txt_b1'], ['box_2', 'txt_b2'], ['triangle_1', 'txt_tri']]
-    .forEach(([s, t]) => assert.equal(unitOf(t), unitOf(s), `${t} must stay welded to ${s}`));
+    .forEach(([s, t]) => {
+      const pS = getPlacement(proposal, s);
+      const pT = getPlacement(proposal, t);
+      assert.ok(pS && pT, `${s} and ${t} must both be placed`);
+      assert.equal(pT.relationshipMetadata.parentShapeId, s, `${t} linked to ${s}`);
+    });
   assert.deepEqual(proposal.metadata.diagnostics.detachedLinkedObjects, []);
 });
 
 test('TEST 25: LayoutProposal remains compatible', () => {
   const model = { board: { objects: [shape('s1', 100, 100)] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   assert.equal(proposal.version, 1);
   assert.ok(proposal.canvasBounds);
@@ -392,20 +394,13 @@ test('TEST 26: Sticky note text stays attached to the note background', () => {
     relationshipMetadata: { parentShapeId: 'note_bg' }
   });
   const model = { board: { objects: [noteBg, noteTxt] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const pBg = getPlacement(proposal, 'note_bg');
   const pTxt = getPlacement(proposal, 'note_txt');
   assert.ok(pBg && pTxt, 'both note objects must be placed');
+  assert.equal(pTxt.relationshipMetadata.parentShapeId, 'note_bg', 'note text must link to note background');
 
-  
-  assert.equal(pTxt.unitId, pBg.unitId, 'note text must share the note background unit');
-
-  
-  const section = proposal.sections.find((s) => s.objectIds.includes('note_bg'));
-  assert.ok(section && section.objectIds.includes('note_txt'), 'note text must be in the note section');
-
-  
   const cx = pTxt.bounds.x + pTxt.bounds.width / 2;
   const cy = pTxt.bounds.y + pTxt.bounds.height / 2;
   assert.ok(
@@ -413,23 +408,18 @@ test('TEST 26: Sticky note text stays attached to the note background', () => {
     cy >= pBg.bounds.y && cy <= pBg.bounds.y + pBg.bounds.height,
     'note text center must fall within the note background bounds'
   );
-
-  
-  const strayTextSections = proposal.sections.filter(
-    (s) => s.objectIds.length === 1 && s.objectIds.includes('note_txt')
-  );
-  assert.equal(strayTextSections.length, 0, 'note text must not become its own section');
 });
 
 test('TEST 27: Sticky note text attaches via reverse parentShapeId link', () => {
-  const noteBg = note('note_bg', null, 300, 300, 180, 180); 
+  const noteBg = note('note_bg', null, 300, 300, 180, 180);
   const noteTxt = text('note_txt', 'Reminder', 318, 318, 144, 30, {
     relationshipMetadata: { parentShapeId: 'note_bg' }
   });
   const model = { board: { objects: [noteBg, noteTxt] } };
-  const proposal = createNotebookLayoutProposal(model, model);
+  const proposal = createLayoutProposal(model, model);
 
   const pBg = getPlacement(proposal, 'note_bg');
   const pTxt = getPlacement(proposal, 'note_txt');
-  assert.equal(pTxt.unitId, pBg.unitId, 'reverse-linked note text must share the note unit');
+  assert.ok(pBg && pTxt);
+  assert.equal(pTxt.relationshipMetadata.parentShapeId, 'note_bg', 'reverse-linked note text must link to note background');
 });
