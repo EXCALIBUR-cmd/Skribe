@@ -224,6 +224,100 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
     };
   }
 
+  // Phase 4F.19: Structural Composition Candidates
+  if (opportunity.category === 'composition' || opportunity.structureId) {
+    const actId = opportunity.id.startsWith('cand_')
+      ? opportunity.id.replace(/^cand_/, 'act_')
+      : (opportunity.id.startsWith('opp_') ? opportunity.id.replace(/^opp_/, 'act_') : `act_${opportunity.id}`);
+
+    if (oppType === 'flow') {
+      if (oppIds.length < 2) {
+        return { action: null, rejectedReason: 'Flow composition requires at least 2 nodes' };
+      }
+      return {
+        action: {
+          id: actId,
+          type: 'cleanFlowchart',
+          objectIds: opportunity.orderedNodeIds || sortStrings(oppIds),
+          memberIds: opportunity.memberIds || sortStrings(oppIds),
+          connectorIds: sortStrings(opportunity.connectorIds || []),
+          template: opportunity.template,
+          orientation: opportunity.orientation,
+          levelAssignment: opportunity.levelAssignment,
+          orderedNodeIds: opportunity.orderedNodeIds,
+          verifiedEdges: opportunity.verifiedEdges,
+          confidence: opportunity.confidence,
+          reason: opportunity.reason || `Reorganized flow structure with ${oppIds.length} nodes for clearer directional reading.`,
+          evidence: opportunity.evidence || ['structure-aware-flow-composition'],
+          layoutBenefit: 'reorganizes flow into clear directional levels'
+        },
+        rejectedReason: null
+      };
+    }
+
+    if (oppType === 'cluster') {
+      if (oppIds.length < 2) {
+        return { action: null, rejectedReason: 'Cluster composition requires at least 2 items' };
+      }
+      return {
+        action: {
+          id: actId,
+          type: 'arrangeGrid',
+          objectIds: sortStrings(oppIds),
+          confidence: opportunity.confidence,
+          reason: opportunity.reason || `Reorganized ${oppIds.length} related notes into a compact cluster.`,
+          evidence: opportunity.evidence || ['structure-aware-cluster-composition'],
+          layoutBenefit: 'compact cluster grid arrangement'
+        },
+        rejectedReason: null
+      };
+    }
+
+    if (oppType === 'sequence') {
+      if (oppIds.length < 2) {
+        return { action: null, rejectedReason: 'Sequence composition requires at least 2 items' };
+      }
+      const axis = opportunity.template === 'sequence_column' ? 'y' : 'x';
+      return {
+        action: {
+          id: actId,
+          type: 'equalizeSpacing',
+          axis,
+          objectIds: sortStrings(oppIds),
+          confidence: opportunity.confidence,
+          reason: opportunity.reason || `Aligned ${oppIds.length} related nodes into a consistent sequence.`,
+          evidence: opportunity.evidence || ['structure-aware-sequence-cadence'],
+          layoutBenefit: `consistent ${axis === 'y' ? 'vertical' : 'horizontal'} rhythm`
+        },
+        rejectedReason: null
+      };
+    }
+
+    if (oppType === 'annotation') {
+      if (oppIds.length < 2) {
+        return { action: null, rejectedReason: 'Annotation composition requires parent and note' };
+      }
+      return {
+        action: {
+          id: actId,
+          type: 'align',
+          axis: 'centerY',
+          objectIds: sortStrings(oppIds),
+          confidence: opportunity.confidence,
+          reason: opportunity.reason || `Repositioned annotation near parent shape while preserving connector semantics.`,
+          evidence: opportunity.evidence || ['structure-aware-annotation'],
+          layoutBenefit: 'repositions annotation near parent'
+        },
+        rejectedReason: null
+      };
+    }
+
+    return {
+      action: null,
+      rejectedReason: `Structure type '${oppType}' is designated for preservation or cannot be safely expressed by supported executor operations.`
+    };
+  }
+
   return { action: null, rejectedReason: `Unsupported opportunity type '${oppType}'` };
 };
 

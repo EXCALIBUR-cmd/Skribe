@@ -236,7 +236,7 @@ export const detectBrokenFlowOpportunities = (objects, objectMap, semanticScene)
         }
       });
 
-      if (cluster.length >= 2) {
+      if (cluster.length >= 2 && hasDisorder) {
         const sortedNodeIds = sortStrings(cluster);
         opportunities.push({
           id: `opp_flow_${sortedNodeIds[0]}`,
@@ -244,12 +244,12 @@ export const detectBrokenFlowOpportunities = (objects, objectMap, semanticScene)
           objectIds: sortedNodeIds,
           connectorIds: sortStrings(Array.from(clusterConns)),
           confidence: cluster.length >= 3 ? 0.98 : 0.96,
-          visualBenefit: hasDisorder ? 9.2 : 8.5,
+          visualBenefit: 9.2,
           movementCost: 3.5,
           risk: 1.5,
-          evidence: hasDisorder ? ['explicit-connector-topology', 'backward-edge-disorder'] : ['explicit-connector-topology', 'graph-structure'],
-          reason: `Flowchart graph with ${cluster.length} connected nodes and ${clusterConns.size} connectors demonstrates clear topological flow; structuring levels enhances diagram legibility.`,
-          metadata: { nodeCount: cluster.length, connectorCount: clusterConns.size, hasDisorder }
+          evidence: ['explicit-connector-topology', 'backward-edge-disorder'],
+          reason: `Flowchart graph with ${cluster.length} connected nodes and ${clusterConns.size} connectors demonstrates backward or disordered edge flow; hierarchical leveling restores directional clarity.`,
+          metadata: { nodeCount: cluster.length, connectorCount: clusterConns.size, hasDisorder: true }
         });
       }
     }
@@ -709,9 +709,24 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, option
   return allOpportunities;
 };
 
+export const createBoardMovementBudget = (objectCount = 20, options = {}) => {
+  return {
+    maxActions: options.maxActions || Math.max(5, Math.min(15, Math.ceil(objectCount * 0.75))),
+    maxMovedObjects: options.maxMovedObjects || Math.max(10, Math.min(30, Math.ceil(objectCount * 0.8))),
+    minUtilityThreshold: options.minUtilityThreshold ?? 0.5,
+    maxCompositions: options.maxCompositions ?? 2,
+    maxCompositionMovedObjects: options.maxCompositionMovedObjects ?? Math.min(10, Math.max(4, Math.ceil(objectCount * 0.6))),
+    maxTotalCompositionMovement: options.maxTotalCompositionMovement ?? 2000,
+    maxTotalStructuralRisk: options.maxTotalStructuralRisk ?? 4.0
+  };
+};
+
 export const scoreOpportunity = (opportunity) => {
   if (!opportunity) return 0;
-  const benefit = (opportunity.visualBenefit || 5.0) * (opportunity.confidence || 0.9);
+  if (typeof opportunity.utilityScore === 'number') {
+    return opportunity.utilityScore;
+  }
+  const benefit = (opportunity.visualBenefit || opportunity.compositionBenefit || 5.0) * (opportunity.confidence || 0.9);
   const cost = (opportunity.movementCost || 1.0) + (opportunity.risk || 1.0);
   const utility = Number((benefit - cost).toFixed(3));
   return utility;
@@ -719,49 +734,112 @@ export const scoreOpportunity = (opportunity) => {
 
 export const rankAndSelectOpportunities = (opportunities, options = {}) => {
   const rawOpportunities = opportunities || [];
+  const compositionCandidates = options.compositionCandidates || [];
   const objectCount = options.totalObjectCount || 20;
 
-  const budget = {
-    maxActions: options.maxActions || Math.max(5, Math.min(15, Math.ceil(objectCount * 0.75))),
-    maxMovedObjects: options.maxMovedObjects || Math.max(10, Math.min(30, Math.ceil(objectCount * 0.8))),
-    minUtilityThreshold: options.minUtilityThreshold ?? 1.0
-  };
+  const budget = createBoardMovementBudget(objectCount, options);
 
-  const scored = rawOpportunities.map((opp) => ({
+  // Mark items as either anomaly opportunity or composition candidate
+  const formattedOpps = rawOpportunities.map((opp) => ({
     ...opp,
+    category: opp.category || 'anomaly',
     utilityScore: scoreOpportunity(opp)
   }));
 
-  const sorted = scored.sort((a, b) => {
+  const formattedCandidates = compositionCandidates.map((cand) => ({
+    ...cand,
+    category: 'composition',
+    utilityScore: typeof cand.utilityScore === 'number' ? cand.utilityScore : scoreOpportunity(cand)
+  }));
+
+  // Score and sort unified candidates
+  const allItems = [...formattedCandidates, ...formattedOpps];
+
+  const sorted = allItems.sort((a, b) => {
+    // Composition candidates take precedence over micro-anomaly actions if both have similar utility
+    const isCompA = a.category === 'composition';
+    const isCompB = b.category === 'composition';
+    if (isCompA !== isCompB) {
+      if (Math.abs(b.utilityScore - a.utilityScore) < 0.5) {
+        return isCompA ? -1 : 1;
+      }
+    }
+
     const prioA = OPPORTUNITY_PRIORITY[a.type] || 99;
     const prioB = OPPORTUNITY_PRIORITY[b.type] || 99;
-    if (prioA !== prioB) return prioA - prioB;
+    if (prioA !== prioB && !isCompA && !isCompB) return prioA - prioB;
     if (b.utilityScore !== a.utilityScore) return b.utilityScore - a.utilityScore;
     return String(a.id).localeCompare(String(b.id));
   });
 
   const selectedOpportunities = [];
   const rejectedOpportunities = [];
-  const claimedObjects = new Map();
-  const claimedTypes = new Map();
+  const claimedLayoutObjects = new Map();
+  const claimedDetachObjects = new Map();
   let totalMovedObjects = new Set();
+  let totalCompositionMovedObjects = new Set();
+  let selectedCompositionCount = 0;
 
   const hasStructuralMess = sorted.some((opp) =>
     opp.utilityScore >= budget.minUtilityThreshold &&
-    [OPPORTUNITY_TYPES.OVERLAP, OPPORTUNITY_TYPES.BROKEN_FLOW, OPPORTUNITY_TYPES.CONNECTOR_CROSSING, OPPORTUNITY_TYPES.CLUTTERED_CLUSTER].includes(opp.type)
+    [OPPORTUNITY_TYPES.OVERLAP, OPPORTUNITY_TYPES.BROKEN_FLOW, OPPORTUNITY_TYPES.CONNECTOR_CROSSING, OPPORTUNITY_TYPES.CLUTTERED_CLUSTER, 'flow', 'cluster'].includes(opp.type)
   );
 
   for (const opp of sorted) {
-    const actId = opp.id.startsWith('opp_') ? opp.id.replace(/^opp_/, 'act_') : `act_${opp.id}`;
+    const actId = opp.id.startsWith('opp_')
+      ? opp.id.replace(/^opp_/, 'act_')
+      : (opp.id.startsWith('cand_') ? opp.id.replace(/^cand_/, 'act_') : `act_${opp.id}`);
 
     if (opp.utilityScore < budget.minUtilityThreshold) {
       rejectedOpportunities.push({
         id: opp.id,
         actionId: actId,
         type: opp.type,
+        category: opp.category,
         reason: `Utility score ${opp.utilityScore} below threshold ${budget.minUtilityThreshold}`
       });
       continue;
+    }
+
+    const isComposition = opp.category === 'composition';
+
+    // Hard Invariant: If composition benefit is 0 (no meaningful visual change), reject
+    if (isComposition && (opp.compositionBenefit ?? 0) <= 0) {
+      rejectedOpportunities.push({
+        id: opp.id,
+        actionId: actId,
+        type: opp.type,
+        category: opp.category,
+        reason: 'Composition benefit is 0: no meaningful geometric change'
+      });
+      continue;
+    }
+
+    // Budget checks for compositions
+    if (isComposition) {
+      if (selectedCompositionCount >= budget.maxCompositions) {
+        rejectedOpportunities.push({
+          id: opp.id,
+          actionId: actId,
+          type: opp.type,
+          category: opp.category,
+          reason: `Composition budget limit reached: maxCompositions (${budget.maxCompositions})`
+        });
+        continue;
+      }
+
+      const oppObjSet = new Set(opp.objectIds || []);
+      const projectedCompCount = new Set([...totalCompositionMovedObjects, ...oppObjSet]).size;
+      if (projectedCompCount > budget.maxCompositionMovedObjects) {
+        rejectedOpportunities.push({
+          id: opp.id,
+          actionId: actId,
+          type: opp.type,
+          category: opp.category,
+          reason: `Composition budget limit reached: maxCompositionMovedObjects (${budget.maxCompositionMovedObjects})`
+        });
+        continue;
+      }
     }
 
     const cosmeticCount = selectedOpportunities.filter((o) => o.type === OPPORTUNITY_TYPES.COSMETIC_TEXT_ISSUE).length;
@@ -770,28 +848,33 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
         id: opp.id,
         actionId: actId,
         type: opp.type,
+        category: opp.category,
         reason: 'Additional cosmetic text normalization suppressed in favor of higher-value structural cleanup: subsumed by higher-priority action'
       });
       continue;
     }
 
     const isLayoutOpp = opp.type !== OPPORTUNITY_TYPES.DETACHED_TEXT;
-    const conflictId = opp.objectIds.find((id) => {
-      if (!claimedObjects.has(id)) return false;
-      const prevType = claimedTypes.get(id);
-      if (opp.type === OPPORTUNITY_TYPES.DETACHED_TEXT) {
-        return prevType === OPPORTUNITY_TYPES.DETACHED_TEXT;
-      }
-      return prevType !== OPPORTUNITY_TYPES.DETACHED_TEXT;
-    });
+    const conflictId = isLayoutOpp
+      ? (opp.objectIds || []).find((id) => claimedLayoutObjects.has(id))
+      : (opp.objectIds || []).find((id) => claimedDetachObjects.has(id));
 
     if (conflictId) {
-      const winnerId = claimedObjects.get(conflictId);
+      const winnerId = isLayoutOpp
+        ? claimedLayoutObjects.get(conflictId)
+        : claimedDetachObjects.get(conflictId);
+
+      const isWinnerComposition = winnerId.startsWith('cand_') || winnerId.startsWith('struct_') || winnerId.startsWith('act_struct_');
+      const subsumptionReason = isWinnerComposition
+        ? `Object '${conflictId}' in action '${opp.id}' is subsumed by higher-level structural composition '${winnerId}'`
+        : `Object '${conflictId}' in opportunity '${opp.id}' is subsumed by higher-priority action '${winnerId}'`;
+
       rejectedOpportunities.push({
         id: opp.id,
         actionId: actId,
         type: opp.type,
-        reason: `Object '${conflictId}' in opportunity '${opp.id}' is subsumed by higher-priority action '${winnerId}'`,
+        category: opp.category,
+        reason: subsumptionReason,
         supersededBy: winnerId
       });
       continue;
@@ -804,7 +887,9 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     if (isLayoutOpp && currentLayoutCount >= budget.maxActions) {
       rejectedOpportunities.push({
         id: opp.id,
+        actionId: actId,
         type: opp.type,
+        category: opp.category,
         reason: `Budget limit reached: maxActions (${budget.maxActions})`
       });
       continue;
@@ -813,17 +898,28 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     if (isLayoutOpp && projectedMovedCount > budget.maxMovedObjects) {
       rejectedOpportunities.push({
         id: opp.id,
+        actionId: actId,
         type: opp.type,
+        category: opp.category,
         reason: `Budget limit reached: maxMovedObjects (${budget.maxMovedObjects})`
       });
       continue;
     }
 
     selectedOpportunities.push(opp);
-    opp.objectIds.forEach((id) => {
-      claimedObjects.set(id, opp.id);
-      claimedTypes.set(id, opp.type);
+    (opp.objectIds || []).forEach((id) => {
+      if (isLayoutOpp) {
+        claimedLayoutObjects.set(id, opp.id);
+      } else {
+        claimedDetachObjects.set(id, opp.id);
+      }
     });
+
+    if (isComposition) {
+      selectedCompositionCount++;
+      oppObjSet.forEach((id) => totalCompositionMovedObjects.add(id));
+    }
+
     if (isLayoutOpp) {
       oppObjSet.forEach((id) => totalMovedObjects.add(id));
     }
@@ -834,6 +930,10 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     selectedActions: selectedOpportunities.length,
     maxMovedObjects: budget.maxMovedObjects,
     movedObjects: totalMovedObjects.size,
+    maxCompositions: budget.maxCompositions,
+    selectedCompositions: selectedCompositionCount,
+    maxCompositionMovedObjects: budget.maxCompositionMovedObjects,
+    compositionMovedObjects: totalCompositionMovedObjects.size,
     budgetExceeded: false
   };
 

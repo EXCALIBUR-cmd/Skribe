@@ -135,8 +135,24 @@ const executeCleanFlowchart = ({
   });
 
   const connectorEndpoints = new Map();
+
+  // Populate verified edges from planner if provided (Invariant: executor obeys planner's verified topology)
+  if (Array.isArray(action.verifiedEdges)) {
+    action.verifiedEdges.forEach((e) => {
+      if (e.connId && e.srcId && e.tgtId && nodeSet.has(e.srcId) && nodeSet.has(e.tgtId) && e.srcId !== e.tgtId) {
+        if (!adj.get(e.srcId).includes(e.tgtId)) {
+          adj.get(e.srcId).push(e.tgtId);
+          inDegree.set(e.tgtId, inDegree.get(e.tgtId) + 1);
+        }
+        connectorEndpoints.set(e.connId, { srcId: e.srcId, tgtId: e.tgtId });
+      }
+    });
+  }
+
   connectorIds.forEach((cId) => {
+    if (connectorEndpoints.has(cId)) return;
     const cObj = objectMap.get(cId) || placementMap.get(cId);
+    if (!cObj) return;
     const meta = cObj.relationshipMetadata || cObj.connectorMetadata || cObj.connector || {};
     let srcId = meta.sourceShapeId || meta.sourceObjectId || cObj.sourceShapeId;
     let tgtId = meta.targetShapeId || meta.targetObjectId || cObj.targetShapeId;
@@ -177,8 +193,10 @@ const executeCleanFlowchart = ({
     }
 
     if (srcId && tgtId && nodeSet.has(srcId) && nodeSet.has(tgtId) && srcId !== tgtId) {
-      adj.get(srcId).push(tgtId);
-      inDegree.set(tgtId, inDegree.get(tgtId) + 1);
+      if (!adj.get(srcId).includes(tgtId)) {
+        adj.get(srcId).push(tgtId);
+        inDegree.set(tgtId, inDegree.get(tgtId) + 1);
+      }
       connectorEndpoints.set(cId, { srcId, tgtId });
     }
   });
@@ -193,7 +211,10 @@ const executeCleanFlowchart = ({
   });
 
   let isVertical = false;
-  if (connectorEndpoints.size > 0) {
+  if (action.orientation === 'vertical' || action.orientation === 'horizontal') {
+    // Invariant: The executor must not change the semantic ordering/orientation selected by the planner.
+    isVertical = action.orientation === 'vertical';
+  } else if (connectorEndpoints.size > 0) {
     isVertical = totalDy > totalDx * 1.1;
   } else {
     const minX = Math.min(...nodeIds.map((id) => placementMap.get(id).bounds.x));
@@ -204,46 +225,70 @@ const executeCleanFlowchart = ({
   }
 
   const levelMap = new Map();
-  const roots = nodeIds.filter((id) => inDegree.get(id) === 0);
 
-  if (roots.length === 0) {
-    const sorted = [...nodeIds].sort((a, b) => {
-      const pA = placementMap.get(a);
-      const pB = placementMap.get(b);
-      return isVertical
-        ? (pA.bounds.y - pB.bounds.y || pA.bounds.x - pB.bounds.x)
-        : (pA.bounds.x - pB.bounds.x || pA.bounds.y - pB.bounds.y);
-    });
-    roots.push(sorted[0]);
-  }
-
-  const queue = roots.map((r) => {
-    levelMap.set(r, 0);
-    return r;
-  });
-
-  const visited = new Set();
-  while (queue.length > 0) {
-    const u = queue.shift();
-    const curLevel = levelMap.get(u);
-    const neighbors = adj.get(u) || [];
-    neighbors.forEach((v) => {
-      const nextLevel = curLevel + 1;
-      if (!levelMap.has(v) || levelMap.get(v) < nextLevel) {
-        levelMap.set(v, nextLevel);
-      }
-      if (!visited.has(v)) {
-        visited.add(v);
-        queue.push(v);
+  if (action.levelAssignment && typeof action.levelAssignment === 'object') {
+    // Invariant: The executor must not change the semantic ordering/orientation selected by the planner.
+    Object.entries(action.levelAssignment).forEach(([id, lvl]) => {
+      if (nodeSet.has(id)) {
+        levelMap.set(id, Number(lvl));
       }
     });
-  }
-
-  nodeIds.forEach((id) => {
-    if (!levelMap.has(id)) {
-      levelMap.set(id, 0);
+    nodeIds.forEach((id) => {
+      if (!levelMap.has(id)) levelMap.set(id, 0);
+    });
+  } else {
+    // Invariant: If the planner cannot establish a reliable composition orientation/order,
+    // no layout executor may infer one from object position.
+    const hasResolvedEdges = connectorEndpoints.size > 0 || Array.from(adj.values()).some((arr) => arr.length > 0);
+    if (!hasResolvedEdges) {
+      return {
+        valid: false,
+        failedActionId: action.id,
+        errorType: 'unresolvedTopology',
+        reason: 'Cannot execute cleanFlowchart: no verified connector topology or planner level assignment provided. Layout executor must not infer semantic flow from object position.'
+      };
     }
-  });
+
+    const roots = nodeIds.filter((id) => inDegree.get(id) === 0);
+    if (roots.length === 0) {
+      const sorted = [...nodeIds].sort((a, b) => {
+        const pA = placementMap.get(a);
+        const pB = placementMap.get(b);
+        return isVertical
+          ? (pA.bounds.y - pB.bounds.y || pA.bounds.x - pB.bounds.x)
+          : (pA.bounds.x - pB.bounds.x || pA.bounds.y - pB.bounds.y);
+      });
+      roots.push(sorted[0]);
+    }
+
+    const queue = roots.map((r) => {
+      levelMap.set(r, 0);
+      return r;
+    });
+
+    const visited = new Set();
+    while (queue.length > 0) {
+      const u = queue.shift();
+      const curLevel = levelMap.get(u);
+      const neighbors = adj.get(u) || [];
+      neighbors.forEach((v) => {
+        const nextLevel = curLevel + 1;
+        if (!levelMap.has(v) || levelMap.get(v) < nextLevel) {
+          levelMap.set(v, nextLevel);
+        }
+        if (!visited.has(v)) {
+          visited.add(v);
+          queue.push(v);
+        }
+      });
+    }
+
+    nodeIds.forEach((id) => {
+      if (!levelMap.has(id)) {
+        levelMap.set(id, 0);
+      }
+    });
+  }
 
   const maxLevel = Math.max(...Array.from(levelMap.values()), 0);
   const levels = [];
@@ -403,6 +448,8 @@ const executeCleanFlowchart = ({
           connP.pathCommands = transformed.pathCommands;
           connP.pathData = transformed.pathStr;
           connP.path = transformed.pathCommands;
+          connP.worldPath = transformed.pathCommands;
+          connP.worldPathCommands = transformed.pathCommands;
         }
       }
     }

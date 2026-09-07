@@ -1142,3 +1142,71 @@ test('39. Real Board Fixture: flowchart execution cleans process & decision node
   assert.equal(pStroke.bounds.x, 300);
   assert.equal(pStroke.bounds.y, 580);
 });
+
+test('40. cleanFlowchart invariant: rejects when no verified edges and no planner level assignment exist', () => {
+  const model = {
+    board: {
+      objects: [
+        normalizeObject({ id: 'node_1', type: 'rect', left: 100, top: 100, width: 100, height: 60 }),
+        normalizeObject({ id: 'node_2', type: 'rect', left: 400, top: 100, width: 100, height: 60 }),
+        normalizeObject({ id: 'conn_unattached', type: 'path', isConnector: true, left: 220, top: 120, width: 100, height: 20 })
+      ]
+    }
+  };
+
+  const plan = {
+    version: 1,
+    actions: [
+      { id: 'act_unverified', type: 'cleanFlowchart', objectIds: ['node_1', 'node_2'], connectorIds: ['conn_unattached'], confidence: 0.90, reason: 'Unverified action' }
+    ],
+    untouchedObjectIds: [],
+    diagnostics: { actionCount: 1, highConfidenceActionCount: 1, untouchedObjectCount: 0, unsupportedActionCount: 0 }
+  };
+
+  const proposal = executeCleanupPlan(plan, model);
+  assert.equal(proposal.valid, false, 'Action without verified topology or planner levels must be rejected');
+  assert.equal(proposal.errorType, 'unresolvedTopology', 'errorType must be unresolvedTopology');
+  assert.ok(proposal.error.includes('verified connector topology'), 'Error must explain lack of verified topology');
+});
+
+test('41. cleanFlowchart invariant: strictly follows planner levelAssignment and orientation', () => {
+  const model = {
+    board: {
+      objects: [
+        normalizeObject({ id: 'node_left', type: 'rect', left: 100, top: 100, width: 100, height: 60 }),
+        normalizeObject({ id: 'node_right', type: 'rect', left: 500, top: 100, width: 100, height: 60 }),
+        normalizeObject({ id: 'conn_rev', type: 'path', isConnector: true, left: 200, top: 120, width: 300, height: 20 })
+      ]
+    }
+  };
+
+  // Planner declares node_right is root (level 0) and node_left is target (level 1)
+  const plan = {
+    version: 1,
+    actions: [
+      {
+        id: 'act_planner_ordered',
+        type: 'cleanFlowchart',
+        objectIds: ['node_right', 'node_left'],
+        connectorIds: ['conn_rev'],
+        orientation: 'horizontal',
+        levelAssignment: { node_right: 0, node_left: 1 },
+        verifiedEdges: [{ connId: 'conn_rev', srcId: 'node_right', tgtId: 'node_left' }],
+        confidence: 0.95,
+        reason: 'Planner ordered reverse flow'
+      }
+    ],
+    untouchedObjectIds: [],
+    diagnostics: { actionCount: 1, highConfidenceActionCount: 1, untouchedObjectCount: 0, unsupportedActionCount: 0 }
+  };
+
+  const proposal = executeCleanupPlan(plan, model);
+  assert.equal(proposal.valid, true);
+
+  const pRight = proposal.placements.find((p) => p.objectId === 'node_right');
+  const pLeft = proposal.placements.find((p) => p.objectId === 'node_left');
+
+  // node_right was assigned level 0, so it must be placed at the first horizontal level position
+  assert.ok(pRight.bounds.x < pLeft.bounds.x, 'Level 0 node (node_right) must be at earlier position than Level 1 node (node_left)');
+});
+

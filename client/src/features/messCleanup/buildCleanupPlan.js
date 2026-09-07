@@ -14,6 +14,10 @@ import {
   rankAndSelectOpportunities
 } from './cleanupOpportunities.js';
 import { resolveCleanupOpportunities } from './resolveCleanupOpportunity.js';
+import {
+  discoverVisualStructures,
+  generateCompositionCandidates
+} from './discoverVisualStructures.js';
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -60,8 +64,11 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     if (!srcId || !tgtId) {
       const containers = rawObjects.filter((o) => ['shape', 'note'].includes(getSemanticType(o)));
       const topo = recoverConnectorTopology(conn, containers);
-      srcId = topo.sourceShapeId;
-      tgtId = topo.targetShapeId;
+      const topoConf = topo.overallConfidence ?? topo.confidence ?? 0;
+      if (topoConf >= 0.85) {
+        srcId = topo.sourceShapeId;
+        tgtId = topo.targetShapeId;
+      }
     }
 
     if (srcId && tgtId && objectMap.has(srcId) && objectMap.has(tgtId)) {
@@ -82,6 +89,9 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   });
 
+  // Phase 4F.19: Discover visual structures and generate composition candidates
+  const visualStructures = discoverVisualStructures(wsModel, semanticScene, options);
+  const compositionCandidates = generateCompositionCandidates(visualStructures, options);
   const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, options);
 
   const {
@@ -89,6 +99,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     rejectedOpportunities: budgetRejected,
     budgetReport
   } = rankAndSelectOpportunities(allOpportunities, {
+    compositionCandidates,
     totalObjectCount: allObjectIds.length,
     ...options
   });
@@ -143,6 +154,19 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
 
     if (action.type === 'cleanFlowchart') {
       const nodeIds = action.objectIds || [];
+      const conflictingOwner = nodeIds.find((id) => layoutOwnership.has(id));
+
+      if (conflictingOwner) {
+        const ownerActionId = layoutOwnership.get(conflictingOwner);
+        suppressedActions.push(action.id);
+        suppressionReasons.push({
+          actionId: action.id,
+          reason: `Node '${conflictingOwner}' in cleanFlowchart action is already owned by higher-priority action '${ownerActionId}'`
+        });
+        conflictsDetected.push(`Conflict: cleanFlowchart '${action.id}' subsumed by '${ownerActionId}'`);
+        continue;
+      }
+
       const connIds = action.connectorIds || [];
       const owned = new Set([...nodeIds, ...connIds]);
 
@@ -334,6 +358,8 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
   });
 
   const diagnostics = {
+    structures: visualStructures,
+    compositionCandidates,
     opportunities: allOpportunities,
     selectedOpportunities,
     rejectedOpportunities: [...(budgetRejected || []), ...(resolutionRejected || [])],

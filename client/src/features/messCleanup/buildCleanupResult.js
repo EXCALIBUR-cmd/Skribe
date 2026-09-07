@@ -130,14 +130,73 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
     preservationRate: allObjectIds.length > 0 ? Number((untouchedObjectIds.length / allObjectIds.length).toFixed(2)) : 1.0
   };
 
+  const placementMap = new Map((layoutProposal?.placements || []).map((p) => [p.objectId, p]));
+  const movedNonConnectorIds = new Set();
+  const reroutedConnectorIds = new Set();
+  const untouchedSet = new Set(untouchedObjectIds);
+
+  const normalizePathString = (p) => {
+    if (!p) return '';
+    if (typeof p === 'string') return p.trim().replace(/\s+/g, ' ');
+    if (Array.isArray(p)) {
+      return p
+        .map((cmd) => (Array.isArray(cmd) ? cmd.join(' ') : String(cmd)))
+        .join(' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+    }
+    return '';
+  };
+
+  // Hard Invariant: If a board is classified as already well-organized (zero actions executed),
+  // then no object moved and no connector was rerouted.
+  if (actionResults.length > 0) {
+    rawObjects.forEach((orig) => {
+      if (untouchedSet.has(orig.id)) return;
+      const p = placementMap.get(orig.id);
+      if (!p) return;
+      const semType = getSemanticType(orig);
+      const ox = orig.position?.x ?? orig.left ?? orig.bounds?.x ?? 0;
+      const oy = orig.position?.y ?? orig.top ?? orig.bounds?.y ?? 0;
+      const px = p.x ?? p.position?.x ?? p.bounds?.x ?? ox;
+      const py = p.y ?? p.position?.y ?? p.bounds?.y ?? oy;
+      const dist = Math.hypot(px - ox, py - oy);
+
+      if (semType === 'connector') {
+        const origPath = normalizePathString(orig.path || orig.pathData || '');
+        const propPath = normalizePathString(p.path || p.pathData || p.worldPath || '');
+        if (dist > 1.0 || (origPath && propPath && origPath !== propPath)) {
+          reroutedConnectorIds.add(orig.id);
+        }
+      } else {
+        if (dist > 1.0) {
+          movedNonConnectorIds.add(orig.id);
+        }
+      }
+    });
+  }
+
+  const objectsMoved = actionResults.length === 0 ? 0 : movedNonConnectorIds.size;
+  const connectorsRerouted = actionResults.length === 0 ? 0 : reroutedConnectorIds.size;
+  const objectsPreserved = untouchedObjectIds.length;
+  const meaningfulImprovements = actionResults.length;
+
+  const onlyLabels = actionResults.length > 0 && actionResults.every((a) => a.type === 'attachText');
+
   const humanSummary = actionResults.length === 0
-    ? `Board is already well-organized • ${untouchedObjectIds.length} objects intentionally preserved`
-    : `${actionResults.length} meaningful cleanup improvement${actionResults.length > 1 ? 's' : ''}: ${actionParts.join(', ')} • ${untouchedObjectIds.length} object${untouchedObjectIds.length !== 1 ? 's' : ''} intentionally preserved`;
+    ? `Board is already well-organized • ${objectsPreserved} objects intentionally preserved`
+    : (onlyLabels
+      ? `Fixed ${actionTypeCounts.attachText} label${actionTypeCounts.attachText > 1 ? 's' : ''} • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} intentionally preserved`
+      : `${actionParts.join(', ')} • ${objectsMoved} object${objectsMoved !== 1 ? 's' : ''} moved • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} preserved`);
 
   const summary = {
     actionCount: actionResults.length,
+    meaningfulImprovements,
+    objectsMoved,
+    connectorsRerouted,
+    objectsPreserved,
     modifiedObjectCount: modifiedObjectIds.size,
-    untouchedObjectCount: untouchedObjectIds.length,
+    untouchedObjectCount: objectsPreserved,
     highConfidenceCount: actionResults.filter((a) => a.confidence >= 0.90).length,
     usefulActionMetrics,
     humanSummary

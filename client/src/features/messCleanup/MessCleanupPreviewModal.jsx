@@ -427,11 +427,17 @@ export const MessCleanupPreviewModal = ({
             <div className="flex items-center gap-1.5 text-on-surface-variant font-semibold shrink-0">
               <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface">
                 <span className="w-2 h-2 rounded-full bg-primary"></span>
-                {cleanupResult.summary.modifiedObjectCount} improved
+                {cleanupResult.summary.objectsMoved ?? cleanupResult.summary.modifiedObjectCount} moved
               </span>
+              {(cleanupResult.summary.connectorsRerouted > 0) && (
+                <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  {cleanupResult.summary.connectorsRerouted} rerouted
+                </span>
+              )}
               <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface-variant">
                 <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                {cleanupResult.summary.untouchedObjectCount} preserved
+                {cleanupResult.summary.objectsPreserved ?? cleanupResult.summary.untouchedObjectCount} preserved
               </span>
             </div>
           </div>
