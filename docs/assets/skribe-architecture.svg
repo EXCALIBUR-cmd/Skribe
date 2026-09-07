@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 650">
+<defs>
+  <linearGradient id="card" x1="0" x2="1">
+    <stop offset="0" stop-color="#111827"/><stop offset="1" stop-color="#1e293b"/>
+  </linearGradient>
+  <linearGradient id="line" x1="0" x2="1">
+    <stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/>
+  </linearGradient>
+  <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto">
+    <path d="M0,0 L8,4 L0,8 z" fill="#22d3ee"/>
+  </marker>
+</defs>
+<rect width="1200" height="650" rx="30" fill="#090f1c"/>
+<text x="60" y="70" fill="#f8fafc" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="800">Skribe architecture</text>
+<text x="60" y="102" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="15">Two paths. One collaborative workspace.</text>
+
+<g font-family="Inter,Arial,sans-serif">
+  <rect x="65" y="160" width="310" height="360" rx="22" fill="url(#card)" stroke="#475569"/>
+  <text x="95" y="202" fill="#a78bfa" font-size="14" font-weight="700">CLIENT</text>
+  <text x="95" y="242" fill="#f8fafc" font-size="25" font-weight="800">React + Fabric.js</text>
+  <text x="95" y="280" fill="#cbd5e1" font-size="14">Infinite canvas</text>
+  <text x="95" y="306" fill="#cbd5e1" font-size="14">Board UI + tools</text>
+  <text x="95" y="332" fill="#cbd5e1" font-size="14">Auth + state</text>
+  <text x="95" y="358" fill="#cbd5e1" font-size="14">Local interactions</text>
+  <rect x="95" y="400" width="245" height="70" rx="14" fill="#0f172a" stroke="#334155"/>
+  <text x="115" y="428" fill="#94a3b8" font-size="11">CANVAS ENGINE</text>
+  <text x="115" y="453" fill="#f8fafc" font-size="18" font-weight="700">Shapes · Notes · Strokes</text>
+
+  <rect x="445" y="160" width="310" height="360" rx="22" fill="url(#card)" stroke="#475569"/>
+  <text x="475" y="202" fill="#22d3ee" font-size="14" font-weight="700">SERVER</text>
+  <text x="475" y="242" fill="#f8fafc" font-size="25" font-weight="800">Node + Express</text>
+  <text x="475" y="280" fill="#cbd5e1" font-size="14">REST APIs</text>
+  <text x="475" y="306" fill="#cbd5e1" font-size="14">Authentication</text>
+  <text x="475" y="332" fill="#cbd5e1" font-size="14">Board authorization</text>
+  <text x="475" y="358" fill="#cbd5e1" font-size="14">Persistence orchestration</text>
+  <rect x="475" y="400" width="245" height="70" rx="14" fill="#0f172a" stroke="#334155"/>
+  <text x="495" y="428" fill="#94a3b8" font-size="11">REAL-TIME</text>
+  <text x="495" y="453" fill="#f8fafc" font-size="18" font-weight="700">Socket.IO rooms</text>
+
+  <rect x="825" y="160" width="310" height="360" rx="22" fill="url(#card)" stroke="#475569"/>
+  <text x="855" y="202" fill="#4ade80" font-size="14" font-weight="700">DATA</text>
+  <text x="855" y="242" fill="#f8fafc" font-size="25" font-weight="800">MongoDB Atlas</text>
+  <text x="855" y="280" fill="#cbd5e1" font-size="14">Users</text>
+  <text x="855" y="306" fill="#cbd5e1" font-size="14">Boards</text>
+  <text x="855" y="332" fill="#cbd5e1" font-size="14">Canvas state</text>
+  <text x="855" y="358" fill="#cbd5e1" font-size="14">Persistent application data</text>
+  <rect x="855" y="400" width="245" height="70" rx="14" fill="#0f172a" stroke="#334155"/>
+  <text x="875" y="428" fill="#94a3b8" font-size="11">DURABLE STATE</text>
+  <text x="875" y="453" fill="#f8fafc" font-size="18" font-weight="700">REST → MongoDB</text>
+</g>
+
+<path d="M375 240 C405 240, 415 240, 445 240" fill="none" stroke="url(#line)" stroke-width="5" marker-end="url(#arrow)"/>
+<text x="390" y="220" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="12">REST</text>
+
+<path d="M375 410 C405 410, 415 410, 445 410" fill="none" stroke="url(#line)" stroke-width="5" marker-end="url(#arrow)"/>
+<text x="385" y="392" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="12">Socket.IO</text>
+
+<path d="M755 240 C785 240, 795 240, 825 240" fill="none" stroke="url(#line)" stroke-width="5" marker-end="url(#arrow)"/>
+<text x="770" y="220" fill="#94a3b8" font-family="Inter,Arial,sans-serif" font-size="12">Persistence</text>
+<path d="M825 410 C795 410, 785 410, 755 410" fill="none" stroke="#334155" stroke-width="3" stroke-dasharray="8 8" marker-end="url(#arrow)"/>
+
+<text x="600" y="585" text-anchor="middle" fill="#64748b" font-family="Inter,Arial,sans-serif" font-size="13">
+  live collaboration stays fast · durable state stays persistent
+</text>
+</svg>

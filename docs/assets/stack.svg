@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 130">
+<rect width="1200" height="130" rx="24" fill="#0b1220"/>
+<g font-family="Inter,Arial,sans-serif" font-weight="700" font-size="16">
+  <g transform="translate(55,34)">
+    <circle cx="30" cy="30" r="28" fill="#20232a"/><text x="30" y="36" text-anchor="middle" fill="#61dafb">⚛</text>
+    <text x="75" y="37" fill="#e2e8f0">React</text>
+  </g>
+  <g transform="translate(255,34)">
+    <circle cx="30" cy="30" r="28" fill="#151515"/><text x="30" y="36" text-anchor="middle" fill="#f7df1e">JS</text>
+    <text x="75" y="37" fill="#e2e8f0">Fabric.js</text>
+  </g>
+  <g transform="translate(470,34)">
+    <circle cx="30" cy="30" r="28" fill="#0b1f14"/><text x="30" y="36" text-anchor="middle" fill="#68a063">●</text>
+    <text x="75" y="37" fill="#e2e8f0">Node.js</text>
+  </g>
+  <g transform="translate(670,34)">
+    <circle cx="30" cy="30" r="28" fill="#172554"/><text x="30" y="36" text-anchor="middle" fill="#22d3ee">↔</text>
+    <text x="75" y="37" fill="#e2e8f0">Socket.IO</text>
+  </g>
+  <g transform="translate(895,34)">
+    <circle cx="30" cy="30" r="28" fill="#0b2b14"/><text x="30" y="36" text-anchor="middle" fill="#47a248">M</text>
+    <text x="75" y="37" fill="#e2e8f0">MongoDB</text>
+  </g>
+</g>
+</svg>
