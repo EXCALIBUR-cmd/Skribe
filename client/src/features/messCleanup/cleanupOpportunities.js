@@ -804,7 +804,7 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     const isComposition = opp.category === 'composition';
 
     // Hard Invariant: If composition benefit is 0 (no meaningful visual change), reject
-    if (isComposition && (opp.compositionBenefit ?? 0) <= 0) {
+    if (isComposition && opp.compositionBenefit !== undefined && opp.compositionBenefit <= 0) {
       rejectedOpportunities.push({
         id: opp.id,
         actionId: actId,
@@ -814,8 +814,6 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
       });
       continue;
     }
-
-    // Budget checks for compositions
     if (isComposition) {
       if (selectedCompositionCount >= budget.maxCompositions) {
         rejectedOpportunities.push({

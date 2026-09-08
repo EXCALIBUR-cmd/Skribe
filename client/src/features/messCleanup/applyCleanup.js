@@ -1,3 +1,5 @@
+import { parseConnectorPath } from './connectorGeometry.js';
+
 const isFiniteNumber = (val) => typeof val === 'number' && Number.isFinite(val);
 
 const findCanvasObject = (canvasObjects, objectId) => {
@@ -126,7 +128,15 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
           top: targetObj.top,
           angle: targetObj.angle ?? 0,
           scaleX: targetObj.scaleX ?? 1,
-          scaleY: targetObj.scaleY ?? 1
+          scaleY: targetObj.scaleY ?? 1,
+          width: targetObj.width,
+          height: targetObj.height,
+          path: targetObj.path,
+          pathData: targetObj.pathData,
+          x1: targetObj.x1,
+          y1: targetObj.y1,
+          x2: targetObj.x2,
+          y2: targetObj.y2
         }
       });
     }
@@ -215,6 +225,41 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
         scaleY: newScaleY
       };
 
+      if (placement.pathCommands || placement.path) {
+        const rawCommands = placement.pathCommands || placement.path;
+        const commands = Array.isArray(rawCommands)
+          ? rawCommands
+          : (typeof rawCommands === 'string' ? parseConnectorPath(rawCommands)?.allCommands : null);
+        if (Array.isArray(commands)) {
+          propsToSet.path = commands;
+        }
+      }
+      if (placement.pathData) {
+        propsToSet.pathData = placement.pathData;
+      }
+      if (isFiniteNumber(placement.x1)) propsToSet.x1 = placement.x1;
+      if (isFiniteNumber(placement.y1)) propsToSet.y1 = placement.y1;
+      if (isFiniteNumber(placement.x2)) propsToSet.x2 = placement.x2;
+      if (isFiniteNumber(placement.y2)) propsToSet.y2 = placement.y2;
+      if (isFiniteNumber(placement.bounds?.width)) propsToSet.width = placement.bounds.width;
+      if (isFiniteNumber(placement.bounds?.height)) propsToSet.height = placement.bounds.height;
+
+      // Ensure connector path is never a raw string on targetObj
+      if ((targetObj.isConnector || targetObj.type === 'path' || targetObj.type === 'Path') && typeof targetObj.path === 'string') {
+        const parsed = parseConnectorPath(targetObj.path)?.allCommands;
+        if (parsed) targetObj.path = parsed;
+      }
+
+      if (typeof targetObj._calcDimensions === 'function' && propsToSet.path) {
+        targetObj.path = propsToSet.path;
+        const dims = targetObj._calcDimensions();
+        if (dims) {
+          if (dims.width !== undefined) propsToSet.width = dims.width;
+          if (dims.height !== undefined) propsToSet.height = dims.height;
+          if (dims.pathOffset !== undefined) propsToSet.pathOffset = dims.pathOffset;
+        }
+      }
+
       if (typeof targetObj.set === 'function') {
         targetObj.set(propsToSet);
       } else {
@@ -233,7 +278,9 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
           top: newTop,
           angle: newAngle,
           scaleX: newScaleX,
-          scaleY: newScaleY
+          scaleY: newScaleY,
+          ...(propsToSet.path ? { path: propsToSet.path } : {}),
+          ...(propsToSet.pathData ? { pathData: propsToSet.pathData } : {})
         }
       });
     }

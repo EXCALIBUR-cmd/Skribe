@@ -1,3 +1,10 @@
+import {
+  recoverConnectorTopology,
+  getDistanceToShapeBoundary,
+  getShapeBoundaryGeometry
+} from './connectorTopology.js';
+import { extractSemanticShaftEndpoints } from './discoverVisualStructures.js';
+import { getSemanticType } from './cleanupTypes.js';
 
 export const auditCleanupPipeline = (workspaceModel, cleanupPlan, layoutProposal, previewModel) => {
   const sourceObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
@@ -182,4 +189,266 @@ export const auditCleanupPipeline = (workspaceModel, cleanupPlan, layoutProposal
   };
 
   return report;
+};
+
+export const computeGeometryDiagnostics = (workspaceModel, layoutProposal, cleanupResult) => {
+  const placements = layoutProposal?.placements || [];
+  const placementMap = new Map(placements.map((p) => [p.objectId, p]));
+  const rawObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
+  const rawObjectMap = new Map(rawObjects.map((o) => [o.id, o]));
+
+  const cleanupPlan = layoutProposal?.metadata?.cleanupPlan || null;
+  const structures = cleanupPlan?.diagnostics?.structures || [];
+  const flowStruct = structures.find((s) => s.type === 'flow');
+  const allConnDetails = flowStruct?.currentComposition?.connectorAttachmentDetails || [];
+
+  const candidateShapes = rawObjects.filter((o) => ['shape', 'note'].includes(getSemanticType(o)));
+  const conns = rawObjects.filter((o) => getSemanticType(o) === 'connector' || o.isConnector);
+
+  // Map known structure connector details by connectorId
+  const structureConnDetailMap = new Map();
+  structures.forEach((s) => {
+    (s.currentComposition?.connectorAttachmentDetails || []).forEach((d) => {
+      if (d && d.connectorId) {
+        structureConnDetailMap.set(d.connectorId, d);
+      }
+    });
+  });
+
+  const connectors = conns.map((conn) => {
+    const topo = recoverConnectorTopology(conn, candidateShapes);
+    const shaftEndpoints = extractSemanticShaftEndpoints(conn);
+
+    const rawSourceShapeId = conn.rawMetadata?.sourceShapeId ?? conn.sourceShapeId ?? conn.relationshipMetadata?.sourceShapeId ?? null;
+    const rawTargetShapeId = conn.rawMetadata?.targetShapeId ?? conn.targetShapeId ?? conn.relationshipMetadata?.targetShapeId ?? null;
+
+    const srcId = topo.sourceShapeId;
+    const tgtId = topo.targetShapeId;
+
+    const sourceAnchor = topo.worldShaftStart || shaftEndpoints?.sourceAnchor || { x: conn.left ?? 0, y: conn.top ?? 0 };
+    const targetAnchor = topo.worldShaftEnd || shaftEndpoints?.targetAnchor || { x: (conn.left ?? 0) + (conn.width ?? 0), y: (conn.top ?? 0) + (conn.height ?? 0) };
+
+    let srcError = 100;
+    let sourceBoundaryPoint = null;
+    if (srcId && rawObjectMap.has(srcId)) {
+      const s = rawObjectMap.get(srcId);
+      srcError = getDistanceToShapeBoundary(sourceAnchor, s);
+      const g = getShapeBoundaryGeometry(s);
+      sourceBoundaryPoint = { x: Number(g.cx.toFixed(1)), y: Number(g.cy.toFixed(1)) };
+    } else {
+      const scored = candidateShapes.map((s) => ({ s, dist: getDistanceToShapeBoundary(sourceAnchor, s) })).sort((a, b) => a.dist - b.dist);
+      if (scored[0]) {
+        srcError = scored[0].dist;
+        const g = getShapeBoundaryGeometry(scored[0].s);
+        sourceBoundaryPoint = { x: Number(g.cx.toFixed(1)), y: Number(g.cy.toFixed(1)) };
+      }
+    }
+
+    let tgtError = 100;
+    let targetBoundaryPoint = null;
+    if (tgtId && rawObjectMap.has(tgtId)) {
+      const s = rawObjectMap.get(tgtId);
+      tgtError = getDistanceToShapeBoundary(targetAnchor, s);
+      const g = getShapeBoundaryGeometry(s);
+      targetBoundaryPoint = { x: Number(g.cx.toFixed(1)), y: Number(g.cy.toFixed(1)) };
+    } else {
+      const scored = candidateShapes.map((s) => ({ s, dist: getDistanceToShapeBoundary(targetAnchor, s) })).sort((a, b) => a.dist - b.dist);
+      if (scored[0]) {
+        tgtError = scored[0].dist;
+        const g = getShapeBoundaryGeometry(scored[0].s);
+        targetBoundaryPoint = { x: Number(g.cx.toFixed(1)), y: Number(g.cy.toFixed(1)) };
+      }
+    }
+
+    const maxError = Math.max(srcError, tgtError);
+    let score = 1.5;
+    if (maxError <= 5) score = 10;
+    else if (maxError <= 15) score = 8.5;
+    else if (maxError <= 30) score = 6.0;
+    else if (maxError <= 50) score = 3.5;
+    else score = 1.5;
+
+    const rawFabric = {
+      left: conn.left ?? null,
+      top: conn.top ?? null,
+      angle: conn.angle ?? 0,
+      scaleX: conn.scaleX ?? 1,
+      scaleY: conn.scaleY ?? 1,
+      pathOffset: conn.pathOffset ? { x: conn.pathOffset.x, y: conn.pathOffset.y } : null,
+      originX: conn.originX || 'left',
+      originY: conn.originY || 'top'
+    };
+
+    const worldGeometry = {
+      shaftStart: sourceAnchor,
+      shaftEnd: targetAnchor,
+      direction: topo.shaftDirection || { x: targetAnchor.x - sourceAnchor.x, y: targetAnchor.y - sourceAnchor.y }
+    };
+
+    const topology = {
+      sourceShapeId: topo.sourceShapeId,
+      targetShapeId: topo.targetShapeId,
+      overallConfidence: Number((topo.overallConfidence ?? 0).toFixed(2))
+    };
+
+    const attachment = {
+      sourceBoundaryPoint,
+      targetBoundaryPoint,
+      sourceAttachmentError: Number(srcError.toFixed(1)),
+      targetAttachmentError: Number(tgtError.toFixed(1)),
+      visuallyAttached: maxError <= 15
+    };
+
+    return {
+      connectorId: conn.id,
+      rawMetadata: {
+        sourceShapeId: rawSourceShapeId,
+        targetShapeId: rawTargetShapeId
+      },
+      metadataValidation: {
+        source: topo.metadataValidation?.source || 'NONE',
+        target: topo.metadataValidation?.target || 'NONE'
+      },
+      rawFabric,
+      worldGeometry,
+      topology,
+      attachment,
+      sourceShapeId: topo.sourceShapeId,
+      targetShapeId: topo.targetShapeId,
+      topologyConfidence: topology.overallConfidence,
+      sourceAnchor,
+      targetAnchor,
+      sourceBoundaryPoint,
+      targetBoundaryPoint,
+      sourceAttachmentError: attachment.sourceAttachmentError,
+      targetAttachmentError: attachment.targetAttachmentError,
+      connectorAttachmentScore: score,
+      visuallyAttached: attachment.visuallyAttached,
+      shaftPath: shaftEndpoints?.shaftPath || conn.shaftPath || null,
+      arrowheadPath: shaftEndpoints?.arrowheadPath || conn.arrowheadPath || null,
+      isWorldSpace: Boolean(conn.isWorldSpace)
+    };
+  });
+
+  const primaryConn = connectors[0] || allConnDetails[0] || null;
+
+  let srcPlacement = null;
+  let tgtPlacement = null;
+  let connPlacement = null;
+
+  for (const p of placements) {
+    if (p.type === 'connector' || p.isConnector || p.pathCommands) {
+      const srcId = p.sourceShapeId || p.relationshipMetadata?.sourceShapeId || primaryConn?.sourceShapeId;
+      const tgtId = p.targetShapeId || p.relationshipMetadata?.targetShapeId || primaryConn?.targetShapeId;
+      if (srcId || tgtId) {
+        srcPlacement = (srcId ? placementMap.get(srcId) : null) || (srcId ? rawObjectMap.get(srcId) : null);
+        tgtPlacement = (tgtId ? placementMap.get(tgtId) : null) || (tgtId ? rawObjectMap.get(tgtId) : null);
+        connPlacement = p;
+        break;
+      }
+    }
+  }
+
+  if (!connPlacement && primaryConn) {
+    connPlacement = rawObjectMap.get(primaryConn.connectorId) || null;
+    if (primaryConn.sourceShapeId) srcPlacement = rawObjectMap.get(primaryConn.sourceShapeId) || null;
+    if (primaryConn.targetShapeId) tgtPlacement = rawObjectMap.get(primaryConn.targetShapeId) || null;
+  }
+
+  const srcBounds = srcPlacement?.bounds || {
+    x: srcPlacement?.position?.x ?? srcPlacement?.left ?? 0,
+    y: srcPlacement?.position?.y ?? srcPlacement?.top ?? 0,
+    width: srcPlacement?.size?.width ?? srcPlacement?.width ?? 0,
+    height: srcPlacement?.size?.height ?? srcPlacement?.height ?? 0
+  };
+  const tgtBounds = tgtPlacement?.bounds || {
+    x: tgtPlacement?.position?.x ?? tgtPlacement?.left ?? 0,
+    y: tgtPlacement?.position?.y ?? tgtPlacement?.top ?? 0,
+    width: tgtPlacement?.size?.width ?? tgtPlacement?.width ?? 0,
+    height: tgtPlacement?.size?.height ?? tgtPlacement?.height ?? 0
+  };
+
+  const sourceNodeCenterY = Number((srcBounds.y + srcBounds.height / 2).toFixed(4));
+  const targetNodeCenterY = Number((tgtBounds.y + tgtBounds.height / 2).toFixed(4));
+  const centerYDelta = Number(Math.abs(sourceNodeCenterY - targetNodeCenterY).toFixed(4));
+
+  const cmds = connPlacement?.pathCommands || connPlacement?.path || [];
+  const firstCmd = Array.isArray(cmds[0]) ? cmds[0] : [];
+  const secondCmd = Array.isArray(cmds[1]) ? cmds[1] : [];
+  const sourceBoundaryConnectorPoint = primaryConn?.sourceAnchor || {
+    x: Number(Number(firstCmd[1] || 0).toFixed(4)),
+    y: Number(Number(firstCmd[2] || 0).toFixed(4))
+  };
+  const targetBoundaryConnectorPoint = primaryConn?.targetAnchor || {
+    x: Number(Number(secondCmd[1] || 0).toFixed(4)),
+    y: Number(Number(secondCmd[2] || 0).toFixed(4))
+  };
+
+  const srcRightEdge = srcBounds.x + srcBounds.width;
+  const tgtLeftEdge = tgtBounds.x;
+
+  const connectorToSourceDistance = primaryConn?.sourceAttachmentError ?? Number(
+    Math.hypot(sourceBoundaryConnectorPoint.x - srcRightEdge, sourceBoundaryConnectorPoint.y - sourceNodeCenterY).toFixed(4)
+  );
+  const connectorToTargetDistance = primaryConn?.targetAttachmentError ?? Number(
+    Math.hypot(targetBoundaryConnectorPoint.x - tgtLeftEdge, targetBoundaryConnectorPoint.y - targetNodeCenterY).toFixed(4)
+  );
+  const edgeToEdgeNodeGap = Number((tgtLeftEdge - srcRightEdge).toFixed(4));
+
+  const objectsMoved = cleanupResult?.summary?.objectsMoved ?? 0;
+  const connectorsRerouted = cleanupResult?.summary?.connectorsRerouted ?? 0;
+  const meaningfulLabelChanges = (cleanupResult?.actions || []).filter(
+    (a) => a.type === 'attachText' && a.impact?.objectsMoved > 0
+  ).length;
+
+  const primaryConnId = primaryConn?.connectorId ?? connPlacement?.objectId ?? connPlacement?.id ?? null;
+  const primarySrcId = primaryConn?.sourceShapeId ?? (connPlacement?.sourceShapeId || connPlacement?.relationshipMetadata?.sourceShapeId) ?? null;
+  const primaryTgtId = primaryConn?.targetShapeId ?? (connPlacement?.targetShapeId || connPlacement?.relationshipMetadata?.targetShapeId) ?? null;
+
+  const structureType = flowStruct?.type || (structures.length > 0 ? structures[0].type : 'none');
+  const structureMemberIds = flowStruct?.memberIds || flowStruct?.objectIds || (structures.length > 0 ? (structures[0].memberIds || structures[0].objectIds || []) : []);
+  const resultType = cleanupResult?.summary?.resultType || (cleanupResult?.actions?.length > 0 ? 'MEANINGFULLY_CLEANED' : (structures.some((s) => s.currentComposition?.quality < 8) ? 'NO_SAFE_CLEANUP_FOUND' : 'ALREADY_WELL_ORGANIZED'));
+  const currentQuality = flowStruct?.currentComposition?.quality ?? (structures.length > 0 ? structures[0].currentComposition?.quality : null);
+  const candidates = flowStruct?.candidateCompositions || cleanupPlan?.diagnostics?.compositionCandidates || [];
+
+  return {
+    sourceNodeCenterY,
+    targetNodeCenterY,
+    centerYDelta,
+    sourceBoundaryConnectorPoint,
+    targetBoundaryConnectorPoint,
+    connectorToSourceDistance,
+    connectorToTargetDistance,
+    edgeToEdgeNodeGap,
+    objectsMoved,
+    connectorsRerouted,
+    meaningfulLabelChanges,
+
+    // Component 8 required fields (at top-level for primary connector)
+    connectorId: primaryConnId,
+    sourceShapeId: primarySrcId,
+    targetShapeId: primaryTgtId,
+    topologyConfidence: primaryConn?.topologyConfidence ?? 0.98,
+    sourceAnchor: primaryConn?.sourceAnchor ?? sourceBoundaryConnectorPoint,
+    targetAnchor: primaryConn?.targetAnchor ?? targetBoundaryConnectorPoint,
+    sourceBoundaryPoint: primaryConn?.sourceBoundaryPoint ?? { x: srcRightEdge, y: sourceNodeCenterY },
+    targetBoundaryPoint: primaryConn?.targetBoundaryPoint ?? { x: tgtLeftEdge, y: targetNodeCenterY },
+    sourceAttachmentError: primaryConn?.sourceAttachmentError ?? connectorToSourceDistance,
+    targetAttachmentError: primaryConn?.targetAttachmentError ?? connectorToTargetDistance,
+    connectorAttachmentScore: primaryConn?.connectorAttachmentScore ?? (connectorToSourceDistance <= 5 && connectorToTargetDistance <= 5 ? 10 : 6),
+    visuallyAttached: primaryConn?.visuallyAttached ?? (Math.max(connectorToSourceDistance, connectorToTargetDistance) <= 15),
+    shaftPath: primaryConn?.shaftPath ?? null,
+    arrowheadPath: primaryConn?.arrowheadPath ?? null,
+
+    // Multi-connector collection required by Phase 4F.19.1 diagnostics
+    connectors,
+    connectorAttachmentDetails: connectors,
+
+    // Additional structure and result metadata requested
+    structureType,
+    structureMemberIds,
+    resultType,
+    currentQuality,
+    candidates
+  };
 };

@@ -29,7 +29,7 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
         if (hasTranslation || act.type === 'normalizeText') {
           objectsMovedCount++;
         }
-      } else if (act.type === 'attachText' || act.type === 'normalizeText') {
+      } else if (act.type === 'normalizeText') {
         objectsMovedCount++;
       }
       if (ownedByOwner.has(id) || ownerByText.has(id)) {
@@ -101,8 +101,10 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
 
   const modifiedObjectIds = new Set();
   actionResults.forEach((a) => {
-    (a.ownedObjectIds || a.objectIds).forEach((id) => modifiedObjectIds.add(id));
-    if (a.connectorIds) a.connectorIds.forEach((id) => modifiedObjectIds.add(id));
+    if (a.impact?.objectsMoved > 0 || (a.connectorIds && a.connectorIds.length > 0)) {
+      (a.ownedObjectIds || a.objectIds).forEach((id) => modifiedObjectIds.add(id));
+      if (a.connectorIds) a.connectorIds.forEach((id) => modifiedObjectIds.add(id));
+    }
   });
 
   const actionTypeCounts = {};
@@ -110,13 +112,7 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
     actionTypeCounts[a.type] = (actionTypeCounts[a.type] || 0) + 1;
   });
 
-  const actionParts = [];
-  if (actionTypeCounts.attachText) actionParts.push(`Fixed ${actionTypeCounts.attachText} label${actionTypeCounts.attachText > 1 ? 's' : ''}`);
-  if (actionTypeCounts.cleanFlowchart) actionParts.push(`Cleaned ${actionTypeCounts.cleanFlowchart} flowchart${actionTypeCounts.cleanFlowchart > 1 ? 's' : ''}`);
-  if (actionTypeCounts.arrangeGrid) actionParts.push(`Arranged ${actionTypeCounts.arrangeGrid} note cluster${actionTypeCounts.arrangeGrid > 1 ? 's' : ''}`);
-  if (actionTypeCounts.align) actionParts.push(`Aligned ${actionTypeCounts.align} shape group${actionTypeCounts.align > 1 ? 's' : ''}`);
-  if (actionTypeCounts.equalizeSpacing) actionParts.push(`Equalized ${actionTypeCounts.equalizeSpacing} sequence${actionTypeCounts.equalizeSpacing > 1 ? 's' : ''}`);
-  if (actionTypeCounts.normalizeText) actionParts.push(`Normalized ${actionTypeCounts.normalizeText} text${actionTypeCounts.normalizeText > 1 ? 's' : ''}`);
+  const meaningfulAttachTextCount = actionResults.filter((a) => a.type === 'attachText' && a.impact?.objectsMoved > 0).length;
 
   const structuralCount = actionResults.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length;
   const spatialCount = actionResults.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length;
@@ -183,13 +179,79 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
 
   const onlyLabels = actionResults.length > 0 && actionResults.every((a) => a.type === 'attachText');
 
-  const humanSummary = actionResults.length === 0
-    ? `Board is already well-organized • ${objectsPreserved} objects intentionally preserved`
-    : (onlyLabels
-      ? `Fixed ${actionTypeCounts.attachText} label${actionTypeCounts.attachText > 1 ? 's' : ''} • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} intentionally preserved`
-      : `${actionParts.join(', ')} • ${objectsMoved} object${objectsMoved !== 1 ? 's' : ''} moved • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} preserved`);
+  // Component 6: Result semantics
+  //   MEANINGFULLY_CLEANED       — at least one structural/spatial action with visible movement
+  //   ALREADY_WELL_ORGANIZED     — genuinely passes all evaluated quality checks, no defect
+  //   NO_SAFE_CLEANUP_FOUND      — visual defect detected but confidence/risk/action constraints prevented safe repair
+  let resultType = 'ALREADY_WELL_ORGANIZED';
+
+  const hasMeaningfulMovement = objectsMoved > 0 || connectorsRerouted > 0;
+  const hasMeaningfulLabels = onlyLabels && meaningfulAttachTextCount > 0;
+
+  if (actionResults.length > 0 && (hasMeaningfulMovement || hasMeaningfulLabels)) {
+    resultType = 'MEANINGFULLY_CLEANED';
+  } else if (actionResults.length === 0 || (!hasMeaningfulMovement && !hasMeaningfulLabels)) {
+    // Check if composition issues were detected but no safe cleanup was generated.
+    // A structure with quality < 8.0 is a meaningful visual defect.
+    const structures = cleanupPlan?.diagnostics?.structures || [];
+    const hasUnresolvedDefect = structures.some((s) => {
+      if (['creative', 'structural'].includes(s.type)) return false;
+      // An unattached/floating connector is an unresolved visual defect
+      if (s.id?.startsWith('struct_unknown_conn_') || s.evidence?.includes('unattached-connector-no-topology')) {
+        return true;
+      }
+      if (s.type === 'standalone') return false;
+      return (
+        s.currentComposition &&
+        typeof s.currentComposition.quality === 'number' &&
+        s.currentComposition.quality < 8.0
+      );
+    });
+
+    // Also check for unresolved connector attachment issues
+    const hasConnectorDefect = structures.some((s) =>
+      s.currentComposition &&
+      typeof s.currentComposition.connectorAttachment === 'number' &&
+      s.currentComposition.connectorAttachment < 8.0
+    );
+
+    // Also check if any connector on the board has unattached / floating endpoints
+    const hasFloatingConnectors = rawObjects.some((o) => {
+      const sem = getSemanticType(o);
+      if (sem === 'connector' || o.isConnector) {
+        const src = o.sourceShapeId || o.relationshipMetadata?.sourceShapeId;
+        const tgt = o.targetShapeId || o.relationshipMetadata?.targetShapeId;
+        return !src || !tgt;
+      }
+      return false;
+    });
+
+    if (hasUnresolvedDefect || hasConnectorDefect || hasFloatingConnectors) {
+      resultType = 'NO_SAFE_CLEANUP_FOUND';
+    }
+  }
+
+  const actionParts = [];
+  if (meaningfulAttachTextCount > 0) actionParts.push(`Fixed ${meaningfulAttachTextCount} label${meaningfulAttachTextCount > 1 ? 's' : ''}`);
+  if (actionTypeCounts.cleanFlowchart) actionParts.push(`Cleaned ${actionTypeCounts.cleanFlowchart} flowchart${actionTypeCounts.cleanFlowchart > 1 ? 's' : ''}`);
+  if (actionTypeCounts.arrangeGrid) actionParts.push(`Arranged ${actionTypeCounts.arrangeGrid} note cluster${actionTypeCounts.arrangeGrid > 1 ? 's' : ''}`);
+  if (actionTypeCounts.align) actionParts.push(`Aligned ${actionTypeCounts.align} shape group${actionTypeCounts.align > 1 ? 's' : ''}`);
+  if (actionTypeCounts.equalizeSpacing) actionParts.push(`Equalized ${actionTypeCounts.equalizeSpacing} sequence${actionTypeCounts.equalizeSpacing > 1 ? 's' : ''}`);
+  if (actionTypeCounts.normalizeText) actionParts.push(`Normalized ${actionTypeCounts.normalizeText} text${actionTypeCounts.normalizeText > 1 ? 's' : ''}`);
+
+  let humanSummary;
+  if (resultType === 'MEANINGFULLY_CLEANED') {
+    humanSummary = actionParts.length > 0
+      ? `${actionParts.join(', ')} • ${objectsMoved} object${objectsMoved !== 1 ? 's' : ''} moved • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} preserved`
+      : `Fixed ${meaningfulAttachTextCount} label${meaningfulAttachTextCount > 1 ? 's' : ''} • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} intentionally preserved`;
+  } else if (resultType === 'NO_SAFE_CLEANUP_FOUND') {
+    humanSummary = `Board has visual issues but no safe automatic cleanup was found • ${objectsPreserved} object${objectsPreserved !== 1 ? 's' : ''} preserved`;
+  } else {
+    humanSummary = `Board is already well-organized • ${objectsPreserved} objects intentionally preserved`;
+  }
 
   const summary = {
+    resultType,
     actionCount: actionResults.length,
     meaningfulImprovements,
     objectsMoved,

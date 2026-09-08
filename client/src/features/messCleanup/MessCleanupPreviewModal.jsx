@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { buildPreviewRenderModel, worldToPreview } from './previewModel.js';
 import { mapSvgPathCommands, parseConnectorPath } from './connectorGeometry.js';
 import { buildCleanupResult } from './buildCleanupResult.js';
+import { computeGeometryDiagnostics } from './auditCleanupPipeline.js';
 
 const isDarkColor = (color) => {
   if (!color || color === 'transparent' || color === 'none') return false;
@@ -144,6 +145,19 @@ export const MessCleanupPreviewModal = ({
     () => buildPreviewRenderModel(workspaceModel, layoutProposal),
     [workspaceModel, layoutProposal]
   );
+
+  useEffect(() => {
+    if (layoutProposal && workspaceModel && cleanupResult) {
+      const diags = computeGeometryDiagnostics(workspaceModel, layoutProposal, cleanupResult);
+      console.log('[MessCleanup Diagnostics Publish]', diags);
+      window.__messCleanupDiagnostics = diags;
+      console.log('[MessCleanup Diagnostics Window]', window.__messCleanupDiagnostics);
+      console.log('[MessCleanup Diagnostics Stringified]', JSON.stringify(window.__messCleanupDiagnostics));
+      if (diags) {
+        console.log('=== [MESS CLEANUP MODAL GEOMETRY DIAGNOSTICS] ===', diags);
+      }
+    }
+  }, [layoutProposal, workspaceModel, cleanupResult]);
 
   if (!isOpen) return null;
 

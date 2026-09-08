@@ -1,5 +1,5 @@
 import { getSemanticType, getShapeType, isTextObject, detectConnectorTypeFromPath } from './cleanupTypes.js';
-import { translatePathCommands } from './connectorGeometry.js';
+import { translatePathCommands, transformPathCommandsToWorld, parseConnectorPath } from './connectorGeometry.js';
 
 export const getPathWorldDelta = (object) => {
   if (!object || !Array.isArray(object.path) || object.path.length === 0) {
@@ -367,18 +367,62 @@ export const normalizeObject = (object, zIndex = 0) => {
   }
 
   if (object.path && Array.isArray(object.path)) {
-    const { dx, dy } = getPathWorldDelta(object);
-    normalized.path = (dx !== 0 || dy !== 0)
-      ? translatePathCommands(object.path, dx, dy)
-      : cloneJsonValue(object.path);
+    if (semanticType === 'connector' || object.isConnector) {
+      if (object.isWorldSpace === true || object.worldPathCommands) {
+        normalized.path = cloneJsonValue(object.worldPathCommands || object.path);
+        normalized.worldPath = normalized.path;
+        normalized.worldPathCommands = normalized.path;
+        normalized.isWorldSpace = true;
+      } else {
+        normalized.worldPathCommands = transformPathCommandsToWorld(object.path, object);
+        normalized.worldPath = normalized.worldPathCommands;
+        normalized.path = normalized.worldPathCommands;
+        normalized.isWorldSpace = true;
+      }
+    } else {
+      const { dx, dy } = getPathWorldDelta(object);
+      normalized.path = (dx !== 0 || dy !== 0)
+        ? translatePathCommands(object.path, dx, dy)
+        : cloneJsonValue(object.path);
 
-    normalized.worldPath = normalized.path;
-    normalized.worldPathCommands = normalized.path;
+      normalized.worldPath = normalized.path;
+      normalized.worldPathCommands = normalized.path;
+    }
   }
 
   if (semanticType === 'connector') {
     const connType = object.connectorType || object.connector?.connectorType || detectConnectorTypeFromPath(object) || 'straight';
     normalized.connectorType = connType;
+
+    const parsedWorld = parseConnectorPath(normalized.path);
+    const worldShaftStart = parsedWorld?.startPt || { x: normalized.bounds?.x ?? 0, y: normalized.bounds?.y ?? 0 };
+    const worldShaftEnd = parsedWorld?.endPt || { x: (normalized.bounds?.x ?? 0) + (normalized.bounds?.width ?? 0), y: (normalized.bounds?.y ?? 0) + (normalized.bounds?.height ?? 0) };
+    const shaftDirection = {
+      x: worldShaftEnd.x - worldShaftStart.x,
+      y: worldShaftEnd.y - worldShaftStart.y
+    };
+
+    const pathOffset = object.pathOffset && typeof object.pathOffset.x === 'number' && typeof object.pathOffset.y === 'number'
+      ? { x: object.pathOffset.x, y: object.pathOffset.y }
+      : null;
+
+    normalized.localPath = Array.isArray(object.path) ? cloneJsonValue(object.path) : null;
+    normalized.pathOffset = pathOffset;
+    normalized.origin = { x: originX, y: originY };
+    normalized.left = left;
+    normalized.top = top;
+    normalized.angle = getNumber(object.angle !== undefined ? object.angle : object.rotation, 0);
+    normalized.scaleX = scaleX;
+    normalized.scaleY = scaleY;
+    normalized.worldShaftStart = worldShaftStart;
+    normalized.worldShaftEnd = worldShaftEnd;
+    normalized.shaftDirection = shaftDirection;
+    normalized.shaftPath = parsedWorld?.mainCommands || [];
+    normalized.arrowheadPath = parsedWorld?.hasArrowhead
+      ? parsedWorld.allCommands.slice(parsedWorld.mainCommands.length)
+      : [];
+    normalized.isWorldSpace = true;
+
     normalized.connector = {
       sourceShapeId,
       targetShapeId,

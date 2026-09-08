@@ -32,15 +32,6 @@ export const detectRelationships = (objects) => {
       object.connectorTopology = topo;
       object.sourceShapeId = topo.sourceShapeId;
       object.targetShapeId = topo.targetShapeId;
-
-      if (!object.relationshipMetadata) object.relationshipMetadata = {};
-      object.relationshipMetadata.sourceShapeId = topo.sourceShapeId;
-      object.relationshipMetadata.targetShapeId = topo.targetShapeId;
-
-      if (object.connector) {
-        object.connector.sourceShapeId = topo.sourceShapeId;
-        object.connector.targetShapeId = topo.targetShapeId;
-      }
     }
 
     if (metadata.attachedTextId) {

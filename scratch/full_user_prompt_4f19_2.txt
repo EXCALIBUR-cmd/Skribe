@@ -1,0 +1,351 @@
+<USER_REQUEST>
+Phase 4F.19.2 — Canonical Connector World Geometry & Metadata Validation
+
+Do NOT implement connector repair yet.
+
+Phase 4F.19.1 diagnostics exposed the actual root cause.
+
+Two critical issues were found:
+
+1. Connector world geometry is incomplete.
+
+normalizeObjects.js currently translates connector path commands but does not apply:
+- Fabric angle
+- scaleX
+- scaleY
+- full transform matrix
+
+Therefore rotated connectors are being analyzed as if their path were still horizontal.
+
+2. Persisted connector metadata can be stale.
+
+connectorTopology.js currently accepts explicit sourceShapeId with near-0.99 confidence even when the persisted source is geometrically inconsistent with the connector.
+
+Canonical example:
+Connector 1 claims:
+sourceShapeId = shape_elem_1788819871101_txc8m
+
+That shape is the Process hexagon and is approximately 461px away from the connector's source endpoint.
+
+This metadata MUST NOT automatically override geometric evidence.
+
+DO NOT lower:
+MAX_ATTACH_DISTANCE = 35px
+
+DO NOT implement connector repair.
+
+DO NOT modify cleanup executor behavior.
+
+The goal of this phase is to establish trustworthy canonical connector geometry and trustworthy topology.
+
+==================================================
+PART 1 — CANONICAL WORLD-SPACE CONNECTOR GEOMETRY
+==================================================
+
+Audit normalizeObjects.js and connectorGeometry.js.
+
+For every Fabric connector Path:
+
+raw:
+- path
+- pathOffset
+- left
+- top
+- originX
+- originY
+- angle
+- scaleX
+- scaleY
+- width
+- height
+
+Determine the exact Fabric transform required to convert path-local coordinates into canonical world-space coordinates.
+
+Prefer using the actual Fabric transform matrix / equivalent mathematically identical transform rather than reconstructing an incomplete transform manually.
+
+The resulting worldPathCommands MUST reflect:
+
+translation
++
+rotation
++
+scale
++
+pathOffset/origin semantics.
+
+Do not double-transform paths that are already world-space.
+
+For each connector expose:
+
+localPath
+pathOffset
+origin
+left
+top
+angle
+scaleX
+scaleY
+worldPath
+worldShaftStart
+worldShaftEnd
+shaftDirection.
+
+For the canonical real-board connectors verify that rotated connectors no longer produce horizontal tangent vectors of (140,0) when their actual Fabric angle is 36.94° or -45°.
+
+==================================================
+PART 2 — SEMANTIC SHAFT ENDPOINTS
+==================================================
+
+Keep the existing arrowhead distinction.
+
+A connector may contain:
+
+- main shaft commands
+- arrowhead subpath
+
+The semantic endpoint for topology/attachment is the shaft endpoint, not the arrowhead tip.
+
+Validate this for:
+- straight connector
+- rotated connector
+- scaled connector
+- curved connector
+- connector with arrowhead.
+
+Do not regress existing arrowhead rendering.
+
+==================================================
+PART 3 — EXPLICIT METADATA VALIDATION
+==================================================
+
+Explicit sourceShapeId / targetShapeId must be treated as persisted evidence, not unconditional truth.
+
+For each explicit relationship:
+
+1. Look up the referenced shape.
+2. Compute the semantic connector endpoint in world space.
+3. Compute distance to the referenced shape boundary.
+4. Check endpoint tangent/direction compatibility.
+5. Compare against nearby competing shapes.
+6. Determine whether metadata is geometrically consistent.
+
+Classify each explicit endpoint as:
+
+VALIDATED
+STALE
+AMBIGUOUS
+INVALID
+
+Rules:
+
+VALIDATED:
+- geometry is consistent
+- explicit metadata can contribute high confidence.
+
+STALE / INVALID:
+- referenced shape is geometrically implausible
+- do NOT return 0.99 confidence.
+- do NOT use the stale relationship for flow structure discovery.
+
+AMBIGUOUS:
+- insufficient evidence
+- leave unresolved.
+
+Never let stale metadata create a verified topology relationship.
+
+Do not delete the persisted metadata from the raw object.
+Mark it as untrusted/rejected for topology purposes.
+
+==================================================
+PART 4 — GEOMETRIC RECOVERY AFTER CORRECT TRANSFORM
+==================================================
+
+Once world-space connector geometry is correct, rerun endpoint recovery.
+
+Do not change MAX_ATTACH_DISTANCE yet.
+
+Measure:
+
+distance
+direction compatibility
+ambiguity margin
+confidence.
+
+The goal is to see the true geometry after transform correction.
+
+For each endpoint print:
+
+connectorId
+endpointType
+localEndpoint
+worldEndpoint
+direction
+candidateShape
+boundaryPoint
+distance
+directionCompatibility
+ambiguityMargin
+confidence
+metadataStatus.
+
+==================================================
+PART 5 — CANONICAL REAL-BOARD VERIFICATION
+==================================================
+
+Use the exact board:
+
+6a9c6e3233c10e861b77e4e7
+
+Expected current connectors:
+
+Connector 1:
+conn_1788819877574_jt6ms
+
+Connector 2:
+conn_1788819917106_bjw2f
+
+Connector 3:
+conn_1788819927702_6k31a
+
+Do NOT assume their intended topology.
+
+After correct transformation, determine whether each is:
+
+A. safely recoverable
+B. partially recoverable
+C. genuinely unresolved.
+
+==================================================
+PART 6 — STALE METADATA REGRESSION
+==================================================
+
+Add tests for:
+
+1. Explicit metadata + geometrically consistent connector
+   → metadata validated, high confidence.
+
+2. Explicit metadata + geometrically inconsistent connector
+   → metadata marked STALE, not verified.
+
+3. No metadata + geometrically recoverable connector
+   → geometry recovery allowed if all existing confidence requirements pass.
+
+4. No metadata + ambiguous endpoint
+   → unresolved.
+
+5. Rotated connector
+   → world endpoint/direction reflects actual angle.
+
+6. Scaled connector
+   → world geometry reflects scale.
+
+7. Rotated + scaled connector with arrowhead
+   → semantic shaft endpoints remain correct.
+
+8. Already world-space path
+   → must not be double-transformed.
+
+9. Fabric pathOffset/origin case
+   → correct world coordinates.
+
+==================================================
+PART 7 — HARD INVARIANTS
+==================================================
+
+Preserve:
+
+- confidence >= 0.85 before topology becomes verified
+- no topology invention
+- no proximity-only attachment
+- no connector repair
+- no executor changes
+- no creative movement
+- no divider movement.
+
+Add:
+
+Explicit metadata alone MUST NEVER produce verified topology.
+
+A persisted sourceShapeId/targetShapeId that conflicts with world geometry MUST be rejected for topology purposes.
+
+==================================================
+PART 8 — BROWSER DIAGNOSTICS
+==================================================
+
+Expose:
+
+connectorId
+
+rawMetadata:
+  sourceShapeId
+  targetShapeId
+
+metadataValidation:
+  source = VALIDATED / STALE / AMBIGUOUS / INVALID
+  target = VALIDATED / STALE / AMBIGUOUS / INVALID
+
+rawFabric:
+  left
+  top
+  angle
+  scaleX
+  scaleY
+  pathOffset
+  originX
+  originY
+
+worldGeometry:
+  shaftStart
+  shaftEnd
+  direction
+
+topology:
+  sourceShapeId
+  targetShapeId
+  overallConfidence
+
+This must make it possible to understand exactly why topology was or was not trusted.
+
+==================================================
+FINAL ACCEPTANCE
+==================================================
+
+After this phase:
+
+1. Rotated connectors must be evaluated in true world space.
+2. Tangent direction must reflect real connector orientation.
+3. Stale explicit metadata must never create false verified topology.
+4. Existing confidence threshold remains 0.85.
+5. Canonical real-board connector topology is re-evaluated using corrected geometry.
+6. No connector is repaired yet.
+
+Run:
+
+- conservativeTopologyRecovery.test.js
+- cleanupComposition.test.js
+- all Mess Cleanup tests
+- server tests
+- real-board evaluation
+- browser diagnostics on 6a9c6e3233c10e861b77e4e7.
+
+Do not begin 4F.19.3 until this phase establishes which real connectors are genuinely verified after the coordinate transform and metadata validation fixes.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-08T16:01:56+05:30.
+
+The user's current state is as follows:
+Active Document: c:\Skribe\scratch\trace_phase4f19_2.mjs (LANGUAGE_JAVASCRIPT)
+Cursor is on line: 1
+Other open documents:
+- c:\Skribe\scratch\trace_phase4f19_2.mjs (LANGUAGE_JAVASCRIPT)
+- c:\Skribe\server\scripts\add_members_to_board.mjs (LANGUAGE_JAVASCRIPT)
+- c:\Skribe\server\test_nemotron_image.js (LANGUAGE_JAVASCRIPT)
+- c:\Skribe\server\scripts\seed_browser_test_boards.mjs (LANGUAGE_JAVASCRIPT)
+- c:\Skribe\client\scripts\evaluate_real_world_boards.js (LANGUAGE_JAVASCRIPT)
+Browser State:
+  Page 2177AB091CA3967F8DF3E9DD51090BBD (skribe) - http://localhost:5173/board/6a9c6e3233c10e861b77e4e7 [ACTIVE]
+    Viewport: 1536x776, Page Height: 776
+Running terminal commands:
+- npm run dev:server (in c:\Skribe, running for 63h2m1s)
+- npm run dev:client (in c:\Skribe, running for 63h1m8s)
+</ADDITIONAL_METADATA>

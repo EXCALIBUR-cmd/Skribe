@@ -1,4 +1,5 @@
 
+import * as fabric from 'fabric';
 import { generateConnectorPathData } from '../../utils/connectorUtils.js';
 
 export const parseConnectorPath = (pathInput) => {
@@ -370,6 +371,276 @@ export const mapSvgPathCommands = (pathCommandsOrStr, mapPoint, delta = null) =>
     }
     return '';
   }).filter(Boolean).join(' ');
+};
+
+export const computePathBounds = (commands) => {
+  if (!Array.isArray(commands) || commands.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  commands.forEach((cmd) => {
+    const type = cmd[0];
+    if (type === 'M' || type === 'm' || type === 'L' || type === 'l') {
+      const x = Number(cmd[1]), y = Number(cmd[2]);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    } else if (type === 'C' || type === 'c') {
+      [Number(cmd[1]), Number(cmd[3]), Number(cmd[5])].forEach((x) => {
+        if (Number.isFinite(x)) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+      });
+      [Number(cmd[2]), Number(cmd[4]), Number(cmd[6])].forEach((y) => {
+        if (Number.isFinite(y)) { minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      });
+    } else if (type === 'Q' || type === 'q') {
+      [Number(cmd[1]), Number(cmd[3])].forEach((x) => {
+        if (Number.isFinite(x)) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+      });
+      [Number(cmd[2]), Number(cmd[4])].forEach((y) => {
+        if (Number.isFinite(y)) { minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      });
+    }
+  });
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return null;
+  }
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+};
+
+export const getConnectorTransformMatrix = (object, pathBounds = null) => {
+  // If live Fabric object with calcTransformMatrix:
+  if (typeof object?.calcTransformMatrix === 'function') {
+    return object.calcTransformMatrix();
+  }
+
+  const angle = Number(object?.angle ?? object?.rotation ?? 0);
+  const scaleX = Number(object?.scaleX ?? object?.scale?.x ?? 1);
+  const scaleY = Number(object?.scaleY ?? object?.scale?.y ?? 1);
+  const left = Number(object?.left ?? object?.position?.x ?? 0);
+  const top = Number(object?.top ?? object?.position?.y ?? 0);
+  const originX = object?.originX || 'left';
+  const originY = object?.originY || 'top';
+  const flipX = Boolean(object?.flipX);
+  const flipY = Boolean(object?.flipY);
+  const skewX = Number(object?.skewX ?? 0);
+  const skewY = Number(object?.skewY ?? 0);
+
+  let cx = left;
+  let cy = top;
+
+  if (originX !== 'center' || originY !== 'center') {
+    const rawW = object?.width !== undefined ? Number(object.width) : (pathBounds ? pathBounds.width : 0);
+    const rawH = object?.height !== undefined ? Number(object.height) : (pathBounds ? pathBounds.height : 0);
+    const strokeWidth = Number(object?.strokeWidth ?? 0);
+    const w = (rawW + strokeWidth) * scaleX;
+    const h = (rawH + strokeWidth) * scaleY;
+
+    const ox = originX === 'left' ? -0.5 : originX === 'right' ? 0.5 : 0;
+    const oy = originY === 'top' ? -0.5 : originY === 'bottom' ? 0.5 : 0;
+    const dx = -ox * w;
+    const dy = -oy * h;
+
+    const rad = (angle * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    cx = left + (dx * cos - dy * sin);
+    cy = top + (dx * sin + dy * cos);
+  }
+
+  // Prefer Fabric composeMatrix if available
+  if (fabric?.util?.composeMatrix) {
+    return fabric.util.composeMatrix({
+      translateX: cx,
+      translateY: cy,
+      angle,
+      scaleX: scaleX * (flipX ? -1 : 1),
+      scaleY: scaleY * (flipY ? -1 : 1),
+      skewX,
+      skewY
+    });
+  }
+
+  const rad = (angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  const effScaleX = scaleX * (flipX ? -1 : 1);
+  const effScaleY = scaleY * (flipY ? -1 : 1);
+
+  if (skewX !== 0 || skewY !== 0) {
+    const tanSkewX = Math.tan((skewX * Math.PI) / 180);
+    const tanSkewY = Math.tan((skewY * Math.PI) / 180);
+    const a = effScaleX * (cos + sin * tanSkewY);
+    const b = effScaleX * (sin - cos * tanSkewY);
+    const c = effScaleY * (-sin + cos * tanSkewX);
+    const d = effScaleY * (cos + sin * tanSkewX);
+    return [a, b, c, d, cx, cy];
+  }
+
+  return [
+    effScaleX * cos,
+    effScaleX * sin,
+    -effScaleY * sin,
+    effScaleY * cos,
+    cx,
+    cy
+  ];
+};
+
+export const invertTransformMatrix = (matrix) => {
+  if (!Array.isArray(matrix) || matrix.length < 6) return null;
+  const [a, b, c, d, tx, ty] = matrix;
+  const det = a * d - b * c;
+  if (Math.abs(det) < 1e-12) return null;
+  return [
+    d / det,
+    -b / det,
+    -c / det,
+    a / det,
+    (c * ty - d * tx) / det,
+    (b * tx - a * ty) / det
+  ];
+};
+
+export const transformPathCommandsToWorld = (pathInput, object = {}) => {
+  let commands = [];
+  if (Array.isArray(pathInput)) {
+    commands = pathInput.map((cmd) => [...cmd]);
+  } else if (typeof pathInput === 'string') {
+    commands = parseConnectorPath(pathInput)?.allCommands || [];
+  }
+  if (commands.length === 0) return [];
+
+  // Idempotency: do not double-transform already world-space paths
+  if (object?.isWorldSpace === true || object?.isNormalized === true || object?.worldNormalized === true) {
+    return commands;
+  }
+
+  // If object has no positioning or transform metadata, commands are already in world space (e.g. synthetic test objects)
+  const hasTransformProps =
+    object?.left !== undefined ||
+    object?.top !== undefined ||
+    (object?.angle !== undefined && object?.angle !== 0) ||
+    (object?.scaleX !== undefined && object?.scaleX !== 1) ||
+    (object?.scaleY !== undefined && object?.scaleY !== 1) ||
+    object?.pathOffset !== undefined;
+
+  if (!hasTransformProps) {
+    return commands;
+  }
+
+  const bounds = computePathBounds(commands);
+
+  let pathOffset;
+  if (object?.pathOffset && typeof object.pathOffset.x === 'number' && typeof object.pathOffset.y === 'number') {
+    pathOffset = { x: object.pathOffset.x, y: object.pathOffset.y };
+  } else {
+    pathOffset = bounds ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 } : { x: 0, y: 0 };
+  }
+
+  const matrix = getConnectorTransformMatrix(object, bounds);
+  const [a, b, c, d, tx, ty] = matrix;
+
+  const transformPoint = (px, py) => {
+    const lx = px - pathOffset.x;
+    const ly = py - pathOffset.y;
+    return {
+      x: a * lx + c * ly + tx,
+      y: b * lx + d * ly + ty
+    };
+  };
+
+  return commands.map((cmd) => {
+    const type = cmd[0];
+    if (type === 'M' || type === 'm' || type === 'L' || type === 'l') {
+      const p = transformPoint(Number(cmd[1]), Number(cmd[2]));
+      return [type.toUpperCase(), p.x, p.y];
+    }
+    if (type === 'C' || type === 'c') {
+      const cp1 = transformPoint(Number(cmd[1]), Number(cmd[2]));
+      const cp2 = transformPoint(Number(cmd[3]), Number(cmd[4]));
+      const end = transformPoint(Number(cmd[5]), Number(cmd[6]));
+      return ['C', cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y];
+    }
+    if (type === 'Q' || type === 'q') {
+      const cp = transformPoint(Number(cmd[1]), Number(cmd[2]));
+      const end = transformPoint(Number(cmd[3]), Number(cmd[4]));
+      return ['Q', cp.x, cp.y, end.x, end.y];
+    }
+    if (type === 'Z' || type === 'z') {
+      return ['Z'];
+    }
+    return [...cmd];
+  });
+};
+
+export const invertWorldPathCommands = (pathInput, object = {}) => {
+  let commands = [];
+  if (Array.isArray(pathInput)) {
+    commands = pathInput.map((cmd) => [...cmd]);
+  } else if (typeof pathInput === 'string') {
+    commands = parseConnectorPath(pathInput)?.allCommands || [];
+  }
+  if (commands.length === 0) return [];
+
+  let pathOffset = { x: 0, y: 0 };
+  let localBounds = null;
+
+  if (object?.localPath) {
+    localBounds = computePathBounds(object.localPath);
+    if (localBounds) {
+      pathOffset = { x: localBounds.x + localBounds.width / 2, y: localBounds.y + localBounds.height / 2 };
+    }
+  }
+
+  if (object?.pathOffset && typeof object.pathOffset.x === 'number' && typeof object.pathOffset.y === 'number') {
+    pathOffset = { x: object.pathOffset.x, y: object.pathOffset.y };
+  } else if (!object?.localPath) {
+    localBounds = computePathBounds(commands);
+  }
+
+  const matrix = getConnectorTransformMatrix(object, localBounds);
+  const invMatrix = invertTransformMatrix(matrix);
+  if (!invMatrix) return commands;
+
+  const [a, b, c, d, tx, ty] = invMatrix;
+
+  const invertPoint = (wx, wy) => {
+    const lx = a * wx + c * wy + tx;
+    const ly = b * wx + d * wy + ty;
+    return {
+      x: lx + pathOffset.x,
+      y: ly + pathOffset.y
+    };
+  };
+
+  return commands.map((cmd) => {
+    const type = cmd[0];
+    if (type === 'M' || type === 'm' || type === 'L' || type === 'l') {
+      const p = invertPoint(Number(cmd[1]), Number(cmd[2]));
+      return [type.toUpperCase(), p.x, p.y];
+    }
+    if (type === 'C' || type === 'c') {
+      const cp1 = invertPoint(Number(cmd[1]), Number(cmd[2]));
+      const cp2 = invertPoint(Number(cmd[3]), Number(cmd[4]));
+      const end = invertPoint(Number(cmd[5]), Number(cmd[6]));
+      return ['C', cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y];
+    }
+    if (type === 'Q' || type === 'q') {
+      const cp = invertPoint(Number(cmd[1]), Number(cmd[2]));
+      const end = invertPoint(Number(cmd[3]), Number(cmd[4]));
+      return ['Q', cp.x, cp.y, end.x, end.y];
+    }
+    if (type === 'Z' || type === 'z') {
+      return ['Z'];
+    }
+    return [...cmd];
+  });
 };
 
 export default transformConnectorGeometry;

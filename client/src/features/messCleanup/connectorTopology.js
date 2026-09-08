@@ -1,5 +1,5 @@
 
-import { parseConnectorPath } from './connectorGeometry.js';
+import { parseConnectorPath, transformPathCommandsToWorld } from './connectorGeometry.js';
 
 export const MAX_ATTACH_DISTANCE = 35;
 export const MIN_AMBIGUITY_MARGIN = 15;
@@ -93,10 +93,44 @@ export const getDistanceToShapeBoundary = (point, shape) => {
   return Math.hypot(dx, dy);
 };
 
-export const getConnectorEndpointsAndTangents = (connector) => {
-  const parsed = parseConnectorPath(connector.path || connector.pathCommands);
+export const getConnectorEndpointsAndTangents = (connector, candidateShapes = []) => {
+  let pathCommands = connector?.worldPathCommands || connector?.worldPath || connector?.path || connector?.pathCommands;
+  if (!connector?.isWorldSpace && !connector?.worldPathCommands && pathCommands) {
+    pathCommands = transformPathCommandsToWorld(pathCommands, connector);
+  }
+  const parsed = parseConnectorPath(pathCommands);
   if (!parsed || !parsed.mainCommands || parsed.mainCommands.length === 0) {
     const bounds = connector.bounds || connector.position || { x: 0, y: 0, width: 0, height: 0 };
+    const explicitSource = connector.sourceShapeId || connector.relationshipMetadata?.sourceShapeId || null;
+    const explicitTarget = connector.targetShapeId || connector.relationshipMetadata?.targetShapeId || null;
+
+    if (candidateShapes && candidateShapes.length > 0 && (explicitSource || explicitTarget)) {
+      const srcShape = candidateShapes.find((s) => s.id === explicitSource);
+      const tgtShape = candidateShapes.find((s) => s.id === explicitTarget);
+      if (srcShape && tgtShape) {
+        const srcG = getShapeBoundaryGeometry(srcShape);
+        const tgtG = getShapeBoundaryGeometry(tgtShape);
+
+        const corners = [
+          { x: bounds.x, y: bounds.y },
+          { x: bounds.x + bounds.width, y: bounds.y },
+          { x: bounds.x, y: bounds.y + bounds.height },
+          { x: bounds.x + bounds.width, y: bounds.y + bounds.height }
+        ];
+
+        const startPt = corners.slice().sort((a, b) => Math.hypot(a.x - srcG.cx, a.y - srcG.cy) - Math.hypot(b.x - srcG.cx, b.y - srcG.cy))[0];
+        const endPt = corners.slice().sort((a, b) => Math.hypot(a.x - tgtG.cx, a.y - tgtG.cy) - Math.hypot(b.x - tgtG.cx, b.y - tgtG.cy))[0];
+        const tan = { x: endPt.x - startPt.x || 1, y: endPt.y - startPt.y || 0 };
+
+        return {
+          startPt,
+          endPt,
+          startTangent: tan,
+          endTangent: tan
+        };
+      }
+    }
+
     return {
       startPt: { x: bounds.x, y: bounds.y },
       endPt: { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
@@ -166,6 +200,42 @@ export const checkDirectionCompatibility = (point, tangent, shape, role) => {
   return true;
 };
 
+export const isPointInsideShape = (point, shape) => {
+  if (!point || !shape) return false;
+  const g = getShapeBoundaryGeometry(shape);
+  if (g.shapeType === 'circle') {
+    const radius = Math.min(g.width, g.height) / 2;
+    return Math.hypot(point.x - g.cx, point.y - g.cy) <= radius;
+  }
+  if (g.shapeType === 'diamond') {
+    const rx = g.width / 2;
+    const ry = g.height / 2;
+    if (rx === 0 || ry === 0) return false;
+    return (Math.abs(point.x - g.cx) / rx + Math.abs(point.y - g.cy) / ry) <= 1.0;
+  }
+  if (g.shapeType === 'triangle') {
+    const x1 = g.cx, y1 = g.top;
+    const x2 = g.right, y2 = g.bottom;
+    const x3 = g.left, y3 = g.bottom;
+    const denom = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3);
+    if (Math.abs(denom) < 1e-6) return false;
+    const a = ((y2 - y3) * (point.x - x3) + (x3 - x2) * (point.y - y3)) / denom;
+    const b = ((y3 - y1) * (point.x - x3) + (x1 - x3) * (point.y - y3)) / denom;
+    const c = 1 - a - b;
+    return a >= 0 && a <= 1 && b >= 0 && b <= 1 && c >= 0 && c <= 1;
+  }
+  return point.x >= g.left && point.x <= g.right && point.y >= g.top && point.y <= g.bottom;
+};
+
+export const getDistanceToShape = (point, shape) => {
+  if (isPointInsideShape(point, shape)) {
+    return 0;
+  }
+  return getDistanceToShapeBoundary(point, shape);
+};
+
+export const MAX_EXPLICIT_ATTACH_DISTANCE = 50;
+
 export const evaluateEndpointCandidate = (point, tangent, candidateShapes, role, connectorId) => {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
     return { shapeId: null, confidence: 0.0, evidence: 'invalid endpoint point' };
@@ -175,8 +245,8 @@ export const evaluateEndpointCandidate = (point, tangent, candidateShapes, role,
     .filter((s) => s.id !== connectorId)
     .map((s) => ({
       shape: s,
-      dist: getDistanceToShapeBoundary(point, s),
-      directionOk: checkDirectionCompatibility(point, tangent, s, role)
+      dist: getDistanceToShape(point, s),
+      directionOk: isPointInsideShape(point, s) || checkDirectionCompatibility(point, tangent, s, role)
     }))
     .sort((a, b) => a.dist - b.dist);
 
@@ -222,18 +292,109 @@ export const evaluateEndpointCandidate = (point, tangent, candidateShapes, role,
   };
 };
 
+export const validateExplicitEndpoint = ({
+  explicitShapeId,
+  endpoint,
+  tangent,
+  candidateShapes = [],
+  role = 'source',
+  connectorId = null,
+  otherEndShapeId = null
+}) => {
+  if (!explicitShapeId) {
+    return {
+      status: 'NONE',
+      shapeId: null,
+      confidence: 0.0,
+      evidence: 'no explicit metadata'
+    };
+  }
+
+  // 1. Look up the referenced shape
+  const referencedShape = candidateShapes.find((s) => s.id === explicitShapeId);
+  if (!referencedShape) {
+    return {
+      status: 'INVALID',
+      shapeId: null,
+      confidence: 0.0,
+      evidence: `referenced shape ${explicitShapeId} not found among candidates`
+    };
+  }
+
+  // 2. Compute distance to the referenced shape (0 if inside, boundary distance if outside)
+  const isInside = isPointInsideShape(endpoint, referencedShape);
+  const dist = isInside ? 0 : getDistanceToShapeBoundary(endpoint, referencedShape);
+
+  // 3. Check direction compatibility (if inside, direction is trivially compatible)
+  const directionOk = isInside || checkDirectionCompatibility(endpoint, tangent, referencedShape, role);
+
+  // 4. Compare against nearby competing shapes (excluding otherEndShapeId, and requiring directionOk)
+  const otherShapes = candidateShapes
+    .filter((s) => s.id !== connectorId && s.id !== explicitShapeId && s.id !== otherEndShapeId)
+    .map((s) => ({
+      shape: s,
+      dist: getDistanceToShape(endpoint, s),
+      directionOk: isPointInsideShape(endpoint, s) || checkDirectionCompatibility(endpoint, tangent, s, role)
+    }))
+    .filter((s) => s.directionOk)
+    .sort((a, b) => a.dist - b.dist);
+
+  const closestOther = otherShapes[0];
+
+  // 5. Check if referenced shape is geometrically plausible (<= MAX_EXPLICIT_ATTACH_DISTANCE)
+  if (dist > MAX_EXPLICIT_ATTACH_DISTANCE) {
+    return {
+      status: 'STALE',
+      shapeId: null,
+      confidence: Math.max(0.2, 0.85 - (dist - MAX_EXPLICIT_ATTACH_DISTANCE) / 100),
+      evidence: `persisted ${role} ${explicitShapeId} is geometrically inconsistent (${dist.toFixed(1)}px > ${MAX_EXPLICIT_ATTACH_DISTANCE}px)`
+    };
+  }
+
+  // 6. Direction compatibility
+  if (!directionOk) {
+    return {
+      status: 'STALE',
+      shapeId: null,
+      confidence: 0.70,
+      evidence: `persisted ${role} ${explicitShapeId} direction incompatible`
+    };
+  }
+
+  // 7. Check for competing shapes and ambiguity
+  if (closestOther && closestOther.dist <= MAX_EXPLICIT_ATTACH_DISTANCE) {
+    const diff = dist - closestOther.dist;
+    if (diff >= MIN_AMBIGUITY_MARGIN) {
+      return {
+        status: 'STALE',
+        shapeId: null,
+        confidence: 0.75,
+        evidence: `persisted ${role} ${explicitShapeId} (${dist.toFixed(1)}px) conflicts with closer shape ${closestOther.shape.id} (${closestOther.dist.toFixed(1)}px)`
+      };
+    } else if (Math.abs(diff) < MIN_AMBIGUITY_MARGIN && Math.abs(diff) > 0.001) {
+      return {
+        status: 'AMBIGUOUS',
+        shapeId: null,
+        confidence: 0.80,
+        evidence: `persisted ${role} ${explicitShapeId} (${dist.toFixed(1)}px) is ambiguous with competing shape ${closestOther.shape.id} (${closestOther.dist.toFixed(1)}px)`
+      };
+    }
+  }
+
+  // 8. VALIDATED: consistent geometry
+  return {
+    status: 'VALIDATED',
+    shapeId: explicitShapeId,
+    confidence: 0.99,
+    evidence: `persisted ${role} ${explicitShapeId} validated by boundary proximity (${dist.toFixed(1)}px)`
+  };
+};
+
 export const recoverConnectorTopology = (connector, candidateShapes = []) => {
   const explicitSource = connector.sourceShapeId || connector.relationshipMetadata?.sourceShapeId || null;
   const explicitTarget = connector.targetShapeId || connector.relationshipMetadata?.targetShapeId || null;
 
-  let sourceShapeId = explicitSource;
-  let targetShapeId = explicitTarget;
-  let sourceConfidence = explicitSource ? 0.99 : 0.0;
-  let targetConfidence = explicitTarget ? 0.99 : 0.0;
-  let sourceEvidence = explicitSource ? 'explicit-persisted-metadata' : null;
-  let targetEvidence = explicitTarget ? 'explicit-persisted-metadata' : null;
-
-  const { startPt, endPt, startTangent, endTangent } = getConnectorEndpointsAndTangents(connector);
+  const { startPt, endPt, startTangent, endTangent } = getConnectorEndpointsAndTangents(connector, candidateShapes);
 
   const isReversed = Boolean(connector.startArrow && !connector.endArrow);
   const sourcePt = isReversed ? endPt : startPt;
@@ -241,46 +402,126 @@ export const recoverConnectorTopology = (connector, candidateShapes = []) => {
   const targetPt = isReversed ? startPt : endPt;
   const targetTan = isReversed ? { x: -startTangent.x, y: -startTangent.y } : endTangent;
 
-  if (!explicitSource) {
-    const res = evaluateEndpointCandidate(sourcePt, sourceTan, candidateShapes, 'source', connector.id);
-    sourceConfidence = res.confidence;
-    sourceEvidence = res.evidence;
-    if (res.confidence >= 0.95) {
-      sourceShapeId = res.shapeId;
+  // Validate explicit source metadata
+  let sourceShapeId = null;
+  let sourceConfidence = 0.0;
+  let sourceEvidence = null;
+  const sourceValidation = validateExplicitEndpoint({
+    explicitShapeId: explicitSource,
+    endpoint: sourcePt,
+    tangent: sourceTan,
+    candidateShapes,
+    role: 'source',
+    connectorId: connector.id,
+    otherEndShapeId: explicitTarget
+  });
+
+  if (sourceValidation.status === 'VALIDATED') {
+    sourceShapeId = sourceValidation.shapeId;
+    sourceConfidence = sourceValidation.confidence;
+    sourceEvidence = sourceValidation.evidence;
+  } else if (sourceValidation.status === 'STALE' || sourceValidation.status === 'INVALID') {
+    const geom = evaluateEndpointCandidate(sourcePt, sourceTan, candidateShapes, 'source', connector.id);
+    sourceConfidence = geom.confidence;
+    sourceEvidence = `${sourceValidation.evidence}; geometric recovery: ${geom.evidence}`;
+    if (geom.confidence >= 0.95) {
+      sourceShapeId = geom.shapeId;
+    }
+  } else if (sourceValidation.status === 'AMBIGUOUS') {
+    sourceConfidence = sourceValidation.confidence;
+    sourceEvidence = sourceValidation.evidence;
+    sourceShapeId = null;
+  } else {
+    // No explicit metadata
+    const geom = evaluateEndpointCandidate(sourcePt, sourceTan, candidateShapes, 'source', connector.id);
+    sourceConfidence = geom.confidence;
+    sourceEvidence = geom.evidence;
+    if (geom.confidence >= 0.95) {
+      sourceShapeId = geom.shapeId;
     }
   }
 
-  if (!explicitTarget) {
-    const res = evaluateEndpointCandidate(targetPt, targetTan, candidateShapes, 'target', connector.id);
-    targetConfidence = res.confidence;
-    targetEvidence = res.evidence;
-    if (res.confidence >= 0.95) {
-      targetShapeId = res.shapeId;
+  // Validate explicit target metadata
+  let targetShapeId = null;
+  let targetConfidence = 0.0;
+  let targetEvidence = null;
+  const targetValidation = validateExplicitEndpoint({
+    explicitShapeId: explicitTarget,
+    endpoint: targetPt,
+    tangent: targetTan,
+    candidateShapes,
+    role: 'target',
+    connectorId: connector.id,
+    otherEndShapeId: explicitSource
+  });
+
+  if (targetValidation.status === 'VALIDATED') {
+    targetShapeId = targetValidation.shapeId;
+    targetConfidence = targetValidation.confidence;
+    targetEvidence = targetValidation.evidence;
+  } else if (targetValidation.status === 'STALE' || targetValidation.status === 'INVALID') {
+    const geom = evaluateEndpointCandidate(targetPt, targetTan, candidateShapes, 'target', connector.id);
+    targetConfidence = geom.confidence;
+    targetEvidence = `${targetValidation.evidence}; geometric recovery: ${geom.evidence}`;
+    if (geom.confidence >= 0.95) {
+      targetShapeId = geom.shapeId;
+    }
+  } else if (targetValidation.status === 'AMBIGUOUS') {
+    targetConfidence = targetValidation.confidence;
+    targetEvidence = targetValidation.evidence;
+    targetShapeId = null;
+  } else {
+    // No explicit metadata
+    const geom = evaluateEndpointCandidate(targetPt, targetTan, candidateShapes, 'target', connector.id);
+    targetConfidence = geom.confidence;
+    targetEvidence = geom.evidence;
+    if (geom.confidence >= 0.95) {
+      targetShapeId = geom.shapeId;
     }
   }
 
-  const hasExplicit = Boolean(explicitSource || explicitTarget);
+  const bothExplicitValidated = sourceValidation.status === 'VALIDATED' && targetValidation.status === 'VALIDATED';
+  const hasValidatedExplicit = sourceValidation.status === 'VALIDATED' || targetValidation.status === 'VALIDATED';
   const hasRecovered = Boolean(
-    (sourceShapeId && !explicitSource && sourceConfidence >= 0.95) ||
-    (targetShapeId && !explicitTarget && targetConfidence >= 0.95)
+    (sourceShapeId && sourceValidation.status !== 'VALIDATED' && sourceConfidence >= 0.95) ||
+    (targetShapeId && targetValidation.status !== 'VALIDATED' && targetConfidence >= 0.95)
   );
 
-  const endpointSource = hasExplicit
+  const endpointSource = bothExplicitValidated
     ? 'explicit'
-    : (hasRecovered ? 'geometric-recovery' : 'none');
+    : (hasValidatedExplicit
+      ? (hasRecovered ? 'hybrid' : 'explicit')
+      : (hasRecovered ? 'geometric-recovery' : 'none'));
 
   const finalSourceShapeId = sourceConfidence >= 0.95 ? sourceShapeId : null;
   const finalTargetShapeId = targetConfidence >= 0.95 ? targetShapeId : null;
+  const overallConfidence = Math.min(sourceConfidence, targetConfidence);
+
+  const shaftDirection = {
+    x: endPt.x - startPt.x,
+    y: endPt.y - startPt.y
+  };
 
   return {
     sourceShapeId: finalSourceShapeId,
     targetShapeId: finalTargetShapeId,
     sourceConfidence,
     targetConfidence,
-    overallConfidence: Math.min(sourceConfidence, targetConfidence),
+    overallConfidence,
     sourceEvidence,
     targetEvidence,
-    endpointSource
+    endpointSource,
+    rawMetadata: {
+      sourceShapeId: explicitSource,
+      targetShapeId: explicitTarget
+    },
+    metadataValidation: {
+      source: sourceValidation.status,
+      target: targetValidation.status
+    },
+    worldShaftStart: startPt,
+    worldShaftEnd: endPt,
+    shaftDirection
   };
 };
 

@@ -21,6 +21,7 @@ import {
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
+import { parseConnectorPath } from '../../features/messCleanup/connectorGeometry.js';
 import {
   hydrateSkribeFabricObject,
   hydrateCanvasObjects,
@@ -695,13 +696,21 @@ export const FabricCanvas = forwardRef(({
             endArrow: conn.endArrow !== false
           });
 
+          const parsedCommands = parseConnectorPath(newPathData)?.allCommands || [];
+
           conn.set({
-            path: newPathData,
+            path: parsedCommands,
+            pathData: newPathData,
             x1: a1.x,
             y1: a1.y,
             x2: a2.x,
             y2: a2.y
           });
+          if (typeof conn._calcDimensions === 'function') {
+            const dims = conn._calcDimensions();
+            if (dims) conn.set(dims);
+          }
+          conn.set({ dirty: true });
           conn.setCoords();
         }
       }
@@ -1067,7 +1076,17 @@ export const FabricCanvas = forwardRef(({
     const canvas = fabricCanvasRef.current;
     if (!canvas || isHistoryProcessingRef.current || isRemoteOperationRef.current || isBulkOperationRef.current) return;
 
-    canvas.getObjects().forEach((o) => ensureObjectId(o));
+    canvas.getObjects().forEach((o) => {
+      ensureObjectId(o);
+      if (o.type === 'path' || o.type === 'Path' || o.isConnector) {
+        if (typeof o.path === 'string') {
+          const parsed = parseConnectorPath(o.path);
+          o.path = parsed?.allCommands || [];
+        } else if (!Array.isArray(o.path)) {
+          o.path = [];
+        }
+      }
+    });
 
     const canvasObjects = canvas.getObjects();
     console.log('[BOARD SAVE DEBUG] Canvas change detected');
@@ -2230,7 +2249,11 @@ export const FabricCanvas = forwardRef(({
 
       if (result.success) {
         isBulkOperationRef.current = false;
-        saveState();
+        try {
+          saveState();
+        } catch (saveErr) {
+          console.warn('[FabricCanvas] saveState warning after cleanup:', saveErr);
+        }
         isBulkOperationRef.current = true;
       }
 

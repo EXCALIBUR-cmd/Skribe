@@ -1,7 +1,8 @@
 import { getSemanticType } from './cleanupTypes.js';
-import { recoverConnectorTopology } from './connectorTopology.js';
+import { recoverConnectorTopology, getDistanceToShapeBoundary } from './connectorTopology.js';
 import { getObjectBounds, segmentsIntersect } from './cleanupOpportunities.js';
 import { buildVisualObjectModel, resolveContainerOwnership } from './visualUnits.js';
+import { parseConnectorPath } from './connectorGeometry.js';
 
 export const STRUCTURE_TYPES = Object.freeze({
   FLOW: 'flow',
@@ -27,6 +28,48 @@ export const TEMPLATE_TYPES = Object.freeze({
 });
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
+
+/**
+ * Extracts semantic shaft endpoints from a connector object's path.
+ * Separates the shaft geometry from arrowhead subpaths.
+ *
+ * Fabric connector paths may contain:
+ * - shaft geometry (first M...L/C/Q segment)
+ * - arrowhead subpaths (subsequent M...L segments)
+ *
+ * parseConnectorPath.mainCommands = shaft only (before second M)
+ * parseConnectorPath.startPt = start of shaft
+ * parseConnectorPath.endPt = end of shaft (NOT arrowhead tip)
+ *
+ * Reversal: if startArrow && !endArrow, source is at endPt, target at startPt.
+ */
+export const extractSemanticShaftEndpoints = (connector) => {
+  if (!connector) return null;
+
+  const pathInput = connector.path || connector.pathData || connector.pathCommands;
+  if (!pathInput) return null;
+
+  const parsed = parseConnectorPath(pathInput);
+  if (!parsed || !parsed.mainCommands || parsed.mainCommands.length === 0) return null;
+
+  // mainCommands contains the shaft only (before arrowhead subpaths)
+  // startPt: first M command of shaft
+  // endPt: last point of shaft (before arrowhead M)
+  const isReversed = Boolean(connector.startArrow && !connector.endArrow);
+
+  return {
+    shaftStartPt: parsed.startPt,
+    shaftEndPt: parsed.endPt,
+    sourceAnchor: isReversed ? parsed.endPt : parsed.startPt,
+    targetAnchor: isReversed ? parsed.startPt : parsed.endPt,
+    isReversed,
+    hasArrowhead: parsed.hasArrowhead,
+    shaftPath: parsed.mainCommands,
+    arrowheadPath: parsed.hasArrowhead
+      ? parsed.allCommands.slice(parsed.mainCommands.length)
+      : []
+  };
+};
 
 /**
  * Computes deterministic candidate geometry (node placements and connector routes) for a flow structure.
@@ -256,7 +299,8 @@ export const evaluateCompositionQuality = ({
   explicitEdges = [],
   structureType,
   orientation = 'horizontal',
-  levelAssignment = null
+  levelAssignment = null,
+  connectorAttachmentData = null
 }) => {
   if (!objects || objects.length === 0) {
     return {
@@ -596,27 +640,116 @@ export const evaluateCompositionQuality = ({
   // 7. Hierarchy (0-10)
   const hierarchy = 9.0;
 
-  // 8. Readability (0-10) — whitespace carries 15% to reflect gap impact
+  // 9. Connector Attachment (0-10): how well connector shaft endpoints attach to shape boundaries.
+  // null = N/A (no verified connectors in this structure).
+  // Only VERIFIED connectors participate. Unknown/ambiguous connectors are excluded.
+  let connectorAttachment = null;
+  const connectorAttachmentDetails = [];
+
+  if (connectorAttachmentData && connectorAttachmentData.length > 0) {
+    const perConnectorScores = [];
+
+    connectorAttachmentData.forEach((cd) => {
+      const srcShape = objectMap.get(cd.sourceShapeId);
+      const tgtShape = objectMap.get(cd.targetShapeId);
+
+      let srcError = Infinity;
+      let tgtError = Infinity;
+
+      if (srcShape && cd.sourceAnchor && Number.isFinite(cd.sourceAnchor.x)) {
+        srcError = getDistanceToShapeBoundary(cd.sourceAnchor, srcShape);
+      }
+      if (tgtShape && cd.targetAnchor && Number.isFinite(cd.targetAnchor.x)) {
+        tgtError = getDistanceToShapeBoundary(cd.targetAnchor, tgtShape);
+      }
+
+      const maxError = Math.max(
+        Number.isFinite(srcError) ? srcError : 100,
+        Number.isFinite(tgtError) ? tgtError : 100
+      );
+
+      let score;
+      if (maxError <= 5) score = 10;
+      else if (maxError <= 15) score = 8.5;
+      else if (maxError <= 30) score = 6.0;
+      else if (maxError <= 50) score = 3.5;
+      else score = 1.5;
+
+      perConnectorScores.push(score);
+
+      // Diagnostic surface (Component 8)
+      const srcBoundaryPoint = srcShape ? {
+        x: cd.sourceAnchor?.x ?? 0,
+        y: cd.sourceAnchor?.y ?? 0
+      } : null;
+      const tgtBoundaryPoint = tgtShape ? {
+        x: cd.targetAnchor?.x ?? 0,
+        y: cd.targetAnchor?.y ?? 0
+      } : null;
+
+      connectorAttachmentDetails.push({
+        connectorId: cd.connId,
+        sourceShapeId: cd.sourceShapeId,
+        targetShapeId: cd.targetShapeId,
+        topologyConfidence: cd.topologyConfidence ?? 0.98,
+        sourceAnchor: cd.sourceAnchor,
+        targetAnchor: cd.targetAnchor,
+        sourceBoundaryPoint: srcBoundaryPoint,
+        targetBoundaryPoint: tgtBoundaryPoint,
+        sourceAttachmentError: Number((Number.isFinite(srcError) ? srcError : 100).toFixed(1)),
+        targetAttachmentError: Number((Number.isFinite(tgtError) ? tgtError : 100).toFixed(1)),
+        connectorAttachmentScore: score,
+        visuallyAttached: maxError <= 15,
+        shaftPath: cd.shaftPath || null,
+        arrowheadPath: cd.arrowheadPath || null
+      });
+    });
+
+    connectorAttachment = perConnectorScores.reduce((s, v) => s + v, 0) / perConnectorScores.length;
+  }
+
+  // For scoring formulas, use effectiveAttachment:
+  // - If connectors exist: use measured connectorAttachment
+  // - If no connectors: neutral (10), does NOT count as "verified clean"
+  const effectiveAttachment = connectorAttachment !== null ? connectorAttachment : 10;
+
+  // 8. Readability (0-10)
+  // Includes connectorAttachment so that detached connectors drag down readability.
   const readability = Number((
-    alignment * 0.25 +
-    spacing * 0.25 +
-    directionalClarity * 0.20 +
-    connectorCrossings * 0.10 +
-    whitespace * 0.15 +
+    alignment * 0.22 +
+    spacing * 0.22 +
+    directionalClarity * 0.18 +
+    connectorCrossings * 0.08 +
+    effectiveAttachment * 0.12 +
+    whitespace * 0.13 +
     hierarchy * 0.05
   ).toFixed(2));
 
   // Overall Quality (0-10) bounded by weakest core visual dimension.
-  // whitespace is included in minCore so that excessive gaps (whitespace=4)
-  // cannot be masked by otherwise-perfect alignment/direction scores.
-  const minCore = Math.min(alignment, spacing, directionalClarity, whitespace);
+  // connectorAttachment participates in minCore: a flow with severely detached
+  // connectors must not receive "already well-organized" quality merely because
+  // its nodes are nicely aligned.
+  //
+  // Final weights (Component 2):
+  //   alignment:           0.20
+  //   spacing:             0.20
+  //   directionalClarity:  0.16
+  //   connectorCrossings:  0.07
+  //   connectorAttachment: 0.15
+  //   whitespace:          0.11
+  //   hierarchy:           0.03
+  //   readability:         0.08
+  //   Total:               1.00
+  const minCore = Math.min(alignment, spacing, directionalClarity, whitespace, effectiveAttachment);
   const weighted = (
-    alignment * 0.25 +
-    spacing * 0.25 +
-    directionalClarity * 0.22 +
-    connectorCrossings * 0.10 +
-    whitespace * 0.15 +
-    hierarchy * 0.03
+    alignment * 0.20 +
+    spacing * 0.20 +
+    directionalClarity * 0.16 +
+    connectorCrossings * 0.07 +
+    effectiveAttachment * 0.15 +
+    whitespace * 0.11 +
+    hierarchy * 0.03 +
+    readability * 0.08
   );
 
   const maxBoost = hasMultiNodeLevels ? 2.5 : 4.0;
@@ -630,6 +763,8 @@ export const evaluateCompositionQuality = ({
     relativeOrdering: Number(relativeOrdering.toFixed(2)),
     whitespace: Number(whitespace.toFixed(2)),
     hierarchy: Number(hierarchy.toFixed(2)),
+    connectorAttachment: connectorAttachment !== null ? Number(connectorAttachment.toFixed(2)) : null,
+    connectorAttachmentDetails,
     readability,
     quality
   };
@@ -752,18 +887,11 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   });
 
   connectorObjects.forEach((conn) => {
-    let srcId = conn.sourceShapeId || conn.relationshipMetadata?.sourceShapeId || null;
-    let tgtId = conn.targetShapeId || conn.relationshipMetadata?.targetShapeId || null;
-
-    let isRecovered = false;
-    if (!srcId || !tgtId) {
-      const topo = recoverConnectorTopology(conn, candidateContainers);
-      if (topo.sourceShapeId && topo.targetShapeId && (topo.overallConfidence ?? topo.confidence ?? 0) >= 0.85) {
-        srcId = topo.sourceShapeId;
-        tgtId = topo.targetShapeId;
-        isRecovered = true;
-      }
-    }
+    const topo = recoverConnectorTopology(conn, candidateContainers);
+    const isVerified = (topo.overallConfidence ?? topo.confidence ?? 0) >= 0.85;
+    const srcId = isVerified ? topo.sourceShapeId : null;
+    const tgtId = isVerified ? topo.targetShapeId : null;
+    const isRecovered = topo.endpointSource === 'geometric-recovery' || topo.endpointSource === 'hybrid';
 
     if (srcId && tgtId && objectMap.has(srcId) && objectMap.has(tgtId) && srcId !== tgtId) {
       explicitEdges.push({
@@ -789,8 +917,22 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       connectorIds: [cId],
       confidence: 0.95,
       evidence: ['unattached-connector-no-topology'],
-      currentComposition: { quality: 10, readability: 10 },
-      candidateCompositions: [{ template: TEMPLATE_TYPES.PRESERVE, quality: 10 }],
+      currentComposition: {
+        quality: 3.0,
+        readability: 3.0,
+        connectorAttachment: 1.5,
+        connectorAttachmentDetails: [{
+          connectorId: cId,
+          sourceShapeId: null,
+          targetShapeId: null,
+          topologyConfidence: 0.0,
+          sourceAttachmentError: 100,
+          targetAttachmentError: 100,
+          connectorAttachmentScore: 1.5,
+          visuallyAttached: false
+        }]
+      },
+      candidateCompositions: [{ template: TEMPLATE_TYPES.PRESERVE, quality: 3.0 }],
       compositionBenefit: 0.0,
       movementCost: 0.0,
       risk: 3.5,
@@ -948,28 +1090,56 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
 
       const compObjects = component.map((id) => objectMap.get(id)).filter(Boolean);
 
+      const currentNodes = compObjects.map((obj) => ({ id: obj.id, ...getObjectBounds(obj) }));
+
+      // Component 4: Extract semantic shaft endpoints from actual connector paths.
+      // Do NOT substitute shape centers. Use parseConnectorPath to separate
+      // shaft geometry from arrowhead subpaths.
+      const currentConnectors = compEdges.map((e) => {
+        const connObj = objectMap.get(e.connId);
+        const srcB = getObjectBounds(objectMap.get(e.srcId));
+        const tgtB = getObjectBounds(objectMap.get(e.tgtId));
+
+        // Extract semantic shaft endpoints from actual connector path
+        const shaftEndpoints = connObj ? extractSemanticShaftEndpoints(connObj) : null;
+
+        return {
+          connId: e.connId,
+          srcId: e.srcId,
+          tgtId: e.tgtId,
+          path: connObj?.path || connObj?.pathData || '',
+          startPoint: shaftEndpoints ? shaftEndpoints.sourceAnchor : { x: srcB.cx, y: srcB.cy },
+          endPoint: shaftEndpoints ? shaftEndpoints.targetAnchor : { x: tgtB.cx, y: tgtB.cy },
+          shaftEndpoints
+        };
+      });
+
+      // Build connector attachment data for quality evaluation.
+      // Only VERIFIED connectors with actual path data participate.
+      // Connectors without path data cannot have their attachment measured
+      // and are excluded (they don't penalize quality, but don't verify it either).
+      // Unknown/ambiguous connectors are excluded from attachment measurement.
+      const connectorAttachmentData = currentConnectors
+        .filter((cc) => cc.shaftEndpoints !== null)
+        .map((cc) => ({
+        connId: cc.connId,
+        sourceShapeId: cc.srcId,
+        targetShapeId: cc.tgtId,
+        sourceAnchor: cc.startPoint,
+        targetAnchor: cc.endPoint,
+        topologyConfidence: compEdges.find((e) => e.connId === cc.connId)?.confidence ?? 0.96,
+        shaftPath: cc.shaftEndpoints?.shaftPath || null,
+        arrowheadPath: cc.shaftEndpoints?.arrowheadPath || null
+      }));
+
       const currentQualityMetrics = evaluateCompositionQuality({
         objects: compObjects,
         objectMap,
         explicitEdges: compEdges,
         structureType: STRUCTURE_TYPES.FLOW,
         orientation,
-        levelAssignment
-      });
-
-      const currentNodes = compObjects.map((obj) => ({ id: obj.id, ...getObjectBounds(obj) }));
-      const currentConnectors = compEdges.map((e) => {
-        const connObj = objectMap.get(e.connId);
-        const srcB = getObjectBounds(objectMap.get(e.srcId));
-        const tgtB = getObjectBounds(objectMap.get(e.tgtId));
-        return {
-          connId: e.connId,
-          srcId: e.srcId,
-          tgtId: e.tgtId,
-          path: connObj?.path || connObj?.pathData || '',
-          startPoint: { x: srcB.cx, y: srcB.cy },
-          endPoint: { x: tgtB.cx, y: tgtB.cy }
-        };
+        levelAssignment,
+        connectorAttachmentData
       });
 
       const candidateGeometry = computeFlowCandidateGeometry({
@@ -1003,13 +1173,26 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         };
       });
 
+      // Build candidate connector attachment data from candidate geometry.
+      // Candidate connectors are placed on shape boundaries by computeFlowCandidateGeometry,
+      // so their attachment error should be ~0.
+      const candidateConnAttData = candidateGeometry.connectors.map((cc) => ({
+        connId: cc.connId,
+        sourceShapeId: cc.srcId,
+        targetShapeId: cc.tgtId,
+        sourceAnchor: cc.startPoint,
+        targetAnchor: cc.endPoint,
+        topologyConfidence: 0.98
+      }));
+
       const candidateQualityMetrics = evaluateCompositionQuality({
         objects: candidateObjects,
         objectMap: new Map(candidateObjects.map((o) => [o.id, o])),
         explicitEdges: compEdges,
         structureType: STRUCTURE_TYPES.FLOW,
         orientation,
-        levelAssignment
+        levelAssignment,
+        connectorAttachmentData: candidateConnAttData
       });
 
       const candidateQuality = candidateQualityMetrics.quality;
@@ -1418,6 +1601,7 @@ export default {
   STRUCTURE_TYPES,
   TEMPLATE_TYPES,
   evaluateCompositionQuality,
+  extractSemanticShaftEndpoints,
   computeFlowCandidateGeometry,
   compareCompositionsGeometry,
   calculateMovementCost,

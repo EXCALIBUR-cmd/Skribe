@@ -19,7 +19,7 @@ import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceM
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
 import { createLayoutProposal } from '../features/messCleanup/layoutEngine.js';
 import { buildPreviewRenderModel } from '../features/messCleanup/previewModel.js';
-import { auditCleanupPipeline } from '../features/messCleanup/auditCleanupPipeline.js';
+import { auditCleanupPipeline, computeGeometryDiagnostics } from '../features/messCleanup/auditCleanupPipeline.js';
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 
@@ -747,7 +747,16 @@ export const MainCanvasPage = () => {
       const cleanupPlan = layoutProposal?.metadata?.cleanupPlan || null;
       const audit = auditCleanupPipeline(workspaceModel, cleanupPlan, layoutProposal, previewRenderModel);
       console.log('=== [MESS CLEANUP FULL PRODUCTION AUDIT] ===', audit);
-      window.__messCleanupAudit = { workspaceModel, organizationPlan, layoutProposal, previewRenderModel, audit };
+      const cleanupResult = layoutProposal?.metadata?.cleanupResult || null;
+      const geometryDiagnostics = computeGeometryDiagnostics(workspaceModel, layoutProposal, cleanupResult);
+      console.log('[MessCleanup Diagnostics Publish]', geometryDiagnostics);
+      window.__messCleanupDiagnostics = geometryDiagnostics;
+      console.log('[MessCleanup Diagnostics Window]', window.__messCleanupDiagnostics);
+      console.log('[MessCleanup Diagnostics Stringified]', JSON.stringify(window.__messCleanupDiagnostics));
+      if (geometryDiagnostics) {
+        console.log('=== [MESS CLEANUP GEOMETRY DIAGNOSTICS] ===', geometryDiagnostics);
+      }
+      window.__messCleanupAudit = { workspaceModel, organizationPlan, layoutProposal, previewRenderModel, audit, geometryDiagnostics };
 
       setMessCleanupPreview({
         isOpen: true,

@@ -80,7 +80,13 @@ const reportedCanvasData = {
       fill: '',
       originX: 'left',
       originY: 'top',
-      endArrow: true
+      endArrow: true,
+      sourceShapeId: 'shape_orange_rect',
+      targetShapeId: 'shape_teal_rect',
+      relationshipMetadata: {
+        sourceShapeId: 'shape_orange_rect',
+        targetShapeId: 'shape_teal_rect'
+      }
     },
     {
       id: 'text_orange_label',
