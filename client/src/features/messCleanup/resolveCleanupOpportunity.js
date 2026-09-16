@@ -320,7 +320,7 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
     };
   }
 
-  // Phase 4F.19: Structural Composition Candidates
+  
   if (opportunity.category === 'composition' || opportunity.structureId) {
     const actId = opportunity.id.startsWith('cand_')
       ? opportunity.id.replace(/^cand_/, 'act_')

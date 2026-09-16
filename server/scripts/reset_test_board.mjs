@@ -7,7 +7,7 @@ const db = mongoose.connection.db;
 
 const boardId = new mongoose.Types.ObjectId('6a9c6e3233c10e861b77e4e7');
 
-// All registered users should be members so anyone can access
+
 const users = await db.collection('users').find({}).toArray();
 const memberIds = users.map((u) => u._id);
 

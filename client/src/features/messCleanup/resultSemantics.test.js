@@ -50,7 +50,7 @@ test('Control B: Floating unresolved connector → NO_SAFE_CLEANUP_FOUND (not AL
     'Human summary must communicate that no safe cleanup was found');
 });
 
-// ─── Control C: Both endpoints unresolved ───
+
 test('Control C: Connector with both endpoints unresolved → NO_SAFE_CLEANUP_FOUND', () => {
   const shape_a = normalizeObject({ id: 'shape_a', type: 'rect', left: 100, top: 100, width: 120, height: 80 });
 
@@ -125,7 +125,7 @@ test('Control E: Connector referencing non-existent target shape → NO_SAFE_CLE
     'A connector pointing to a non-existent shape has a floating endpoint');
 });
 
-// ─── Control F: Sketch-only board (no connectors, no shapes) ───
+
 test('Control F: Sketch-only board → ALREADY_WELL_ORGANIZED', () => {
   const stroke = normalizeObject({
     id: 'st1',
@@ -146,7 +146,7 @@ test('Control F: Sketch-only board → ALREADY_WELL_ORGANIZED', () => {
     'A sketch-only board has no structural defects');
 });
 
-// ─── Opportunity Detector Unit Tests ───
+
 
 test('connectorAttachmentDefect: detects connector with null source', () => {
   const s1 = normalizeObject({ id: 's1', type: 'rect', left: 100, top: 100, width: 100, height: 80 });

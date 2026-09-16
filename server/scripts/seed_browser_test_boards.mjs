@@ -28,7 +28,7 @@ if (!user) {
 
 console.log('Test user ready:', user.email, 'ID:', user._id);
 
-// 1. Board for reported scenario (meaningfully improved expected)
+
 const reportedBoardId = new mongoose.Types.ObjectId('6a9999999999999999999901');
 const reportedCanvasData = {
   version: '6.5.1',
@@ -134,7 +134,7 @@ await db.collection('boards').updateOne(
 
 console.log('Reported scenario board ready: ID =', reportedBoardId.toString());
 
-// 2. Board for already well-organized scenario (effectively unchanged expected)
+
 const wellOrganizedBoardId = new mongoose.Types.ObjectId('6a9999999999999999999902');
 const wellOrganizedCanvasData = {
   version: '6.5.1',

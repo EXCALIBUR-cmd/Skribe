@@ -205,7 +205,7 @@ export const computeGeometryDiagnostics = (workspaceModel, layoutProposal, clean
   const candidateShapes = rawObjects.filter((o) => ['shape', 'note'].includes(getSemanticType(o)));
   const conns = rawObjects.filter((o) => getSemanticType(o) === 'connector' || o.isConnector);
 
-  // Map known structure connector details by connectorId
+  
   const structureConnDetailMap = new Map();
   structures.forEach((s) => {
     (s.currentComposition?.connectorAttachmentDetails || []).forEach((d) => {
@@ -424,7 +424,7 @@ export const computeGeometryDiagnostics = (workspaceModel, layoutProposal, clean
     connectorsRerouted,
     meaningfulLabelChanges,
 
-    // Component 8 required fields (at top-level for primary connector)
+    
     connectorId: primaryConnId,
     sourceShapeId: primarySrcId,
     targetShapeId: primaryTgtId,
@@ -440,18 +440,18 @@ export const computeGeometryDiagnostics = (workspaceModel, layoutProposal, clean
     shaftPath: primaryConn?.shaftPath ?? null,
     arrowheadPath: primaryConn?.arrowheadPath ?? null,
 
-    // Multi-connector collection required by Phase 4F.19.1 diagnostics
+    
     connectors,
     connectorAttachmentDetails: connectors,
 
-    // Additional structure and result metadata requested
+    
     structureType,
     structureMemberIds,
     resultType,
     currentQuality,
     candidates,
 
-    // Phase 4F.19.3A compositionSafety and textSafety diagnostics
+    
     compositionSafety: {
       protectedObjectCount: candidates[0]?.protectedCollisionCount ?? 0,
       protectedCollisionCount: candidates[0]?.protectedCollisionCount ?? 0,

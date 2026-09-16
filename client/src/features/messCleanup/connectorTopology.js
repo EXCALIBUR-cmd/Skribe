@@ -310,7 +310,7 @@ export const validateExplicitEndpoint = ({
     };
   }
 
-  // 1. Look up the referenced shape
+  
   const referencedShape = candidateShapes.find((s) => s.id === explicitShapeId);
   if (!referencedShape) {
     return {
@@ -321,14 +321,14 @@ export const validateExplicitEndpoint = ({
     };
   }
 
-  // 2. Compute distance to the referenced shape (0 if inside, boundary distance if outside)
+  
   const isInside = isPointInsideShape(endpoint, referencedShape);
   const dist = isInside ? 0 : getDistanceToShapeBoundary(endpoint, referencedShape);
 
-  // 3. Check direction compatibility (if inside, direction is trivially compatible)
+  
   const directionOk = isInside || checkDirectionCompatibility(endpoint, tangent, referencedShape, role);
 
-  // 4. Compare against nearby competing shapes (excluding otherEndShapeId, and requiring directionOk)
+  
   const otherShapes = candidateShapes
     .filter((s) => s.id !== connectorId && s.id !== explicitShapeId && s.id !== otherEndShapeId)
     .map((s) => ({
@@ -341,7 +341,7 @@ export const validateExplicitEndpoint = ({
 
   const closestOther = otherShapes[0];
 
-  // 5. Check if referenced shape is geometrically plausible (<= MAX_EXPLICIT_ATTACH_DISTANCE)
+  
   if (dist > MAX_EXPLICIT_ATTACH_DISTANCE) {
     return {
       status: 'STALE',
@@ -351,7 +351,7 @@ export const validateExplicitEndpoint = ({
     };
   }
 
-  // 6. Direction compatibility
+  
   if (!directionOk) {
     return {
       status: 'STALE',
@@ -361,7 +361,7 @@ export const validateExplicitEndpoint = ({
     };
   }
 
-  // 7. Check for competing shapes and ambiguity
+  
   if (closestOther && closestOther.dist <= MAX_EXPLICIT_ATTACH_DISTANCE) {
     const diff = dist - closestOther.dist;
     if (diff >= MIN_AMBIGUITY_MARGIN) {
@@ -381,7 +381,7 @@ export const validateExplicitEndpoint = ({
     }
   }
 
-  // 8. VALIDATED: consistent geometry
+  
   return {
     status: 'VALIDATED',
     shapeId: explicitShapeId,
@@ -402,7 +402,7 @@ export const recoverConnectorTopology = (connector, candidateShapes = []) => {
   const targetPt = isReversed ? startPt : endPt;
   const targetTan = isReversed ? { x: -startTangent.x, y: -startTangent.y } : endTangent;
 
-  // Validate explicit source metadata
+  
   let sourceShapeId = null;
   let sourceConfidence = 0.0;
   let sourceEvidence = null;
@@ -432,7 +432,7 @@ export const recoverConnectorTopology = (connector, candidateShapes = []) => {
     sourceEvidence = sourceValidation.evidence;
     sourceShapeId = null;
   } else {
-    // No explicit metadata
+    
     const geom = evaluateEndpointCandidate(sourcePt, sourceTan, candidateShapes, 'source', connector.id);
     sourceConfidence = geom.confidence;
     sourceEvidence = geom.evidence;
@@ -441,7 +441,7 @@ export const recoverConnectorTopology = (connector, candidateShapes = []) => {
     }
   }
 
-  // Validate explicit target metadata
+  
   let targetShapeId = null;
   let targetConfidence = 0.0;
   let targetEvidence = null;
@@ -471,7 +471,7 @@ export const recoverConnectorTopology = (connector, candidateShapes = []) => {
     targetEvidence = targetValidation.evidence;
     targetShapeId = null;
   } else {
-    // No explicit metadata
+    
     const geom = evaluateEndpointCandidate(targetPt, targetTan, candidateShapes, 'target', connector.id);
     targetConfidence = geom.confidence;
     targetEvidence = geom.evidence;

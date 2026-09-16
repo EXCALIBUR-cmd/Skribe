@@ -137,7 +137,7 @@ const executeCleanFlowchart = ({
 
   const connectorEndpoints = new Map();
 
-  // Populate verified edges from planner if provided (Invariant: executor obeys planner's verified topology)
+  
   if (Array.isArray(action.verifiedEdges)) {
     action.verifiedEdges.forEach((e) => {
       if (e.connId && e.srcId && e.tgtId && nodeSet.has(e.srcId) && nodeSet.has(e.tgtId) && e.srcId !== e.tgtId) {
@@ -213,7 +213,7 @@ const executeCleanFlowchart = ({
 
   let isVertical = false;
   if (action.orientation === 'vertical' || action.orientation === 'horizontal') {
-    // Invariant: The executor must not change the semantic ordering/orientation selected by the planner.
+    
     isVertical = action.orientation === 'vertical';
   } else if (connectorEndpoints.size > 0) {
     isVertical = totalDy > totalDx * 1.1;
@@ -228,7 +228,7 @@ const executeCleanFlowchart = ({
   const levelMap = new Map();
 
   if (action.levelAssignment && typeof action.levelAssignment === 'object') {
-    // Invariant: The executor must not change the semantic ordering/orientation selected by the planner.
+    
     Object.entries(action.levelAssignment).forEach(([id, lvl]) => {
       if (nodeSet.has(id)) {
         levelMap.set(id, Number(lvl));
@@ -238,8 +238,8 @@ const executeCleanFlowchart = ({
       if (!levelMap.has(id)) levelMap.set(id, 0);
     });
   } else {
-    // Invariant: If the planner cannot establish a reliable composition orientation/order,
-    // no layout executor may infer one from object position.
+    
+    
     const hasResolvedEdges = connectorEndpoints.size > 0 || Array.from(adj.values()).some((arr) => arr.length > 0);
     if (!hasResolvedEdges) {
       return {
@@ -795,10 +795,10 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
       executedActions.push(action);
     }
 
-    // Phase 4F.19.3: repairConnector
-    // The executor applies geometry verbatim from the planner payload.
-    // It MUST NOT infer sourceShapeId, targetShapeId, topology, or structure membership.
-    // If the repair payload is invalid, reject safely.
+    
+    
+    
+    
     else if (action.type === 'repairConnector') {
       const repairs = action.connectorRepairs || [];
       let anyRepairApplied = false;
@@ -809,21 +809,21 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         const connP = placementMap.get(repair.connectorId);
         if (!connP) continue;
 
-        // Validate that the connector exists and the payload has required geometry
+        
         if (!Array.isArray(repair.shaftPath) || repair.shaftPath.length === 0) continue;
         if (!repair.sourceAnchor || !repair.targetAnchor) continue;
 
-        // Build full path: shaft + arrowhead
+        
         const fullPath = [...repair.shaftPath.map((c) => [...c])];
         if (Array.isArray(repair.arrowheadPath)) {
           repair.arrowheadPath.forEach((c) => fullPath.push([...c]));
         }
 
-        // Compute bounds from path
+        
         const pathBounds = computePathBounds(fullPath);
         if (!pathBounds) continue;
 
-        // Apply the geometry to the placement
+        
         connP.position = { x: pathBounds.x, y: pathBounds.y };
         connP.bounds = {
           x: pathBounds.x,
@@ -842,7 +842,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         connP.arrowheadPath = repair.arrowheadPath;
         connP.routeType = repair.routeType;
 
-        // Record transformation
+        
         const hist = transformationHistory.get(repair.connectorId) || [];
         hist.push({ actionId: action.id, type: 'repairConnector', dx: 0, dy: 0 });
 

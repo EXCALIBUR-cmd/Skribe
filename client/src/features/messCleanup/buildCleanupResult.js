@@ -144,8 +144,8 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
     return '';
   };
 
-  // Hard Invariant: If a board is classified as already well-organized (zero actions executed),
-  // then no object moved and no connector was rerouted.
+  
+  
   if (actionResults.length > 0) {
     rawObjects.forEach((orig) => {
       if (untouchedSet.has(orig.id)) return;
@@ -179,10 +179,10 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
 
   const onlyLabels = actionResults.length > 0 && actionResults.every((a) => a.type === 'attachText');
 
-  // Component 6: Result semantics
-  //   MEANINGFULLY_CLEANED       — at least one structural/spatial action with visible movement
-  //   ALREADY_WELL_ORGANIZED     — genuinely passes all evaluated quality checks, no defect
-  //   NO_SAFE_CLEANUP_FOUND      — visual defect detected but confidence/risk/action constraints prevented safe repair
+  
+  
+  
+  
   let resultType = 'ALREADY_WELL_ORGANIZED';
 
   const hasMeaningfulMovement = objectsMoved > 0 || connectorsRerouted > 0;
@@ -191,15 +191,15 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
   if (actionResults.length > 0 && (hasMeaningfulMovement || hasMeaningfulLabels || (actionTypeCounts.repairConnector > 0 && connectorsRerouted > 0))) {
     resultType = 'MEANINGFULLY_CLEANED';
   } else if (actionResults.length === 0 || (!hasMeaningfulMovement && !hasMeaningfulLabels)) {
-    // Phase 4F.19.3A Modification 1:
-    // Determine NO_SAFE_CLEANUP_FOUND based strictly on actual opportunity/candidate evidence,
-    // NOT an arbitrary global quality < 8.0 threshold.
+    
+    
+    
     const opportunities = cleanupPlan?.diagnostics?.opportunities || [];
     const candidates = cleanupPlan?.diagnostics?.compositionCandidates || [];
     const rejectedOpps = cleanupPlan?.diagnostics?.rejectedOpportunities || [];
     const structures = cleanupPlan?.diagnostics?.structures || [];
 
-    // 1. Actionable defect / cleanup opportunity detected:
+    
     const hasActionableOpportunity = opportunities.some((o) => {
       if (['brokenFlow', 'overlap', 'clutteredCluster', 'connectorCrossing', 'connectorAttachmentDefect'].includes(o.type)) {
         return true;
@@ -233,12 +233,12 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
 
     const actionableDefectDetected = hasActionableOpportunity || hasFloatingConnectors || hasDetachedConnectors || hasActionableCandidate;
 
-    // 2. No candidate passed the required safety/confidence/risk gates:
+    
     const noSafeCandidateAccepted = actionResults.length === 0 || (!hasMeaningfulMovement && !hasMeaningfulLabels);
 
-    // State-based classification: an observed defect with no safe repair = NO_SAFE_CLEANUP_FOUND.
-    // This gate does NOT require candidatesConsidered > 0. A floating connector with
-    // unresolved topology produces zero formal candidates but is still a visible defect.
+    
+    
+    
     if (actionableDefectDetected && noSafeCandidateAccepted) {
       resultType = 'NO_SAFE_CLEANUP_FOUND';
     } else {

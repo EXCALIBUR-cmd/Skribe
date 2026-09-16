@@ -14,11 +14,7 @@ export const SUPPORTED_ACTION_TYPES = new Set([
   'preserve'
 ]);
 
-/**
- * Amendment 1: Explicit allowlist for geometry-bearing repair fields.
- * Only these fields may carry repair geometry on a repairConnector action.
- * Unexpected coordinate-bearing fields are rejected.
- */
+
 export const REPAIR_CONNECTOR_ALLOWED_FIELDS = new Set([
   'connectorId',
   'sourceShapeId',
@@ -31,7 +27,7 @@ export const REPAIR_CONNECTOR_ALLOWED_FIELDS = new Set([
   'arrowheadPath'
 ]);
 
-/** Diagnostic fields allowed on individual repair payloads (non-geometry-bearing). */
+
 export const REPAIR_CONNECTOR_DIAGNOSTIC_FIELDS = new Set([
   'repairAccepted',
   'repairRejectedReason',
@@ -188,7 +184,7 @@ export const validateCleanupPlan = (plan, workspaceModel = null) => {
       }
     }
 
-    // Amendment 1: Strict schema validation for repairConnector
+    
     if (action.type === 'repairConnector') {
       if (!Array.isArray(action.connectorRepairs) || action.connectorRepairs.length === 0) {
         errors.push(`${prefix} (repairConnector) must have a non-empty connectorRepairs array`);
@@ -196,20 +192,20 @@ export const validateCleanupPlan = (plan, workspaceModel = null) => {
         const allAllowed = new Set([...REPAIR_CONNECTOR_ALLOWED_FIELDS, ...REPAIR_CONNECTOR_DIAGNOSTIC_FIELDS]);
         action.connectorRepairs.forEach((repair, rIdx) => {
           const rPrefix = `${prefix}.connectorRepairs[${rIdx}]`;
-          // Required fields
+          
           const required = ['connectorId', 'sourceShapeId', 'targetShapeId', 'topologyConfidence', 'routeType', 'sourceAnchor', 'targetAnchor', 'shaftPath'];
           for (const field of required) {
             if (repair[field] === undefined || repair[field] === null) {
               errors.push(`${rPrefix} missing required field '${field}'`);
             }
           }
-          // Reject unexpected fields
+          
           for (const key of Object.keys(repair)) {
             if (!allAllowed.has(key)) {
               errors.push(`${rPrefix} unexpected coordinate-bearing field '${key}'`);
             }
           }
-          // Validate anchor structure
+          
           if (repair.sourceAnchor && (typeof repair.sourceAnchor.x !== 'number' || typeof repair.sourceAnchor.y !== 'number')) {
             errors.push(`${rPrefix} sourceAnchor must have numeric x and y`);
           }
@@ -229,7 +225,7 @@ export const validateCleanupPlan = (plan, workspaceModel = null) => {
       }
     }
 
-    // Skip FORBIDDEN_COORDINATE_FIELDS for repairConnector — validated via strict allowlist above
+    
     if (action.type !== 'repairConnector') {
       Object.keys(action).forEach((key) => {
         if (FORBIDDEN_COORDINATE_FIELDS.has(key)) {

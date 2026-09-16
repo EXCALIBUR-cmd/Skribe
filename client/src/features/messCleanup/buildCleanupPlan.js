@@ -91,7 +91,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   });
 
-  // Phase 4F.19: Discover visual structures and generate composition candidates
+  
   const visualStructures = discoverVisualStructures(wsModel, semanticScene, options);
   const compositionCandidates = generateCompositionCandidates(visualStructures, options);
   const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, options);
@@ -340,15 +340,15 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );
 
-  // Phase 4F.19.3: Generate connector repairs for verified connectors
-  // Repairs are generated ONCE here and stored in the plan.
-  // The SAME payload is used for preview, approval, and apply (Amendment 2).
+  
+  
+  
   const repairResult = generateConnectorRepairs(wsModel, visualStructures, options);
   const connectorRepairActions = [];
 
   if (repairResult.connectorRepairs.length > 0) {
     for (const repair of repairResult.connectorRepairs) {
-      // Skip if connector is already owned by a layout action (e.g. cleanFlowchart)
+      
       if (layoutOwnership.has(repair.connectorId)) continue;
 
       const repairAction = {
@@ -369,7 +369,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   }
 
-  // Recalculate untouched after adding connector repairs
+  
   const finalUntouchedObjectIds = sortStrings(
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );

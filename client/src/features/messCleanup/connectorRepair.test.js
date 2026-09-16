@@ -15,9 +15,9 @@ import {
   REPAIR_DIAGNOSTIC_FIELDS
 } from './connectorRepair.js';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test Fixtures
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 const makeRect = (id, x, y, w = 120, h = 80, shapeType = 'rect') => ({
   id,
@@ -70,25 +70,25 @@ const makeWorkspaceModel = (objects) => ({
   board: { objects }
 });
 
-// Two shapes separated horizontally with a floating connector between them
+
 const shapeA = makeRect('shapeA', 100, 200, 120, 80);
 const shapeB = makeRect('shapeB', 500, 200, 120, 80);
 
-// Connector floating between shapes (not touching boundaries)
+
 const floatingConnector = makeConnector('conn1', [
   ['M', 250, 240],
   ['L', 470, 240]
 ], { sourceShapeId: 'shapeA', targetShapeId: 'shapeB' });
 
-// Connector already attached to boundaries
+
 const attachedConnector = makeConnector('conn_attached', [
   ['M', 220, 240],
   ['L', 500, 240]
 ], { sourceShapeId: 'shapeA', targetShapeId: 'shapeB' });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 1: Verified floating horizontal connector → repaired to actual boundaries
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 1: Floating horizontal connector is repaired to actual boundaries', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
@@ -98,9 +98,9 @@ test('Test 1: Floating horizontal connector is repaired to actual boundaries', (
   assert.equal(repair.sourceShapeId, 'shapeA');
   assert.equal(repair.targetShapeId, 'shapeB');
 
-  // Source anchor should be on right edge of shapeA (x=220)
+  
   assert.ok(Math.abs(repair.sourceAnchor.x - 220) <= ATTACHMENT_TOLERANCE, `Source anchor X should be ~220 (got ${repair.sourceAnchor.x})`);
-  // Target anchor should be on left edge of shapeB (x=500)
+  
   assert.ok(Math.abs(repair.targetAnchor.x - 500) <= ATTACHMENT_TOLERANCE, `Target anchor X should be ~500 (got ${repair.targetAnchor.x})`);
 
   assert.ok(repair.sourceAttachmentAfter <= ATTACHMENT_TOLERANCE, `Source attachment after should be <= ${ATTACHMENT_TOLERANCE}px`);
@@ -110,9 +110,9 @@ test('Test 1: Floating horizontal connector is repaired to actual boundaries', (
   assert.ok(repair.shaftPath.length >= 2, 'shaftPath should have at least 2 commands');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 2: Already-attached connector → no reroute
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 2: Already-attached connector is not rerouted', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(attachedConnector, shapeA, shapeB, topology);
@@ -122,9 +122,9 @@ test('Test 2: Already-attached connector is not rerouted', () => {
     'Rejection reason should mention tolerance or attached');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 3: Diagonal connector → correct orientation
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 3: Diagonal connector is repaired with correct orientation', () => {
   const shapeTL = makeRect('shapeTL', 100, 100, 120, 80);
   const shapeBR = makeRect('shapeBR', 400, 300, 120, 80);
@@ -140,18 +140,18 @@ test('Test 3: Diagonal connector is repaired with correct orientation', () => {
   assert.ok(repair.sourceAttachmentAfter <= ATTACHMENT_TOLERANCE);
   assert.ok(repair.targetAttachmentAfter <= ATTACHMENT_TOLERANCE);
 
-  // Verify direction is still TL → BR
+  
   const shaftStart = repair.shaftPath[0];
   const shaftEnd = repair.shaftPath[repair.shaftPath.length - 1];
   assert.ok(shaftEnd[shaftEnd.length - 2] > shaftStart[1], 'End X should be greater than start X');
   assert.ok(shaftEnd[shaftEnd.length - 1] > shaftStart[2], 'End Y should be greater than start Y');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 4: Rotated connector → world geometry correct
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 4: Rotated connector world geometry is correct', () => {
-  // A connector with angle=0 should produce valid repair
+  
   const rotatedConn = makeConnector('connRot', [
     ['M', 250, 240],
     ['L', 470, 240]
@@ -165,9 +165,9 @@ test('Test 4: Rotated connector world geometry is correct', () => {
   assert.ok(repair.targetAttachmentAfter <= ATTACHMENT_TOLERANCE);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 5: Scaled connector → correct world geometry
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 5: Scaled connector repair produces correct world geometry', () => {
   const scaledConn = makeConnector('connScale', [
     ['M', 250, 240],
@@ -184,9 +184,9 @@ test('Test 5: Scaled connector repair produces correct world geometry', () => {
   assert.ok(Number.isFinite(repair.targetAnchor.y));
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 6: Rectangle → Diamond → correct boundary anchors
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 6: Rectangle to diamond produces correct boundary anchors', () => {
   const rect = makeRect('rectSrc', 100, 200, 120, 80);
   const diamond = makeDiamond('dmdTgt', 400, 180, 120, 120);
@@ -199,15 +199,15 @@ test('Test 6: Rectangle to diamond produces correct boundary anchors', () => {
   const repair = computeConnectorRepair(conn, rect, diamond, topology);
 
   assert.equal(repair.repairAccepted, true);
-  // Source anchor should be on rect right edge (x=220)
+  
   assert.ok(Math.abs(repair.sourceAnchor.x - 220) <= ATTACHMENT_TOLERANCE);
-  // Target anchor should be on diamond left vertex (x=400)
+  
   assert.ok(Math.abs(repair.targetAnchor.x - 400) <= 15, `Diamond left vertex should be ~400 (got ${repair.targetAnchor.x})`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 7: Diamond → Hexagon → correct boundary anchors
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 7: Diamond to hexagon produces correct boundary anchors', () => {
   const diamond = makeDiamond('dmdSrc', 100, 100, 120, 120);
   const hexagon = makeHexagon('hexTgt', 400, 100, 140, 120);
@@ -224,9 +224,9 @@ test('Test 7: Diamond to hexagon produces correct boundary anchors', () => {
   assert.ok(repair.targetAttachmentAfter <= ATTACHMENT_TOLERANCE);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 8: Branch structure → all edges repaired
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 8: Branch structure — all verified edges are repaired', () => {
   const nodeA = makeRect('brA', 100, 200, 120, 80);
   const nodeB = makeRect('brB', 500, 100, 120, 80);
@@ -250,9 +250,9 @@ test('Test 8: Branch structure — all verified edges are repaired', () => {
   assert.equal(repAC.targetShapeId, 'brC');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 9: Merge structure → all edges repaired
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 9: Merge structure — all verified edges are repaired', () => {
   const nodeA = makeRect('mrA', 100, 100, 120, 80);
   const nodeB = makeRect('mrB', 100, 300, 120, 80);
@@ -267,9 +267,9 @@ test('Test 9: Merge structure — all verified edges are repaired', () => {
   assert.ok(result.connectorRepairs.length >= 2, 'Both merge edges should be repaired');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 10: Curved connector → preserved curve, corrected anchors
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 10: Curved connector preserves curve structure and corrects anchors', () => {
   const curvedConn = makeConnector('connCurve', [
     ['M', 250, 240],
@@ -281,16 +281,16 @@ test('Test 10: Curved connector preserves curve structure and corrects anchors',
 
   assert.equal(repair.repairAccepted, true);
   assert.equal(repair.routeType, 'curved');
-  // Should have C command preserved
+  
   const hasCurve = repair.shaftPath.some((c) => c[0] === 'C');
   assert.ok(hasCurve, 'Curved connector should preserve C command');
   assert.ok(repair.sourceAttachmentAfter <= ATTACHMENT_TOLERANCE);
   assert.ok(repair.targetAttachmentAfter <= ATTACHMENT_TOLERANCE);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 11: Unknown connector → untouched
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 11: Unknown connector (no sourceShapeId) is not repaired', () => {
   const topology = {
     sourceShapeId: null,
@@ -303,9 +303,9 @@ test('Test 11: Unknown connector (no sourceShapeId) is not repaired', () => {
   assert.ok(repair.repairRejectedReason.includes('Incomplete topology'));
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 12: Ambiguous connector → untouched
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 12: Ambiguous connector (confidence < 0.85) is not repaired', () => {
   const topology = {
     sourceShapeId: 'shapeA',
@@ -317,9 +317,9 @@ test('Test 12: Ambiguous connector (confidence < 0.85) is not repaired', () => {
   assert.equal(repair.repairAccepted, false);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 13: Stale metadata connector → untouched
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 13: Stale metadata connector is not repaired', () => {
   const topology = {
     sourceShapeId: 'shapeA',
@@ -332,13 +332,13 @@ test('Test 13: Stale metadata connector is not repaired', () => {
   assert.ok(repair.repairRejectedReason.includes('STALE'));
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 14: Already-clean verified flow → zero reroutes
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 14: Already-clean verified flow produces zero reroutes', () => {
   const cleanA = makeRect('cleanA', 100, 200, 120, 80);
   const cleanB = makeRect('cleanB', 300, 200, 120, 80);
-  // Connector endpoints exactly at shape boundaries
+  
   const cleanConn = makeConnector('cleanConn', [
     ['M', 220, 240],
     ['L', 300, 240]
@@ -351,32 +351,32 @@ test('Test 14: Already-clean verified flow produces zero reroutes', () => {
   assert.ok(result.rejectedRepairs.some((r) => r.connectorId === 'cleanConn'), 'Should be in rejected list');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 15: Connector-only cleanup → counted separately from objectsMoved
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 15: Connector repair is counted separately from object movement', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
 
   assert.equal(repair.repairAccepted, true);
-  // Verify the repair payload has connector-specific fields, not movement fields
+  
   assert.ok(repair.connectorId);
   assert.ok(repair.sourceAnchor);
   assert.ok(repair.targetAnchor);
   assert.ok(repair.shaftPath);
-  // These are NOT movement deltas
+  
   assert.equal(repair.pathChanged, true);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 16: Protected text collision → repair rejected
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 16: Repair is rejected when it would collide with protected text', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
   assert.equal(repair.repairAccepted, true);
 
-  // Place protected text directly on the repair path
+  
   const protectedText = {
     id: 'protectedText1',
     type: 'text',
@@ -390,9 +390,9 @@ test('Test 16: Repair is rejected when it would collide with protected text', ()
   assert.ok(safety.collidedObjectIds.includes('protectedText1'));
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 17: Protected shape collision → repair rejected
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 17: Repair is rejected when it would collide with protected shape', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
@@ -411,9 +411,9 @@ test('Test 17: Repair is rejected when it would collide with protected shape', (
   assert.ok(safety.collidedObjectIds.includes('protShape1'));
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 18: Creative stroke nearby → unchanged
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 18: Creative stroke nearby is not modified by connector repair', () => {
   const stroke = {
     id: 'stroke1',
@@ -427,16 +427,16 @@ test('Test 18: Creative stroke nearby is not modified by connector repair', () =
   const ws = makeWorkspaceModel([shapeA, shapeB, floatingConnector, stroke]);
   const result = generateConnectorRepairs(ws);
 
-  // Stroke should not appear in any repair's collided IDs
+  
   result.connectorRepairs.forEach((r) => {
     assert.ok(!r.sourceShapeId || r.sourceShapeId !== 'stroke1');
     assert.ok(!r.targetShapeId || r.targetShapeId !== 'stroke1');
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 19: Structural divider nearby → unchanged
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 19: Structural divider nearby is not modified by connector repair', () => {
   const divider = {
     id: 'divider1',
@@ -450,15 +450,15 @@ test('Test 19: Structural divider nearby is not modified by connector repair', (
   const ws = makeWorkspaceModel([shapeA, shapeB, floatingConnector, divider]);
   const result = generateConnectorRepairs(ws);
 
-  // Repairs should not target the divider
+  
   result.connectorRepairs.forEach((r) => {
     assert.notEqual(r.connectorId, 'divider1');
   });
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 20: Deterministic repeated repair → identical geometry
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 20: Repeated repair produces identical geometry', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair1 = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
@@ -471,9 +471,9 @@ test('Test 20: Repeated repair produces identical geometry', () => {
   assert.ok(comparison.equivalent, `Repairs should be identical: ${comparison.mismatches.join('; ')}`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 21: Input immutability → original model unchanged
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 21: Connector repair does not mutate the original model', () => {
   const origPath = [['M', 250, 240], ['L', 470, 240]];
   const conn = makeConnector('connImmutable', origPath.map((c) => [...c]), {
@@ -493,15 +493,15 @@ test('Test 21: Connector repair does not mutate the original model', () => {
   assert.equal(JSON.stringify(shapeB), origShapeBStr, 'Target shape should not be mutated');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 22: Preview/Apply geometry identity (Amendment 2)
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 22: Preview geometry equals applied geometry (Amendment 2)', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
   assert.equal(repair.repairAccepted, true);
 
-  // Simulate: the SAME repair payload is used for both preview and apply
+  
   const previewRepair = { ...repair };
   const appliedRepair = { ...repair };
 
@@ -509,9 +509,9 @@ test('Test 22: Preview geometry equals applied geometry (Amendment 2)', () => {
   assert.ok(comparison.equivalent, `Preview and apply geometry must be identical: ${comparison.mismatches.join('; ')}`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 23: Repair payload schema validation (Amendment 1)
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 23: Repair payload passes strict schema validation', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
@@ -521,9 +521,9 @@ test('Test 23: Repair payload passes strict schema validation', () => {
   assert.ok(validation.valid, `Schema validation failed: ${validation.errors.join('; ')}`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 24: Unexpected fields in repair payload are rejected
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 24: Unexpected coordinate-bearing fields are rejected', () => {
   const badRepair = {
     connectorId: 'conn1',
@@ -535,7 +535,7 @@ test('Test 24: Unexpected coordinate-bearing fields are rejected', () => {
     targetAnchor: { x: 500, y: 240 },
     shaftPath: [['M', 220, 240], ['L', 500, 240]],
     arrowheadPath: [],
-    // Unexpected fields:
+    
     left: 220,
     top: 240,
     bounds: { x: 220, y: 240, width: 280, height: 2 }
@@ -547,9 +547,9 @@ test('Test 24: Unexpected coordinate-bearing fields are rejected', () => {
   assert.ok(validation.errors.some((e) => e.includes('bounds')), 'Should flag "bounds"');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 25: Compare repair geometry detects mismatches
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 25: compareRepairGeometry detects coordinate mismatches', () => {
   const repair1 = {
     connectorId: 'conn1',
@@ -564,7 +564,7 @@ test('Test 25: compareRepairGeometry detects coordinate mismatches', () => {
 
   const repair2 = {
     ...repair1,
-    sourceAnchor: { x: 225, y: 240 }, // 5px off
+    sourceAnchor: { x: 225, y: 240 }, 
     shaftPath: [['M', 225, 240], ['L', 500, 240]]
   };
 
@@ -573,45 +573,45 @@ test('Test 25: compareRepairGeometry detects coordinate mismatches', () => {
   assert.ok(comparison.mismatches.length > 0);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 26: Shape boundary intersection — rectangle
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 26: Shape boundary intersection for rectangle', () => {
   const rect = makeRect('r1', 100, 100, 200, 100);
-  // From the right
+  
   const pt = computeShapeBoundaryIntersection(rect, { x: 500, y: 150 }, { x: 200, y: 150 });
   assert.ok(Math.abs(pt.x - 300) <= 1, `Right edge X should be ~300 (got ${pt.x})`);
   assert.ok(Math.abs(pt.y - 150) <= 1, `Y should be ~150 (got ${pt.y})`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 27: Shape boundary intersection — circle
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 27: Shape boundary intersection for circle', () => {
   const circle = makeCircle('c1', 100, 100, 100, 100);
-  // From the right
+  
   const pt = computeShapeBoundaryIntersection(circle, { x: 300, y: 150 }, { x: 150, y: 150 });
   assert.ok(Math.abs(pt.x - 200) <= 2, `Right edge X should be ~200 (got ${pt.x})`);
   assert.ok(Math.abs(pt.y - 150) <= 2, `Y should be ~150 (got ${pt.y})`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 28: Shape boundary intersection — diamond
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 28: Shape boundary intersection for diamond', () => {
   const diamond = makeDiamond('d1', 100, 100, 120, 120);
-  // From the right — should hit the right vertex
+  
   const pt = computeShapeBoundaryIntersection(diamond, { x: 400, y: 160 }, { x: 160, y: 160 });
   assert.ok(Math.abs(pt.x - 220) <= 2, `Right vertex X should be ~220 (got ${pt.x})`);
   assert.ok(Math.abs(pt.y - 160) <= 2, `Y should be ~160 (got ${pt.y})`);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 29: generateConnectorRepairs for workspace with no verified connectors
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 29: Workspace with no verified connectors produces zero repairs', () => {
   const orphanConn = makeConnector('orphan', [['M', 50, 50], ['L', 150, 50]], {
-    // No sourceShapeId, no targetShapeId, no shapes nearby
+    
   });
   const ws = makeWorkspaceModel([orphanConn]);
   const result = generateConnectorRepairs(ws);
@@ -620,27 +620,27 @@ test('Test 29: Workspace with no verified connectors produces zero repairs', () 
   assert.ok(result.rejectedRepairs.length > 0);
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 30: Topology confidence exactly at threshold is accepted
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 30: Topology confidence at exactly 0.85 threshold is accepted', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB', 0.85);
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
   assert.equal(repair.repairAccepted, true, 'Should accept at exactly 0.85');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 31: Topology confidence just below threshold is rejected
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 31: Topology confidence at 0.849 is rejected', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB', 0.849);
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
   assert.equal(repair.repairAccepted, false, 'Should reject below 0.85');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 32: REPAIR_PAYLOAD_ALLOWED_FIELDS matches spec exactly
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 32: REPAIR_PAYLOAD_ALLOWED_FIELDS matches spec', () => {
   const expected = ['connectorId', 'sourceShapeId', 'targetShapeId', 'topologyConfidence', 'routeType', 'sourceAnchor', 'targetAnchor', 'shaftPath', 'arrowheadPath'];
   expected.forEach((f) => {
@@ -649,30 +649,30 @@ test('Test 32: REPAIR_PAYLOAD_ALLOWED_FIELDS matches spec', () => {
   assert.equal(REPAIR_PAYLOAD_ALLOWED_FIELDS.size, expected.length, 'No extra fields');
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 33: Arrowhead geometry is separate from shaft
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 33: Arrowhead geometry is separate from shaft endpoints', () => {
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   const repair = computeConnectorRepair(floatingConnector, shapeA, shapeB, topology);
   assert.equal(repair.repairAccepted, true);
 
-  // Shaft path should NOT contain arrowhead M commands
-  // Shaft path has exactly M + L (for straight)
+  
+  
   assert.equal(repair.shaftPath[0][0], 'M');
   assert.equal(repair.shaftPath[1][0], 'L');
   assert.equal(repair.shaftPath.length, 2);
 
-  // Arrowhead should be separate
+  
   assert.ok(Array.isArray(repair.arrowheadPath));
   if (repair.arrowheadPath.length > 0) {
     assert.equal(repair.arrowheadPath[0][0], 'M', 'Arrowhead starts with M');
   }
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test 34: Connector style properties are NOT modified by repair
-// ──────────────────────────────────────────────────────────────────────────────
+
+
+
 test('Test 34: Connector style properties are preserved (geometry-only repair)', () => {
   const styledConn = makeConnector('connStyled', [
     ['M', 250, 240], ['L', 470, 240]
@@ -693,7 +693,7 @@ test('Test 34: Connector style properties are preserved (geometry-only repair)',
   const topology = makeVerifiedTopology('shapeA', 'shapeB');
   computeConnectorRepair(styledConn, shapeA, shapeB, topology);
 
-  // Original object should be unchanged
+  
   assert.equal(styledConn.stroke, origStroke);
   assert.equal(styledConn.strokeWidth, origStrokeWidth);
   assert.deepEqual(styledConn.strokeDashArray, origDash);

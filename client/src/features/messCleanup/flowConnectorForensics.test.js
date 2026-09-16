@@ -9,7 +9,7 @@ import { buildCleanupPlan } from './buildCleanupPlan.js';
 import { executeCleanupPlan } from './executeCleanupPlan.js';
 import { buildCleanupResult } from './buildCleanupResult.js';
 
-// Canonical Synthetic Detached Flow Fixture
+
 const createCanonicalFixture = (overrides = {}) => {
   const defaultObjects = [
     {
@@ -132,7 +132,7 @@ test('Test 5 — Ambiguous detached flow: two equally plausible target shapes re
         path: 'M 615 393 L 760 393',
         endArrow: true
       },
-      // Target candidate 1 (above arrow)
+      
       {
         id: 'circle-1',
         type: 'shape',
@@ -140,7 +140,7 @@ test('Test 5 — Ambiguous detached flow: two equally plausible target shapes re
         position: { x: 800, y: 250 },
         bounds: { x: 800, y: 250, width: 120, height: 120 }
       },
-      // Target candidate 2 (symmetrically below arrow)
+      
       {
         id: 'circle-2',
         type: 'shape',
@@ -167,7 +167,7 @@ test('Test 5 — Ambiguous detached flow: two equally plausible target shapes re
 test('Test 6 — Wrong-direction candidate: shapes placed behind arrow direction are rejected', () => {
   const fixture = createCanonicalFixture({
     objects: [
-      // Shape placed ahead of start but arrow points right, away from target
+      
       {
         id: 'rect-1',
         type: 'shape',
@@ -180,7 +180,7 @@ test('Test 6 — Wrong-direction candidate: shapes placed behind arrow direction
         connectorType: 'straight',
         position: { x: 400, y: 350 },
         bounds: { x: 400, y: 350, width: 100, height: 16 },
-        path: 'M 500 350 L 400 350', // points LEFT, away from rect-1 at x=800
+        path: 'M 500 350 L 400 350', 
         endArrow: true
       },
       {
@@ -253,7 +253,7 @@ test('Test 9 — Protected-object collision: obstacle in proposed flow placement
         position: { x: 800, y: 200 },
         bounds: { x: 800, y: 200, width: 120, height: 120 }
       },
-      // Protected obstacle placed directly in the corridor where flow would reorganize
+      
       {
         id: 'protected-obstacle',
         type: 'stroke',
@@ -290,7 +290,7 @@ test('Test 10 — Safe repair: canonical detached arrow fixture produces success
 });
 
 test('Test 11 — Zero-change candidate: candidate with delta <= tolerance has visualBenefit = 0', () => {
-  // A board already in ideal aligned and attached layout
+  
   const fixture = createCanonicalFixture({
     objects: [
       {
@@ -330,15 +330,15 @@ test('Test 12 — Preview/apply identity: immutable CleanupPlan applied without 
   const fixture = createCanonicalFixture();
   const plan = buildCleanupPlan(null, fixture);
 
-  // Execute preview pass
+  
   const previewLayout = executeCleanupPlan(plan, fixture);
   const previewArrow = previewLayout.placements.find((p) => p.objectId === 'arrow-1');
 
-  // Execute apply pass with the SAME plan
+  
   const appliedLayout = executeCleanupPlan(plan, fixture);
   const appliedArrow = appliedLayout.placements.find((p) => p.objectId === 'arrow-1');
 
-  // Assert exact geometric identity
+  
   assert.equal(previewArrow.position.x, appliedArrow.position.x);
   assert.equal(previewArrow.position.y, appliedArrow.position.y);
   assert.equal(previewArrow.bounds.width, appliedArrow.bounds.width);

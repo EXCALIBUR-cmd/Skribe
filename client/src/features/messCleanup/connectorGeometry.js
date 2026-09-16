@@ -412,7 +412,7 @@ export const computePathBounds = (commands) => {
 };
 
 export const getConnectorTransformMatrix = (object, pathBounds = null) => {
-  // If live Fabric object with calcTransformMatrix:
+  
   if (typeof object?.calcTransformMatrix === 'function') {
     return object.calcTransformMatrix();
   }
@@ -452,7 +452,7 @@ export const getConnectorTransformMatrix = (object, pathBounds = null) => {
     cy = top + (dx * sin + dy * cos);
   }
 
-  // Prefer Fabric composeMatrix if available
+  
   if (fabric?.util?.composeMatrix) {
     return fabric.util.composeMatrix({
       translateX: cx,
@@ -516,12 +516,12 @@ export const transformPathCommandsToWorld = (pathInput, object = {}) => {
   }
   if (commands.length === 0) return [];
 
-  // Idempotency: do not double-transform already world-space paths
+  
   if (object?.isWorldSpace === true || object?.isNormalized === true || object?.worldNormalized === true) {
     return commands;
   }
 
-  // If object has no positioning or transform metadata, commands are already in world space (e.g. synthetic test objects)
+  
   const hasTransformProps =
     object?.left !== undefined ||
     object?.top !== undefined ||

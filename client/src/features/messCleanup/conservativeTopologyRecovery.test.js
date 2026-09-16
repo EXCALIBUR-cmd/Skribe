@@ -83,7 +83,7 @@ test('1. Explicit metadata + geometrically consistent connector -> VALIDATED, hi
 });
 
 test('2. Explicit metadata + geometrically inconsistent connector -> STALE, not verified', () => {
-  // Connector endpoint is near rectA (5px away), but metadata claims circleB (95px away)
+  
   const connector = {
     id: 'conn_override',
     type: 'connector',
@@ -174,12 +174,12 @@ test('6. Rotated connector -> world endpoints reflect actual angle', () => {
   };
   const norm = normalizeObject(rawConn);
   assert.equal(norm.isWorldSpace, true);
-  // Center is (150, 150). Length is 100. Rotated 90 deg -> vertical from (150, 100) to (150, 200)
+  
   assert.ok(Math.abs(norm.worldShaftStart.x - 150) < 1e-2);
   assert.ok(Math.abs(norm.worldShaftStart.y - 100) < 1e-2);
   assert.ok(Math.abs(norm.worldShaftEnd.x - 150) < 1e-2);
   assert.ok(Math.abs(norm.worldShaftEnd.y - 200) < 1e-2);
-  // Tangent is vertical (dx ~ 0, dy ~ 100)
+  
   assert.ok(Math.abs(norm.shaftDirection.x) < 1e-2);
   assert.ok(Math.abs(norm.shaftDirection.y - 100) < 1e-2);
 });
@@ -413,14 +413,14 @@ test('16. Canonical Connector 1 fixture -> stale metadata is rejected', () => {
   };
 
   const topo = recoverConnectorTopology(conn1, canonicalShapes);
-  // Stale metadata (txc8m is ~529px away) MUST be rejected
+  
   assert.equal(topo.metadataValidation.source, 'STALE');
   assert.notEqual(topo.sourceShapeId, 'shape_elem_1788819871101_txc8m');
-  // Conservative geometric recovery attaches source to igis7 (28.7px)
+  
   assert.equal(topo.sourceShapeId, 'shape_elem_1788819849852_igis7');
-  // Target is floating (84.8px) -> null
+  
   assert.equal(topo.targetShapeId, null);
-  // Overall confidence < 0.85
+  
   assert.ok(topo.overallConfidence < 0.85, `Expected < 0.85, got ${topo.overallConfidence}`);
 });
 

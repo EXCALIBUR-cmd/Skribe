@@ -31,20 +31,7 @@ export const TEMPLATE_TYPES = Object.freeze({
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
 
-/**
- * Extracts semantic shaft endpoints from a connector object's path.
- * Separates the shaft geometry from arrowhead subpaths.
- *
- * Fabric connector paths may contain:
- * - shaft geometry (first M...L/C/Q segment)
- * - arrowhead subpaths (subsequent M...L segments)
- *
- * parseConnectorPath.mainCommands = shaft only (before second M)
- * parseConnectorPath.startPt = start of shaft
- * parseConnectorPath.endPt = end of shaft (NOT arrowhead tip)
- *
- * Reversal: if startArrow && !endArrow, source is at endPt, target at startPt.
- */
+
 export const extractSemanticShaftEndpoints = (connector) => {
   if (!connector) return null;
 
@@ -54,9 +41,9 @@ export const extractSemanticShaftEndpoints = (connector) => {
   const parsed = parseConnectorPath(pathInput);
   if (!parsed || !parsed.mainCommands || parsed.mainCommands.length === 0) return null;
 
-  // mainCommands contains the shaft only (before arrowhead subpaths)
-  // startPt: first M command of shaft
-  // endPt: last point of shaft (before arrowhead M)
+  
+  
+  
   const isReversed = Boolean(connector.startArrow && !connector.endArrow);
 
   return {
@@ -73,9 +60,7 @@ export const extractSemanticShaftEndpoints = (connector) => {
   };
 };
 
-/**
- * Computes bounding-box intersection metrics.
- */
+
 export const getBoxesIntersection = (b1, b2) => {
   if (!b1 || !b2) return { xOverlap: 0, yOverlap: 0, area: 0, pct1: 0, pct2: 0 };
   const xOverlap = Math.max(0, Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x));
@@ -92,9 +77,7 @@ export const getBoxesIntersection = (b1, b2) => {
   };
 };
 
-/**
- * Computes minimum separation gap between two bounding boxes.
- */
+
 export const getBoxesGap = (b1, b2) => {
   if (!b1 || !b2) return Infinity;
   const dx = Math.max(0, Math.max(b1.x, b2.x) - Math.min(b1.x + b1.width, b2.x + b2.width));
@@ -102,9 +85,7 @@ export const getBoxesGap = (b1, b2) => {
   return Math.hypot(dx, dy);
 };
 
-/**
- * Tests if a 2D line segment intersects an axis-aligned bounding box.
- */
+
 export const segmentIntersectsBox = (p1, p2, box) => {
   if (!p1 || !p2 || !box) return false;
   const inBox = (p) => (
@@ -126,9 +107,7 @@ export const segmentIntersectsBox = (p1, p2, box) => {
   );
 };
 
-/**
- * Tests if a 2D point is inside an axis-aligned box with optional margin.
- */
+
 export const pointInsideBox = (p, box, margin = 0) => {
   if (!p || !box) return false;
   return (
@@ -139,10 +118,7 @@ export const pointInsideBox = (p, box, margin = 0) => {
   );
 };
 
-/**
- * Builds complete candidate geometry: node bounds, owned label bounds, connector geometry, and complete union bounds.
- * (Phase 4F.19.3A Modification 2)
- */
+
 export const buildCompleteCandidateGeometry = ({
   candidateGeometry,
   compObjects,
@@ -232,10 +208,7 @@ export const buildCompleteCandidateGeometry = ({
   };
 };
 
-/**
- * Evaluates complete candidate geometry collisions against all non-member protected/unrelated objects.
- * (Phase 4F.19.3A Modification 2)
- */
+
 export const evaluateCompleteGeometryCollisions = ({
   completeGeometry,
   nonMemberObjects = [],
@@ -266,7 +239,7 @@ export const evaluateCompleteGeometryCollisions = ({
     let collides = false;
     let obsCollisionArea = 0;
 
-    // 1. Candidate Node vs Obstacle
+    
     for (const node of candidateNodeBounds) {
       const inter = getBoxesIntersection(node, obsBounds);
       const isMeaningful = isTextObs
@@ -279,7 +252,7 @@ export const evaluateCompleteGeometryCollisions = ({
       }
     }
 
-    // 2. Candidate Label vs Obstacle
+    
     for (const label of candidateLabelBounds) {
       const inter = getBoxesIntersection(label, obsBounds);
       const isMeaningful = isTextObs
@@ -292,7 +265,7 @@ export const evaluateCompleteGeometryCollisions = ({
       }
     }
 
-    // 3. Candidate Connector Shaft vs Obstacle
+    
     for (const conn of candidateConnectorGeometry) {
       if (!conn.startPoint || !conn.endPoint) continue;
       if (isLineObs) {
@@ -311,7 +284,7 @@ export const evaluateCompleteGeometryCollisions = ({
         }
       }
 
-      // 4. Connector Arrowhead vs Obstacle
+      
       if (pointInsideBox(conn.endPoint, obsBounds, 2)) {
         collides = true;
         obsCollisionArea += 50;
@@ -361,9 +334,7 @@ export const evaluateCompleteGeometryCollisions = ({
   };
 };
 
-/**
- * Computes deterministic candidate geometry (node placements and connector routes) for a flow structure.
- */
+
 export const computeFlowCandidateGeometry = ({
   compObjects,
   compLevelMap,
@@ -519,9 +490,7 @@ export const computeFlowCandidateGeometry = ({
   };
 };
 
-/**
- * Searches the local safe region for a collision-free flow candidate placement.
- */
+
 export const findSafeFlowCandidateGeometry = ({
   compObjects,
   compLevelMap,
@@ -532,7 +501,7 @@ export const findSafeFlowCandidateGeometry = ({
   objectMap = null,
   currentCompleteGeometry = null
 }) => {
-  // Compute bounding hull of existing nodes for local safe region
+  
   const nodeBoundsList = compObjects.map((o) => getObjectBounds(o));
   const minX = Math.min(...nodeBoundsList.map((b) => b.x));
   const minY = Math.min(...nodeBoundsList.map((b) => b.y));
@@ -545,7 +514,7 @@ export const findSafeFlowCandidateGeometry = ({
     maxY: maxY + 100
   };
 
-  // Baseline candidate placement (matches executor's exact placement logic)
+  
   const baselineGeom = computeFlowCandidateGeometry({
     compObjects,
     compLevelMap,
@@ -577,9 +546,7 @@ export const findSafeFlowCandidateGeometry = ({
   };
 };
 
-/**
- * Compares current composition geometry vs candidate geometry.
- */
+
 export const compareCompositionsGeometry = ({
   currentNodes,
   candidateNodes,
@@ -640,9 +607,7 @@ export const compareCompositionsGeometry = ({
   };
 };
 
-/**
- * Evaluates the 8 visual composition quality dimensions (0-10) for a set of objects.
- */
+
 export const evaluateCompositionQuality = ({
   objects,
   objectMap,
@@ -685,8 +650,8 @@ export const evaluateCompositionQuality = ({
   const hasMultiNodeLevels = hasLevels && Array.from(levelMap.values()).some((arr) => arr.length >= 2);
 
   if (hasMultiNodeLevels) {
-    // Multi-lane flow (branch, merge, multi-node levels)
-    // 1. Intra-level alignment: nodes in the same level should share the cross-axis coordinate
+    
+    
     const intraLevelAlignScores = [];
     levelMap.forEach((lvlNodes) => {
       if (lvlNodes.length >= 2) {
@@ -708,7 +673,7 @@ export const evaluateCompositionQuality = ({
       }
     });
 
-    // 2. Cross-level branch / merge centering symmetry:
+    
     const centeringScores = [];
     const sortedLevels = Array.from(levelMap.keys()).sort((a, b) => a - b);
     for (let i = 0; i < sortedLevels.length - 1; i++) {
@@ -754,7 +719,7 @@ export const evaluateCompositionQuality = ({
     const allAlign = [...intraLevelAlignScores, ...centeringScores];
     alignment = allAlign.length > 0 ? allAlign.reduce((s, v) => s + v, 0) / allAlign.length : 10;
 
-    // 3. Inter-level spacing (between level l and level l+1)
+    
     const interLevelGaps = [];
     for (let i = 0; i < sortedLevels.length - 1; i++) {
       const l1 = levelMap.get(sortedLevels[i]);
@@ -770,7 +735,7 @@ export const evaluateCompositionQuality = ({
       }
     }
 
-    // 4. Intra-level sibling spacing
+    
     const siblingGaps = [];
     sortedLevels.forEach((lvl) => {
       const nodes = levelMap.get(lvl);
@@ -814,7 +779,7 @@ export const evaluateCompositionQuality = ({
 
     spacing = (interSpacingScore + siblingSpacingScore) / 2;
   } else {
-    // 1. Alignment (0-10): perpendicular variance
+    
     if (boundsList.length >= 2) {
       if (orientation === 'horizontal') {
         const cyVals = boundsList.map((b) => b.cy);
@@ -835,7 +800,7 @@ export const evaluateCompositionQuality = ({
       }
     }
 
-    // 2. Spacing (0-10): consistency of gaps
+    
     if (boundsList.length >= 3) {
       const sorted = orientation === 'horizontal'
         ? [...boundsList].sort((a, b) => a.x - b.x)
@@ -855,7 +820,7 @@ export const evaluateCompositionQuality = ({
       const gapRatio = minGap > 0 ? maxGap / minGap : 1;
 
       if (minGap < 0) {
-        spacing = 2.0; // overlap penalty
+        spacing = 2.0; 
       } else if (gapDiff <= 6) {
         spacing = 10;
       } else if (gapDiff <= 15) {
@@ -870,7 +835,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  // 3. Directional Clarity (0-10)
+  
   let directionalClarity = 10;
   if (structureType === STRUCTURE_TYPES.FLOW && explicitEdges.length > 0) {
     let backwardCount = 0;
@@ -897,7 +862,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  // 4. Connector Crossings (0-10)
+  
   let connectorCrossings = 10;
   if (explicitEdges.length >= 2) {
     let crossings = 0;
@@ -926,7 +891,7 @@ export const evaluateCompositionQuality = ({
     connectorCrossings = Math.max(1, 10 - crossings * 3.5);
   }
 
-  // 5. Relative Ordering (0-10)
+  
   let relativeOrdering = 10;
   if (boundsList.length >= 2) {
     if (structureType === STRUCTURE_TYPES.SEQUENCE || structureType === STRUCTURE_TYPES.FLOW) {
@@ -936,7 +901,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  // 6. Whitespace (0-10): local gap adequacy without excessive waste
+  
   let whitespace = 10;
   if (boundsList.length >= 2) {
     let maxLocalGap = 0;
@@ -948,7 +913,7 @@ export const evaluateCompositionQuality = ({
         if (dist > maxLocalGap) maxLocalGap = dist;
       }
     }
-    // Expected local span for adjacent members is ~100-300px center-to-center
+    
     if (maxLocalGap > 700) {
       whitespace = 2.0;
     } else if (maxLocalGap > 500) {
@@ -960,8 +925,8 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  // For 2-node structures the spacing loop (requires >=3 objects) is skipped,
-  // so check the actual edge-to-edge gap explicitly to catch oversized gaps.
+  
+  
   if (boundsList.length === 2 && spacing === 10) {
     const b0 = boundsList[0];
     const b1 = boundsList[1];
@@ -975,7 +940,7 @@ export const evaluateCompositionQuality = ({
       const bot = b0.y <= b1.y ? b1 : b0;
       edgeGap = bot.y - (top.y + top.height);
     }
-    // Ideal edge-to-edge gap: 40-80px. Penalize excessively large gaps.
+    
     if (edgeGap > 500) {
       spacing = 2.5;
     } else if (edgeGap > 300) {
@@ -987,12 +952,12 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  // 7. Hierarchy (0-10)
+  
   const hierarchy = 9.0;
 
-  // 9. Connector Attachment (0-10): how well connector shaft endpoints attach to shape boundaries.
-  // null = N/A (no verified connectors in this structure).
-  // Only VERIFIED connectors participate. Unknown/ambiguous connectors are excluded.
+  
+  
+  
   let connectorAttachment = null;
   const connectorAttachmentDetails = [];
 
@@ -1027,7 +992,7 @@ export const evaluateCompositionQuality = ({
 
       perConnectorScores.push(score);
 
-      // Diagnostic surface (Component 8)
+      
       const srcBoundaryPoint = srcShape ? {
         x: cd.sourceAnchor?.x ?? 0,
         y: cd.sourceAnchor?.y ?? 0
@@ -1058,13 +1023,13 @@ export const evaluateCompositionQuality = ({
     connectorAttachment = perConnectorScores.reduce((s, v) => s + v, 0) / perConnectorScores.length;
   }
 
-  // For scoring formulas, use effectiveAttachment:
-  // - If connectors exist: use measured connectorAttachment
-  // - If no connectors: neutral (10), does NOT count as "verified clean"
+  
+  
+  
   const effectiveAttachment = connectorAttachment !== null ? connectorAttachment : 10;
 
-  // 8. Readability (0-10)
-  // Includes connectorAttachment so that detached connectors drag down readability.
+  
+  
   const readability = Number((
     alignment * 0.22 +
     spacing * 0.22 +
@@ -1075,21 +1040,21 @@ export const evaluateCompositionQuality = ({
     hierarchy * 0.05
   ).toFixed(2));
 
-  // Overall Quality (0-10) bounded by weakest core visual dimension.
-  // connectorAttachment participates in minCore: a flow with severely detached
-  // connectors must not receive "already well-organized" quality merely because
-  // its nodes are nicely aligned.
-  //
-  // Final weights (Component 2):
-  //   alignment:           0.20
-  //   spacing:             0.20
-  //   directionalClarity:  0.16
-  //   connectorCrossings:  0.07
-  //   connectorAttachment: 0.15
-  //   whitespace:          0.11
-  //   hierarchy:           0.03
-  //   readability:         0.08
-  //   Total:               1.00
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   const minCore = Math.min(alignment, spacing, directionalClarity, whitespace, effectiveAttachment);
   const weighted = (
     alignment * 0.20 +
@@ -1120,22 +1085,19 @@ export const evaluateCompositionQuality = ({
   };
 };
 
-/**
- * Calculates deterministic movement cost based on estimated displacement,
- * structural complexity, and number of moved objects.
- */
+
 export const calculateMovementCost = ({
   objectCount,
   currentQuality,
   candidateQuality,
   isBranchingOrMerge = false
 }) => {
-  // Base cost per object: 0.35
+  
   let cost = objectCount * 0.35;
   if (isBranchingOrMerge) cost += 0.5;
 
-  // Only penalize movement when the structure is already excellent (>=8.5).
-  // Quality 7.0-8.4 still has meaningful room for improvement; do not discourage it.
+  
+  
   if (currentQuality >= 8.5) {
     cost += 2.0;
   }
@@ -1143,10 +1105,7 @@ export const calculateMovementCost = ({
   return Number(Math.min(5.0, Math.max(0.5, cost)).toFixed(2));
 };
 
-/**
- * Calculates composition risk based on topology confidence, presence of creative/divider elements,
- * and structure ambiguity.
- */
+
 export const calculateCompositionRisk = ({
   hasUnknownConnectorEndpoints = false,
   nearCreativeContent = false,
@@ -1159,10 +1118,7 @@ export const calculateCompositionRisk = ({
   return Number(Math.min(5.0, risk).toFixed(2));
 };
 
-/**
- * Evaluates text objects on canvas to determine if they are owned labels or protected/unrelated annotations.
- * (Phase 4F.19.3A Section 6)
- */
+
 export const evaluateTextSafety = (rawObjects, compObjects = [], ownership = null) => {
   const structureContainerIds = new Set(compObjects.map((o) => o.id));
   const nodeBoundsList = compObjects.map((o) => ({ id: o.id, ...getObjectBounds(o) }));
@@ -1229,9 +1185,7 @@ export const evaluateTextSafety = (rawObjects, compObjects = [], ownership = nul
   return textSafetyList;
 };
 
-/**
- * Discovers all visual structures across the canvas.
- */
+
 export const discoverVisualStructures = (workspaceModel, semanticScene = null, options = {}) => {
   const rawObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const objectMap = new Map(rawObjects.map((o) => [o.id, o]));
@@ -1244,7 +1198,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   const claimedObjectIds = new Set();
   const claimedConnectorIds = new Set();
 
-  // 1. Creative Content (Freehand strokes, doodles, sketches)
+  
   const creativeObjects = rawObjects.filter((o) => {
     const sem = getSemanticType(o);
     if (sem === 'connector' || o.isConnector === true || isConnectorPath(o)) return false;
@@ -1271,7 +1225,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   }
 
-  // 2. Structural Dividers (Lines, layout boundaries)
+  
   const structuralObjects = rawObjects.filter((o) => {
     const sem = getSemanticType(o);
     return sem === 'line' || o.isSkribeLine || o.metadata?.isSkribeLine || o.isStraightLine || o.metadata?.isStraightLine;
@@ -1295,7 +1249,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  // 3. Connectors and Topology Recovery
+  
   const connectorObjects = rawObjects.filter((o) => getSemanticType(o) === 'connector');
   const explicitEdges = [];
   const unknownConnectors = [];
@@ -1325,7 +1279,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  // 4. Graph Construction for Verified Connectors
+  
   const adj = new Map();
   const connMap = new Map();
   explicitEdges.forEach((e) => {
@@ -1339,7 +1293,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     connMap.get(pairKey).push(e.connId);
   });
 
-  // 5. Discover FLOW Structures from Graph Components
+  
   const visited = new Set();
   const sortedGraphNodes = [...adj.keys()].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -1375,7 +1329,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         (e) => component.includes(e.srcId) && component.includes(e.tgtId)
       );
 
-      // Analyze orientation from edges
+      
       let totalDx = 0;
       let totalDy = 0;
       compEdges.forEach((e) => {
@@ -1387,7 +1341,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
 
       const orientation = totalDy > totalDx * 1.2 ? 'vertical' : 'horizontal';
 
-      // Check for branching / merging and compute DAG levels
+      
       const outDegrees = new Map();
       const inDegrees = new Map();
       const compAdj = new Map();
@@ -1409,8 +1363,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       if (hasBranch) primaryTemplate = TEMPLATE_TYPES.FLOW_BRANCH;
       if (hasMerge) primaryTemplate = TEMPLATE_TYPES.FLOW_MERGE;
 
-      // Invariant: The composition candidate owns intended orientation and order.
-      // Compute deterministic topological level assignment from verified edges.
+      
+      
       let compRoots = component.filter((id) => inDegrees.get(id) === 0);
       if (compRoots.length === 0) {
         compRoots = [[...component].sort((a, b) => (inDegrees.get(a) - inDegrees.get(b)) || String(a).localeCompare(String(b)))[0]];
@@ -1477,15 +1431,15 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
 
       const currentNodes = compObjects.map((obj) => ({ id: obj.id, ...getObjectBounds(obj) }));
 
-      // Component 4: Extract semantic shaft endpoints from actual connector paths.
-      // Do NOT substitute shape centers. Use parseConnectorPath to separate
-      // shaft geometry from arrowhead subpaths.
+      
+      
+      
       const currentConnectors = compEdges.map((e) => {
         const connObj = objectMap.get(e.connId);
         const srcB = getObjectBounds(objectMap.get(e.srcId));
         const tgtB = getObjectBounds(objectMap.get(e.tgtId));
 
-        // Extract semantic shaft endpoints from actual connector path
+        
         const shaftEndpoints = connObj ? extractSemanticShaftEndpoints(connObj) : null;
 
         return {
@@ -1499,11 +1453,11 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         };
       });
 
-      // Build connector attachment data for quality evaluation.
-      // Only VERIFIED connectors with actual path data participate.
-      // Connectors without path data cannot have their attachment measured
-      // and are excluded (they don't penalize quality, but don't verify it either).
-      // Unknown/ambiguous connectors are excluded from attachment measurement.
+      
+      
+      
+      
+      
       const connectorAttachmentData = currentConnectors
         .filter((cc) => cc.shaftEndpoints !== null)
         .map((cc) => ({
@@ -1618,9 +1572,9 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         };
       });
 
-      // Build candidate connector attachment data from candidate geometry.
-      // Candidate connectors are placed on shape boundaries by computeFlowCandidateGeometry,
-      // so their attachment error should be ~0.
+      
+      
+      
       const candidateConnAttData = candidateGeometry.connectors.map((cc) => ({
         connId: cc.connId,
         sourceShapeId: cc.srcId,
@@ -1643,9 +1597,9 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       const candidateQuality = candidateQualityMetrics.quality;
       let benefit = Math.max(0, Number((candidateQuality - currentQualityMetrics.quality).toFixed(2)));
 
-      // HARD INVARIANT:
-      // If no node geometry changes, no connector geometry changes, and no meaningful visual property changes,
-      // then compositionBenefit MUST equal 0 and the candidate MUST NOT be selected.
+      
+      
+      
       if (!geoComparison.hasMeaningfulVisualChange) {
         benefit = 0;
       }
@@ -1693,7 +1647,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           risk,
           reason: `Flowchart graph of ${nodeCount} nodes organized into clean ${orientation} flow levels.`,
 
-          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          
           candidateCompleteBounds: primaryCompleteGeom.candidateCompleteBounds,
           candidateNodeBounds: primaryCompleteGeom.candidateNodeBounds,
           candidateLabelBounds: primaryCompleteGeom.candidateLabelBounds,
@@ -1714,7 +1668,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         }
       ];
 
-      // Secondary alternative candidate (orthogonal axis)
+      
       if (nodeCount <= 5 && !hasBranch && !hasMerge) {
         const altTemplate = orientation === 'horizontal' ? TEMPLATE_TYPES.FLOW_VERTICAL : TEMPLATE_TYPES.FLOW_HORIZONTAL;
         const altOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
@@ -1773,7 +1727,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           risk: altRisk,
           reason: `Alternative ${altTemplate === TEMPLATE_TYPES.FLOW_HORIZONTAL ? 'horizontal' : 'vertical'} flow candidate.`,
 
-          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          
           candidateCompleteBounds: altCompleteGeom.candidateCompleteBounds,
           candidateNodeBounds: altCompleteGeom.candidateNodeBounds,
           candidateLabelBounds: altCompleteGeom.candidateLabelBounds,
@@ -1825,7 +1779,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  // 5.1 Discover Flow Structures from Detached Flow Intent Associations
+  
   const unverifiedConnectors = unknownConnectors
     .map((cId) => objectMap.get(cId))
     .filter(Boolean)
@@ -2193,7 +2147,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  // Unknown connectors without topology recovery AND without detached flow association become standalone structural/preserved
+  
   unknownConnectors.filter((cId) => !claimedConnectorIds.has(cId)).forEach((cId) => {
     claimedObjectIds.add(cId);
     claimedConnectorIds.add(cId);
@@ -2227,13 +2181,13 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  // 6. Discover CLUSTER Structures (Sticky Notes or Cards)
+  
   const notesGroups = (semanticScene?.groups || []).filter((g) => {
     const isUnassigned = (g.id && g.id.includes('unassigned')) || (g.purpose && g.purpose.toLowerCase().includes('unassigned'));
     return !isUnassigned && g.type === 'notes' && Array.isArray(g.objectIds) && g.objectIds.length >= 2;
   });
 
-  // Also discover spatial clusters of sticky notes not yet claimed
+  
   const unclaimedNotes = rawObjects.filter((o) => {
     if (claimedObjectIds.has(o.id)) return false;
     const sem = getSemanticType(o);
@@ -2241,7 +2195,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   });
 
   if (unclaimedNotes.length >= 2) {
-    // Cluster notes within 350px proximity
+    
     const noteClusters = [];
     const noteVisited = new Set();
 
@@ -2315,7 +2269,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   }
 
-  // 7. Discover SEQUENCE Structures (Semantic groups or repeated roles in line)
+  
   const conceptGroups = (semanticScene?.groups || []).filter((g) => {
     const isUnassigned = (g.id && g.id.includes('unassigned')) || (g.purpose && g.purpose.toLowerCase().includes('unassigned'));
     return !isUnassigned && ['concept', 'diagram'].includes(g.type) && Array.isArray(g.objectIds) && g.objectIds.length >= 2;
@@ -2383,7 +2337,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  // 8. Discover ANNOTATIONS (Callouts or notes attached to shapes)
+  
   const annotations = (semanticScene?.annotations || []).filter((ann) => {
     return ann.objectId && Array.isArray(ann.targetObjectIds) && ann.targetObjectIds.length > 0;
   });
@@ -2420,12 +2374,12 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  // 9. Remaining Unclaimed Objects (STANDALONE)
+  
   rawObjects.forEach((obj) => {
     if (claimedObjectIds.has(obj.id)) return;
     const sem = getSemanticType(obj);
 
-    // Skip texts that are cleanly owned children of containers
+    
     const parent = ownership.ownerByText.get(obj.id);
     if (parent && claimedObjectIds.has(parent)) {
       return;
@@ -2450,10 +2404,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   return structures;
 };
 
-/**
- * Generates bounded CleanupCompositionCandidate objects from discovered visual structures.
- * Filters candidates through the Strong Local Composition Gate.
- */
+
 export const generateCompositionCandidates = (visualStructures, options = {}) => {
   const candidates = [];
   const minStructureConfidence = options.minStructureConfidence ?? 0.90;
@@ -2462,7 +2413,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
   const maxRisk = options.maxRisk ?? 2.0;
 
   visualStructures.forEach((struct) => {
-    // Only reorganizable structure types
+    
     if (![STRUCTURE_TYPES.FLOW, STRUCTURE_TYPES.SEQUENCE, STRUCTURE_TYPES.CLUSTER, STRUCTURE_TYPES.ANNOTATION].includes(struct.type)) {
       return;
     }
@@ -2479,7 +2430,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
       const candCost = cand.movementCost ?? struct.movementCost ?? 1.0;
       const candRisk = cand.risk ?? struct.risk ?? 1.0;
 
-      // Strong Local Composition Gate (Section 12)
+      
       if (
         candConfidence >= minCandidateConfidence &&
         benefit >= minCompositionBenefit &&
@@ -2512,7 +2463,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
           reason: cand.reason || struct.reason,
           evidence: [...(struct.evidence || []), `template:${cand.template}`],
 
-          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          
           candidateCompleteBounds: cand.candidateCompleteBounds || null,
           candidateNodeBounds: cand.candidateNodeBounds || [],
           candidateLabelBounds: cand.candidateLabelBounds || [],

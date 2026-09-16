@@ -244,7 +244,7 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
       if (isFiniteNumber(placement.bounds?.width)) propsToSet.width = placement.bounds.width;
       if (isFiniteNumber(placement.bounds?.height)) propsToSet.height = placement.bounds.height;
 
-      // Ensure connector path is never a raw string on targetObj
+      
       if ((targetObj.isConnector || targetObj.type === 'path' || targetObj.type === 'Path') && typeof targetObj.path === 'string') {
         const parsed = parseConnectorPath(targetObj.path)?.allCommands;
         if (parsed) targetObj.path = parsed;

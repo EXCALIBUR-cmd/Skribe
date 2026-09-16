@@ -696,7 +696,7 @@ export const detectConnectorAttachmentDefectOpportunities = (objects, objectMap)
     const srcResolved = srcId && objectMap.has(srcId);
     const tgtResolved = tgtId && objectMap.has(tgtId);
 
-    // Connector has at least one floating (unattached) endpoint
+    
     if (!srcResolved || !tgtResolved) {
       const floatingEndpoints = [];
       if (!srcResolved) floatingEndpoints.push('source');
@@ -794,7 +794,7 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
 
   const budget = createBoardMovementBudget(objectCount, options);
 
-  // Mark items as either anomaly opportunity or composition candidate
+  
   const formattedOpps = rawOpportunities.map((opp) => ({
     ...opp,
     category: opp.category || 'anomaly',
@@ -807,11 +807,11 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     utilityScore: typeof cand.utilityScore === 'number' ? cand.utilityScore : scoreOpportunity(cand)
   }));
 
-  // Score and sort unified candidates
+  
   const allItems = [...formattedCandidates, ...formattedOpps];
 
   const sorted = allItems.sort((a, b) => {
-    // Composition candidates take precedence over micro-anomaly actions if both have similar utility
+    
     const isCompA = a.category === 'composition';
     const isCompB = b.category === 'composition';
     if (isCompA !== isCompB) {
@@ -858,8 +858,8 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
 
     const isComposition = opp.category === 'composition';
 
-    // Hard Safety Invariant (Section 3): A candidate that creates a meaningful collision with a protected/unrelated object MUST NOT be selected.
-    // High compositionBenefit cannot override protected-object collision.
+    
+    
     if (isComposition && (opp.safe === false || (opp.newProtectedCollisions && opp.newProtectedCollisions > 0) || opp.candidateIntersectsProtectedObject)) {
       const collIds = opp.collidedObjectIds || opp.collisionObjectIds || [];
       rejectedOpportunities.push({
@@ -874,7 +874,7 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
       continue;
     }
 
-    // Hard Invariant: If composition benefit is 0 (no meaningful visual change), reject
+    
     if (isComposition && opp.compositionBenefit !== undefined && opp.compositionBenefit <= 0) {
       rejectedOpportunities.push({
         id: opp.id,

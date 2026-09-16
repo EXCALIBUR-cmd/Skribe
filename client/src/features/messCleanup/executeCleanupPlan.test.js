@@ -1180,7 +1180,7 @@ test('41. cleanFlowchart invariant: strictly follows planner levelAssignment and
     }
   };
 
-  // Planner declares node_right is root (level 0) and node_left is target (level 1)
+  
   const plan = {
     version: 1,
     actions: [
@@ -1206,7 +1206,7 @@ test('41. cleanFlowchart invariant: strictly follows planner levelAssignment and
   const pRight = proposal.placements.find((p) => p.objectId === 'node_right');
   const pLeft = proposal.placements.find((p) => p.objectId === 'node_left');
 
-  // node_right was assigned level 0, so it must be placed at the first horizontal level position
+  
   assert.ok(pRight.bounds.x < pLeft.bounds.x, 'Level 0 node (node_right) must be at earlier position than Level 1 node (node_left)');
 });
 
