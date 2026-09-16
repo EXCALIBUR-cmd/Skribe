@@ -296,6 +296,15 @@ export const normalizeObject = (object, zIndex = 0) => {
     backgroundColor: getColorString(object.backgroundColor),
     startArrow: object.startArrow || object.connector?.startArrow || false,
     endArrow: object.endArrow !== undefined ? !!object.endArrow : (object.connector?.endArrow !== undefined ? !!object.connector.endArrow : (semanticType === 'connector')),
+    hasExplicitArrow: Boolean(
+      object.hasExplicitArrow ||
+      object.endArrow ||
+      object.startArrow ||
+      object.connector?.endArrow ||
+      object.connector?.startArrow ||
+      object.metadata?.endArrow ||
+      object.metadata?.startArrow
+    ),
     connectorType: object.connectorType || object.connector?.connectorType || object.metadata?.connectorType || (semanticType === 'connector' ? detectConnectorTypeFromPath(object) : null),
     isConnector: semanticType === 'connector' || object.isConnector === true,
     isSkribeLine: object.isSkribeLine === true || object.metadata?.isSkribeLine === true || undefined,
@@ -422,6 +431,9 @@ export const normalizeObject = (object, zIndex = 0) => {
       ? parsedWorld.allCommands.slice(parsedWorld.mainCommands.length)
       : [];
     normalized.isWorldSpace = true;
+    if (normalized.arrowheadPath?.length > 0) {
+      normalized.hasExplicitArrow = true;
+    }
 
     normalized.connector = {
       sourceShapeId,

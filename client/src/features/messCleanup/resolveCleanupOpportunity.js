@@ -1,6 +1,8 @@
 
 import { OPPORTUNITY_TYPES } from './cleanupOpportunities.js';
 import { getSemanticType } from './cleanupTypes.js';
+import { findDetachedFlowAssociation } from './detachedFlowAssociation.js';
+import { computeConnectorRepair, validateConnectorRepairSafety } from './connectorRepair.js';
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -224,6 +226,100 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
     };
   }
 
+  if (oppType === OPPORTUNITY_TYPES.CONNECTOR_ATTACHMENT_DEFECT) {
+    const connId = oppIds[0];
+    const connObj = objectMap.get(connId);
+    if (!connObj) {
+      return { action: null, rejectedReason: `Connector '${connId}' missing from model` };
+    }
+
+    const { visualStructures = [] } = context;
+    const struct = visualStructures.find((s) => s.connectorIds?.includes(connId));
+    let assoc = struct?.detachedFlowAssociation || null;
+
+    if (!assoc) {
+      const candidateContainers = Array.from(objectMap.values()).filter((o) =>
+        ['shape', 'note'].includes(getSemanticType(o))
+      );
+      const detachedRes = findDetachedFlowAssociation(connObj, candidateContainers, context);
+      if (detachedRes?.association && detachedRes.association.associationConfidence >= 0.90) {
+        assoc = detachedRes.association;
+      }
+    }
+
+    if (!assoc) {
+      return {
+        action: null,
+        rejectedReason: `No high-confidence flow intent association found for connector '${connId}'; preserved without topology invention.`
+      };
+    }
+
+    const winningCand = struct?.candidateCompositions?.find((c) => c.safe !== false);
+    if (winningCand?.actionType === 'cleanFlowchart') {
+      return {
+        action: {
+          id: `act_flow_${sortStrings([assoc.sourceCandidateId, assoc.targetCandidateId]).join('_')}`,
+          type: 'cleanFlowchart',
+          objectIds: winningCand.orderedNodeIds || sortStrings([assoc.sourceCandidateId, assoc.targetCandidateId]),
+          memberIds: sortStrings([assoc.sourceCandidateId, assoc.targetCandidateId]),
+          connectorIds: [connId],
+          template: winningCand.template,
+          orientation: winningCand.orientation,
+          levelAssignment: winningCand.levelAssignment,
+          orderedNodeIds: winningCand.orderedNodeIds,
+          verifiedEdges: winningCand.verifiedEdges,
+          confidence: winningCand.confidence,
+          reason: winningCand.reason,
+          evidence: [...(opportunity.evidence || []), ...(winningCand.evidence || []), 'detached-flow-repair'],
+          layoutBenefit: 'reorganizes flow into clear directional levels'
+        },
+        rejectedReason: null
+      };
+    }
+
+    const srcObj = objectMap.get(assoc.sourceCandidateId);
+    const tgtObj = objectMap.get(assoc.targetCandidateId);
+    if (!srcObj || !tgtObj) {
+      return { action: null, rejectedReason: 'Source or target shape not found in model' };
+    }
+
+    const repairPayload = winningCand?.connectorRepairs?.[0] || computeConnectorRepair(connObj, srcObj, tgtObj, {
+      connectorId: connId,
+      sourceShapeId: assoc.sourceCandidateId,
+      targetShapeId: assoc.targetCandidateId,
+      routeType: assoc.routeType,
+      overallConfidence: assoc.associationConfidence,
+      confidence: assoc.associationConfidence
+    });
+
+    if (!repairPayload || !repairPayload.repairAccepted) {
+      return { action: null, rejectedReason: repairPayload?.repairRejectedReason || 'Connector repair could not be computed' };
+    }
+
+    const nonMemberObjects = Array.from(objectMap.values()).filter(
+      (o) => o.id !== connId && o.id !== assoc.sourceCandidateId && o.id !== assoc.targetCandidateId
+    );
+    const safety = validateConnectorRepairSafety(repairPayload, nonMemberObjects, new Set([connId, assoc.sourceCandidateId, assoc.targetCandidateId]));
+    if (!safety.safe) {
+      return { action: null, rejectedReason: `Repaired connector collides with protected content: ${safety.collidedObjectIds.join(', ')}` };
+    }
+
+    return {
+      action: {
+        id: `act_connRepair_${connId}`,
+        type: 'repairConnector',
+        objectIds: [connId],
+        ownedObjectIds: [connId],
+        connectorIds: [connId],
+        confidence: assoc.associationConfidence,
+        reason: `Repaired detached connector '${connId}' attaching '${assoc.sourceCandidateId}' to '${assoc.targetCandidateId}' (confidence ${(assoc.associationConfidence * 100).toFixed(0)}%).`,
+        evidence: [...(opportunity.evidence || []), ...assoc.evidence, 'detached-flow-repair'],
+        connectorRepairs: [repairPayload]
+      },
+      rejectedReason: null
+    };
+  }
+
   // Phase 4F.19: Structural Composition Candidates
   if (opportunity.category === 'composition' || opportunity.structureId) {
     const actId = opportunity.id.startsWith('cand_')
@@ -231,12 +327,30 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
       : (opportunity.id.startsWith('opp_') ? opportunity.id.replace(/^opp_/, 'act_') : `act_${opportunity.id}`);
 
     if (oppType === 'flow') {
+      if (opportunity.actionType === 'repairConnector' || opportunity.template === 'repair_connector_only') {
+        const connId = (opportunity.connectorIds || [])[0];
+        return {
+          action: {
+            id: `act_connRepair_${connId}`,
+            type: 'repairConnector',
+            objectIds: [connId],
+            ownedObjectIds: [connId],
+            connectorIds: [connId],
+            confidence: opportunity.confidence,
+            reason: opportunity.reason,
+            evidence: opportunity.evidence,
+            connectorRepairs: opportunity.connectorRepairs || []
+          },
+          rejectedReason: null
+        };
+      }
+
       if (oppIds.length < 2) {
         return { action: null, rejectedReason: 'Flow composition requires at least 2 nodes' };
       }
       return {
         action: {
-          id: actId,
+          id: actId.replace(/^act_struct_flow_/, 'act_flowchart_'),
           type: 'cleanFlowchart',
           objectIds: opportunity.orderedNodeIds || sortStrings(oppIds),
           memberIds: opportunity.memberIds || sortStrings(oppIds),

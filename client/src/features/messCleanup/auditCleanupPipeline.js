@@ -3,7 +3,7 @@ import {
   getDistanceToShapeBoundary,
   getShapeBoundaryGeometry
 } from './connectorTopology.js';
-import { extractSemanticShaftEndpoints } from './discoverVisualStructures.js';
+import { extractSemanticShaftEndpoints, evaluateTextSafety } from './discoverVisualStructures.js';
 import { getSemanticType } from './cleanupTypes.js';
 
 export const auditCleanupPipeline = (workspaceModel, cleanupPlan, layoutProposal, previewModel) => {
@@ -449,6 +449,17 @@ export const computeGeometryDiagnostics = (workspaceModel, layoutProposal, clean
     structureMemberIds,
     resultType,
     currentQuality,
-    candidates
+    candidates,
+
+    // Phase 4F.19.3A compositionSafety and textSafety diagnostics
+    compositionSafety: {
+      protectedObjectCount: candidates[0]?.protectedCollisionCount ?? 0,
+      protectedCollisionCount: candidates[0]?.protectedCollisionCount ?? 0,
+      newProtectedCollisions: candidates[0]?.newProtectedCollisions ?? 0,
+      minimumProtectedGap: candidates[0]?.minimumProtectedGap ?? Infinity,
+      safeRegion: candidates[0]?.safeRegion ?? null,
+      rejectionReason: candidates[0]?.rejectionReason ?? null
+    },
+    textSafety: evaluateTextSafety(rawObjects, rawObjects.filter((o) => ['shape', 'note'].includes(getSemanticType(o))), null)
   };
 };

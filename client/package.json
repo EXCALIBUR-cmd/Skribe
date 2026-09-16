@@ -21,6 +21,7 @@
     "test:mess-cleanup-v2": "node --test src/features/messCleanup/organizationPlanV2.test.js",
     "test:mess-cleanup-omni-client": "node --test src/features/messCleanup/omniClient.test.js",
     "test:shape-text-relationship": "node --test src/features/messCleanup/shapeTextRelationship.test.js",
+    "test:mess-cleanup-connector-repair": "node --test src/features/messCleanup/connectorRepair.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

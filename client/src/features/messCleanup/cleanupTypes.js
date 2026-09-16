@@ -75,6 +75,26 @@ export const getSemanticType = (object) => {
   const typeLower = String(object?.type || '').toLowerCase();
   if (isTextObject(object)) return 'text';
   if (
+    object?.isConnector === true ||
+    typeLower === 'connector' ||
+    object?.connectorType ||
+    object?.connectorMetadata?.connectorType ||
+    object?.metadata?.connectorType ||
+    object?.connector?.startArrow === true ||
+    object?.connector?.endArrow === true ||
+    object?.startArrow === true ||
+    object?.endArrow === true ||
+    (object?.x1 !== undefined && object?.x2 !== undefined && object?.y1 !== undefined && object?.y2 !== undefined && (object?.sourceShapeId || object?.targetShapeId || object?.connectorType || object?.endArrow || object?.startArrow)) ||
+    (Boolean(object?.sourceShapeId)) ||
+    (Boolean(object?.targetShapeId)) ||
+    (Boolean(object?.relationshipMetadata?.sourceShapeId)) ||
+    (Boolean(object?.relationshipMetadata?.targetShapeId)) ||
+    (typeof object?.id === 'string' && (object.id.startsWith('conn_') || object.id.startsWith('connector_') || object.id.startsWith('arrow_') || object.id.startsWith('shape_conn_') || object.id.startsWith('shape_arrow_'))) ||
+    (typeof object?.elementId === 'string' && (object.elementId.startsWith('conn_') || object.elementId.startsWith('connector_') || object.elementId.startsWith('arrow_'))) ||
+    isConnectorPath(object)
+  ) return 'connector';
+
+  if (
     object?.isVectorStroke === true ||
     typeLower === 'stroke' ||
     object?.metadata?.isVectorStroke === true ||
@@ -82,6 +102,7 @@ export const getSemanticType = (object) => {
     (typeof object?.id === 'string' && object.id.startsWith('stroke_')) ||
     (typeof object?.elementId === 'string' && object.elementId.startsWith('stroke_'))
   ) return 'stroke';
+
   if (
     object?.isSkribeLine === true ||
     object?.skribeLine !== undefined ||
@@ -97,23 +118,6 @@ export const getSemanticType = (object) => {
     }
     return 'line';
   }
-  if (
-    object?.isConnector === true ||
-    typeLower === 'connector' ||
-    object?.connectorType ||
-    object?.connectorMetadata?.connectorType ||
-    object?.metadata?.connectorType ||
-    object?.connector?.startArrow === true ||
-    object?.connector?.endArrow === true ||
-    (object?.x1 !== undefined && object?.x2 !== undefined && object?.y1 !== undefined && object?.y2 !== undefined && (object?.sourceShapeId || object?.targetShapeId || object?.connectorType || object?.endArrow || object?.startArrow)) ||
-    (Boolean(object?.sourceShapeId)) ||
-    (Boolean(object?.targetShapeId)) ||
-    (Boolean(object?.relationshipMetadata?.sourceShapeId)) ||
-    (Boolean(object?.relationshipMetadata?.targetShapeId)) ||
-    (typeof object?.id === 'string' && (object.id.startsWith('conn_') || object.id.startsWith('connector_') || object.id.startsWith('arrow_') || object.id.startsWith('shape_conn_') || object.id.startsWith('shape_arrow_'))) ||
-    (typeof object?.elementId === 'string' && (object.elementId.startsWith('conn_') || object.elementId.startsWith('connector_') || object.elementId.startsWith('arrow_'))) ||
-    isConnectorPath(object)
-  ) return 'connector';
   if (
     object?.isStickyNote === true ||
     object?.isChecklistNote === true ||

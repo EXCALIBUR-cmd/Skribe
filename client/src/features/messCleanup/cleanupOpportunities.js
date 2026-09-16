@@ -7,6 +7,7 @@ export const OPPORTUNITY_TYPES = Object.freeze({
   OVERLAP: 'overlap',
   BROKEN_FLOW: 'brokenFlow',
   CONNECTOR_CROSSING: 'connectorCrossing',
+  CONNECTOR_ATTACHMENT_DEFECT: 'connectorAttachmentDefect',
   MISALIGNMENT: 'misalignment',
   UNEVEN_SPACING: 'unevenSpacing',
   DETACHED_TEXT: 'detachedText',
@@ -20,13 +21,14 @@ export const OPPORTUNITY_PRIORITY = Object.freeze({
   overlap: 1,
   brokenFlow: 2,
   connectorCrossing: 3,
-  clutteredCluster: 4,
-  misalignment: 5,
-  unevenSpacing: 6,
-  detachedText: 7,
-  excessiveWhitespace: 8,
-  cosmeticTextIssue: 9,
-  isolatedOutlier: 10
+  connectorAttachmentDefect: 4,
+  clutteredCluster: 5,
+  misalignment: 6,
+  unevenSpacing: 7,
+  detachedText: 8,
+  excessiveWhitespace: 9,
+  cosmeticTextIssue: 10,
+  isolatedOutlier: 11
 });
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
@@ -244,12 +246,14 @@ export const detectBrokenFlowOpportunities = (objects, objectMap, semanticScene)
           objectIds: sortedNodeIds,
           connectorIds: sortStrings(Array.from(clusterConns)),
           confidence: cluster.length >= 3 ? 0.98 : 0.96,
-          visualBenefit: 9.2,
+          visualBenefit: hasDisorder ? 9.2 : 8.5,
           movementCost: 3.5,
           risk: 1.5,
-          evidence: ['explicit-connector-topology', 'backward-edge-disorder'],
-          reason: `Flowchart graph with ${cluster.length} connected nodes and ${clusterConns.size} connectors demonstrates backward or disordered edge flow; hierarchical leveling restores directional clarity.`,
-          metadata: { nodeCount: cluster.length, connectorCount: clusterConns.size, hasDisorder: true }
+          evidence: hasDisorder ? ['explicit-connector-topology', 'backward-edge-disorder'] : ['explicit-connector-topology', 'graph-structure'],
+          reason: hasDisorder
+            ? `Flowchart graph with ${cluster.length} connected nodes and ${clusterConns.size} connectors demonstrates backward or disordered edge flow; hierarchical leveling restores directional clarity.`
+            : `Flowchart graph with ${cluster.length} connected nodes and ${clusterConns.size} connectors demonstrates clear topological flow; structuring levels enhances diagram legibility.`,
+          metadata: { nodeCount: cluster.length, connectorCount: clusterConns.size, hasDisorder }
         });
       }
     }
@@ -524,6 +528,8 @@ export const detectDetachedTextOpportunities = (objects, objectMap, ownership) =
       const isOutsideContainer = !isBoxContained(bCont, bText, 0.70);
       const isMeaningfullyDetached = distFromCenter > 4 || isOutsideContainer || Math.abs(textObj.rotation || textObj.angle || 0) > 2;
 
+      if (!hasExplicitBinding && !isMeaningfullyDetached) return;
+
       let confidence = 0.90;
       let evidence = ['atomic-unit-containment'];
       if (hasExplicitBinding) {
@@ -676,6 +682,53 @@ export const detectIsolatedOutlierOpportunities = (objects, objectMap) => {
   return opportunities;
 };
 
+export const detectConnectorAttachmentDefectOpportunities = (objects, objectMap) => {
+  const opportunities = [];
+  const connectors = objects.filter((o) => {
+    const sem = getSemanticType(o);
+    return sem === 'connector' || o.isConnector;
+  });
+
+  connectors.forEach((conn) => {
+    const srcId = conn.sourceShapeId || conn.relationshipMetadata?.sourceShapeId || null;
+    const tgtId = conn.targetShapeId || conn.relationshipMetadata?.targetShapeId || null;
+
+    const srcResolved = srcId && objectMap.has(srcId);
+    const tgtResolved = tgtId && objectMap.has(tgtId);
+
+    // Connector has at least one floating (unattached) endpoint
+    if (!srcResolved || !tgtResolved) {
+      const floatingEndpoints = [];
+      if (!srcResolved) floatingEndpoints.push('source');
+      if (!tgtResolved) floatingEndpoints.push('target');
+
+      const evidence = floatingEndpoints.map((ep) => `floating-${ep}-endpoint`);
+
+      opportunities.push({
+        id: `opp_conn_attach_${conn.id}`,
+        type: OPPORTUNITY_TYPES.CONNECTOR_ATTACHMENT_DEFECT,
+        objectIds: [conn.id],
+        confidence: 0.95,
+        visualBenefit: 8.5,
+        movementCost: 0,
+        risk: 2.0,
+        evidence,
+        reason: `Connector '${conn.id}' has ${floatingEndpoints.length} floating endpoint${floatingEndpoints.length > 1 ? 's' : ''} (${floatingEndpoints.join(', ')}); visual attachment defect observed.`,
+        metadata: {
+          connectorId: conn.id,
+          floatingEndpoints,
+          sourceResolved: srcResolved,
+          targetResolved: tgtResolved,
+          sourceShapeId: srcId || null,
+          targetShapeId: tgtId || null
+        }
+      });
+    }
+  });
+
+  return opportunities;
+};
+
 export const detectCleanupOpportunities = (workspaceModel, semanticScene, options = {}) => {
   const rawObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const objectMap = new Map(rawObjects.map((o) => [o.id, o]));
@@ -693,11 +746,13 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, option
   const clusters = detectClutteredClusterOpportunities(rawObjects, objectMap, semanticScene);
   const cosmeticTexts = detectCosmeticTextOpportunities(rawObjects, objectMap, ownership);
   const outliers = detectIsolatedOutlierOpportunities(rawObjects, objectMap);
+  const connectorAttachmentDefects = detectConnectorAttachmentDefectOpportunities(rawObjects, objectMap);
 
   const allOpportunities = [
     ...overlaps,
     ...brokenFlows,
     ...crossings,
+    ...connectorAttachmentDefects,
     ...alignments,
     ...spacings,
     ...detachedTexts,
@@ -802,6 +857,22 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     }
 
     const isComposition = opp.category === 'composition';
+
+    // Hard Safety Invariant (Section 3): A candidate that creates a meaningful collision with a protected/unrelated object MUST NOT be selected.
+    // High compositionBenefit cannot override protected-object collision.
+    if (isComposition && (opp.safe === false || (opp.newProtectedCollisions && opp.newProtectedCollisions > 0) || opp.candidateIntersectsProtectedObject)) {
+      const collIds = opp.collidedObjectIds || opp.collisionObjectIds || [];
+      rejectedOpportunities.push({
+        id: opp.id,
+        actionId: actId,
+        type: opp.type,
+        category: opp.category,
+        reason: `protectedObjectCollision: candidate introduces meaningful collision with ${opp.protectedCollisionCount || collIds.length || 1} protected/unrelated object(s) [${collIds.join(', ')}]`,
+        rejectionReason: 'protectedObjectCollision',
+        collidedObjectIds: collIds
+      });
+      continue;
+    }
 
     // Hard Invariant: If composition benefit is 0 (no meaningful visual change), reject
     if (isComposition && opp.compositionBenefit !== undefined && opp.compositionBenefit <= 0) {

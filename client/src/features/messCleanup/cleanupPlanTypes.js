@@ -10,7 +10,41 @@ export const SUPPORTED_ACTION_TYPES = new Set([
   'arrangeGrid',
   'cleanFlowchart',
   'normalizeText',
+  'repairConnector',
   'preserve'
+]);
+
+/**
+ * Amendment 1: Explicit allowlist for geometry-bearing repair fields.
+ * Only these fields may carry repair geometry on a repairConnector action.
+ * Unexpected coordinate-bearing fields are rejected.
+ */
+export const REPAIR_CONNECTOR_ALLOWED_FIELDS = new Set([
+  'connectorId',
+  'sourceShapeId',
+  'targetShapeId',
+  'topologyConfidence',
+  'routeType',
+  'sourceAnchor',
+  'targetAnchor',
+  'shaftPath',
+  'arrowheadPath'
+]);
+
+/** Diagnostic fields allowed on individual repair payloads (non-geometry-bearing). */
+export const REPAIR_CONNECTOR_DIAGNOSTIC_FIELDS = new Set([
+  'repairAccepted',
+  'repairRejectedReason',
+  'currentShaftStart',
+  'currentShaftEnd',
+  'candidateShaftStart',
+  'candidateShaftEnd',
+  'sourceAttachmentBefore',
+  'targetAttachmentBefore',
+  'sourceAttachmentAfter',
+  'targetAttachmentAfter',
+  'pathChanged',
+  'visuallyAttached'
 ]);
 
 export const FORBIDDEN_COORDINATE_FIELDS = new Set([
@@ -154,11 +188,55 @@ export const validateCleanupPlan = (plan, workspaceModel = null) => {
       }
     }
 
-    Object.keys(action).forEach((key) => {
-      if (FORBIDDEN_COORDINATE_FIELDS.has(key)) {
-        errors.push(`${prefix} forbidden coordinate field '${key}' found. CleanupPlan must describe intent only, not geometry.`);
+    // Amendment 1: Strict schema validation for repairConnector
+    if (action.type === 'repairConnector') {
+      if (!Array.isArray(action.connectorRepairs) || action.connectorRepairs.length === 0) {
+        errors.push(`${prefix} (repairConnector) must have a non-empty connectorRepairs array`);
+      } else {
+        const allAllowed = new Set([...REPAIR_CONNECTOR_ALLOWED_FIELDS, ...REPAIR_CONNECTOR_DIAGNOSTIC_FIELDS]);
+        action.connectorRepairs.forEach((repair, rIdx) => {
+          const rPrefix = `${prefix}.connectorRepairs[${rIdx}]`;
+          // Required fields
+          const required = ['connectorId', 'sourceShapeId', 'targetShapeId', 'topologyConfidence', 'routeType', 'sourceAnchor', 'targetAnchor', 'shaftPath'];
+          for (const field of required) {
+            if (repair[field] === undefined || repair[field] === null) {
+              errors.push(`${rPrefix} missing required field '${field}'`);
+            }
+          }
+          // Reject unexpected fields
+          for (const key of Object.keys(repair)) {
+            if (!allAllowed.has(key)) {
+              errors.push(`${rPrefix} unexpected coordinate-bearing field '${key}'`);
+            }
+          }
+          // Validate anchor structure
+          if (repair.sourceAnchor && (typeof repair.sourceAnchor.x !== 'number' || typeof repair.sourceAnchor.y !== 'number')) {
+            errors.push(`${rPrefix} sourceAnchor must have numeric x and y`);
+          }
+          if (repair.targetAnchor && (typeof repair.targetAnchor.x !== 'number' || typeof repair.targetAnchor.y !== 'number')) {
+            errors.push(`${rPrefix} targetAnchor must have numeric x and y`);
+          }
+          if (repair.shaftPath && !Array.isArray(repair.shaftPath)) {
+            errors.push(`${rPrefix} shaftPath must be an array`);
+          }
+          if (repair.arrowheadPath !== undefined && repair.arrowheadPath !== null && !Array.isArray(repair.arrowheadPath)) {
+            errors.push(`${rPrefix} arrowheadPath must be an array`);
+          }
+          if (typeof repair.topologyConfidence === 'number' && repair.topologyConfidence < 0.85) {
+            errors.push(`${rPrefix} topologyConfidence ${repair.topologyConfidence} below required threshold 0.85`);
+          }
+        });
       }
-    });
+    }
+
+    // Skip FORBIDDEN_COORDINATE_FIELDS for repairConnector — validated via strict allowlist above
+    if (action.type !== 'repairConnector') {
+      Object.keys(action).forEach((key) => {
+        if (FORBIDDEN_COORDINATE_FIELDS.has(key)) {
+          errors.push(`${prefix} forbidden coordinate field '${key}' found. CleanupPlan must describe intent only, not geometry.`);
+        }
+      });
+    }
 
     if (Array.isArray(action.objectIds)) {
       action.objectIds.forEach((objId) => {

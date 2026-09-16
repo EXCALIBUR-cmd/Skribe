@@ -1,8 +1,10 @@
-import { getSemanticType } from './cleanupTypes.js';
+import { getSemanticType, isConnectorPath } from './cleanupTypes.js';
 import { recoverConnectorTopology, getDistanceToShapeBoundary } from './connectorTopology.js';
 import { getObjectBounds, segmentsIntersect } from './cleanupOpportunities.js';
 import { buildVisualObjectModel, resolveContainerOwnership } from './visualUnits.js';
 import { parseConnectorPath } from './connectorGeometry.js';
+import { findDetachedFlowAssociation } from './detachedFlowAssociation.js';
+import { computeConnectorRepair } from './connectorRepair.js';
 
 export const STRUCTURE_TYPES = Object.freeze({
   FLOW: 'flow',
@@ -72,13 +74,303 @@ export const extractSemanticShaftEndpoints = (connector) => {
 };
 
 /**
+ * Computes bounding-box intersection metrics.
+ */
+export const getBoxesIntersection = (b1, b2) => {
+  if (!b1 || !b2) return { xOverlap: 0, yOverlap: 0, area: 0, pct1: 0, pct2: 0 };
+  const xOverlap = Math.max(0, Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x));
+  const yOverlap = Math.max(0, Math.min(b1.y + b1.height, b2.y + b2.height) - Math.max(b1.y, b2.y));
+  const area = xOverlap * yOverlap;
+  const a1 = Math.max(1, b1.width * b1.height);
+  const a2 = Math.max(1, b2.width * b2.height);
+  return {
+    xOverlap,
+    yOverlap,
+    area,
+    pct1: area / a1,
+    pct2: area / a2
+  };
+};
+
+/**
+ * Computes minimum separation gap between two bounding boxes.
+ */
+export const getBoxesGap = (b1, b2) => {
+  if (!b1 || !b2) return Infinity;
+  const dx = Math.max(0, Math.max(b1.x, b2.x) - Math.min(b1.x + b1.width, b2.x + b2.width));
+  const dy = Math.max(0, Math.max(b1.y, b2.y) - Math.min(b1.y + b1.height, b2.y + b2.height));
+  return Math.hypot(dx, dy);
+};
+
+/**
+ * Tests if a 2D line segment intersects an axis-aligned bounding box.
+ */
+export const segmentIntersectsBox = (p1, p2, box) => {
+  if (!p1 || !p2 || !box) return false;
+  const inBox = (p) => (
+    p.x > box.x && p.x < box.x + box.width &&
+    p.y > box.y && p.y < box.y + box.height
+  );
+  if (inBox(p1) || inBox(p2)) return true;
+
+  const topLeft = { x: box.x, y: box.y };
+  const topRight = { x: box.x + box.width, y: box.y };
+  const bottomLeft = { x: box.x, y: box.y + box.height };
+  const bottomRight = { x: box.x + box.width, y: box.y + box.height };
+
+  return (
+    segmentsIntersect(p1, p2, topLeft, topRight) ||
+    segmentsIntersect(p1, p2, topRight, bottomRight) ||
+    segmentsIntersect(p1, p2, bottomRight, bottomLeft) ||
+    segmentsIntersect(p1, p2, bottomLeft, topLeft)
+  );
+};
+
+/**
+ * Tests if a 2D point is inside an axis-aligned box with optional margin.
+ */
+export const pointInsideBox = (p, box, margin = 0) => {
+  if (!p || !box) return false;
+  return (
+    p.x >= box.x - margin &&
+    p.x <= box.x + box.width + margin &&
+    p.y >= box.y - margin &&
+    p.y <= box.y + box.height + margin
+  );
+};
+
+/**
+ * Builds complete candidate geometry: node bounds, owned label bounds, connector geometry, and complete union bounds.
+ * (Phase 4F.19.3A Modification 2)
+ */
+export const buildCompleteCandidateGeometry = ({
+  candidateGeometry,
+  compObjects,
+  compEdges = [],
+  ownership = null,
+  objectMap = null
+}) => {
+  const candidateNodes = candidateGeometry?.nodes || [];
+  const candidateConnectors = candidateGeometry?.connectors || [];
+
+  const candidateLabels = [];
+  const candNodeMap = new Map(candidateNodes.map((n) => [n.id, n]));
+
+  compObjects.forEach((origObj) => {
+    const candNode = candNodeMap.get(origObj.id);
+    if (!candNode) return;
+    const origBounds = getObjectBounds(origObj);
+    const dx = candNode.x - origBounds.x;
+    const dy = candNode.y - origBounds.y;
+
+    const ownedTextIds = ownership?.ownedByOwner?.get(origObj.id) || [];
+    ownedTextIds.forEach((tId) => {
+      const textObj = objectMap?.get(tId);
+      if (!textObj) return;
+      const tBounds = getObjectBounds(textObj);
+      const candX = tBounds.x + dx;
+      const candY = tBounds.y + dy;
+      candidateLabels.push({
+        id: tId,
+        parentNodeId: origObj.id,
+        x: candX,
+        y: candY,
+        width: tBounds.width,
+        height: tBounds.height,
+        cx: candX + tBounds.width / 2,
+        cy: candY + tBounds.height / 2
+      });
+    });
+  });
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  candidateNodes.forEach((n) => {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width);
+    maxY = Math.max(maxY, n.y + n.height);
+  });
+  candidateLabels.forEach((l) => {
+    minX = Math.min(minX, l.x);
+    minY = Math.min(minY, l.y);
+    maxX = Math.max(maxX, l.x + l.width);
+    maxY = Math.max(maxY, l.y + l.height);
+  });
+  candidateConnectors.forEach((c) => {
+    if (c.startPoint) {
+      minX = Math.min(minX, c.startPoint.x);
+      minY = Math.min(minY, c.startPoint.y);
+      maxX = Math.max(maxX, c.startPoint.x);
+      maxY = Math.max(maxY, c.startPoint.y);
+    }
+    if (c.endPoint) {
+      minX = Math.min(minX, c.endPoint.x);
+      minY = Math.min(minY, c.endPoint.y);
+      maxX = Math.max(maxX, c.endPoint.x);
+      maxY = Math.max(maxY, c.endPoint.y);
+    }
+  });
+
+  if (!Number.isFinite(minX)) {
+    minX = 0; minY = 0; maxX = 100; maxY = 100;
+  }
+
+  const candidateCompleteBounds = {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+    cx: minX + (maxX - minX) / 2,
+    cy: minY + (maxY - minY) / 2
+  };
+
+  return {
+    candidateNodeBounds: candidateNodes,
+    candidateLabelBounds: candidateLabels,
+    candidateConnectorGeometry: candidateConnectors,
+    candidateCompleteBounds
+  };
+};
+
+/**
+ * Evaluates complete candidate geometry collisions against all non-member protected/unrelated objects.
+ * (Phase 4F.19.3A Modification 2)
+ */
+export const evaluateCompleteGeometryCollisions = ({
+  completeGeometry,
+  nonMemberObjects = [],
+  currentCompleteGeometry = null
+}) => {
+  const {
+    candidateNodeBounds = [],
+    candidateLabelBounds = [],
+    candidateConnectorGeometry = [],
+    candidateCompleteBounds
+  } = completeGeometry;
+
+  const collidedObjectIds = [];
+  let totalCollisionArea = 0;
+  let minGap = Infinity;
+
+  nonMemberObjects.forEach((obs) => {
+    const obsBounds = getObjectBounds(obs);
+    const obsSem = getSemanticType(obs);
+    const isTextObs = obsSem === 'text';
+    const isLineObs = obsSem === 'line' || obs.isSkribeLine || obs.isStraightLine;
+
+    if (candidateCompleteBounds) {
+      const g = getBoxesGap(candidateCompleteBounds, obsBounds);
+      if (g < minGap) minGap = g;
+    }
+
+    let collides = false;
+    let obsCollisionArea = 0;
+
+    // 1. Candidate Node vs Obstacle
+    for (const node of candidateNodeBounds) {
+      const inter = getBoxesIntersection(node, obsBounds);
+      const isMeaningful = isTextObs
+        ? (inter.area > 25 || (inter.xOverlap > 5 && inter.yOverlap > 5))
+        : (inter.area > 50 || (inter.xOverlap > 5 && inter.yOverlap > 5));
+
+      if (isMeaningful) {
+        collides = true;
+        obsCollisionArea += inter.area;
+      }
+    }
+
+    // 2. Candidate Label vs Obstacle
+    for (const label of candidateLabelBounds) {
+      const inter = getBoxesIntersection(label, obsBounds);
+      const isMeaningful = isTextObs
+        ? (inter.area > 25 || (inter.xOverlap > 5 && inter.yOverlap > 5))
+        : (inter.area > 50 || (inter.xOverlap > 5 && inter.yOverlap > 5));
+
+      if (isMeaningful) {
+        collides = true;
+        obsCollisionArea += inter.area;
+      }
+    }
+
+    // 3. Candidate Connector Shaft vs Obstacle
+    for (const conn of candidateConnectorGeometry) {
+      if (!conn.startPoint || !conn.endPoint) continue;
+      if (isLineObs) {
+        const dX1 = obsBounds.x;
+        const dY1 = obsBounds.y;
+        const dX2 = obsBounds.x + obsBounds.width;
+        const dY2 = obsBounds.y + obsBounds.height;
+        if (segmentsIntersect(conn.startPoint, conn.endPoint, { x: dX1, y: dY1 }, { x: dX2, y: dY2 })) {
+          collides = true;
+          obsCollisionArea += 100;
+        }
+      } else {
+        if (segmentIntersectsBox(conn.startPoint, conn.endPoint, obsBounds)) {
+          collides = true;
+          obsCollisionArea += 100;
+        }
+      }
+
+      // 4. Connector Arrowhead vs Obstacle
+      if (pointInsideBox(conn.endPoint, obsBounds, 2)) {
+        collides = true;
+        obsCollisionArea += 50;
+      }
+    }
+
+    if (collides) {
+      collidedObjectIds.push(obs.id);
+      totalCollisionArea += obsCollisionArea;
+    }
+  });
+
+  const candidateProtectedCollisions = collidedObjectIds.length;
+  let currentProtectedCollisions = 0;
+  let currentCollidedIds = new Set();
+
+  if (currentCompleteGeometry) {
+    const currentRes = evaluateCompleteGeometryCollisions({
+      completeGeometry: currentCompleteGeometry,
+      nonMemberObjects,
+      currentCompleteGeometry: null
+    });
+    currentProtectedCollisions = currentRes.candidateProtectedCollisions;
+    currentCollidedIds = new Set(currentRes.collidedObjectIds);
+  }
+
+  const newCollidedIds = collidedObjectIds.filter((id) => !currentCollidedIds.has(id));
+  const newProtectedCollisions = newCollidedIds.length;
+  const resolvedProtectedCollisions = Array.from(currentCollidedIds).filter((id) => !collidedObjectIds.includes(id)).length;
+
+  const candidateIntersectsProtectedObject = candidateProtectedCollisions > 0;
+  const safe = newProtectedCollisions === 0 && candidateProtectedCollisions === 0;
+
+  return {
+    collidedObjectIds,
+    collisionObjectIds: collidedObjectIds,
+    candidateProtectedCollisions,
+    currentProtectedCollisions,
+    newProtectedCollisions,
+    resolvedProtectedCollisions,
+    protectedCollisionCount: candidateProtectedCollisions,
+    protectedCollisionArea: Number(totalCollisionArea.toFixed(1)),
+    minimumProtectedGap: Number(minGap.toFixed(2)),
+    candidateIntersectsProtectedObject,
+    safe,
+    rejectionReason: safe ? null : 'protectedObjectCollision'
+  };
+};
+
+/**
  * Computes deterministic candidate geometry (node placements and connector routes) for a flow structure.
  */
 export const computeFlowCandidateGeometry = ({
   compObjects,
   compLevelMap,
   orientation = 'horizontal',
-  compEdges = []
+  compEdges = [],
+  offsetX = 0,
+  offsetY = 0
 }) => {
   const isVertical = orientation === 'vertical';
   const LEVEL_GAP = 80;
@@ -116,8 +408,8 @@ export const computeFlowCandidateGeometry = ({
     });
   });
 
-  const origMinX = Math.min(...nodeIds.map((id) => nodeBoundsMap.get(id).x));
-  const origMinY = Math.min(...nodeIds.map((id) => nodeBoundsMap.get(id).y));
+  const origMinX = Math.min(...nodeIds.map((id) => nodeBoundsMap.get(id).x)) + offsetX;
+  const origMinY = Math.min(...nodeIds.map((id) => nodeBoundsMap.get(id).y)) + offsetY;
 
   const candidateNodes = [];
   const candBoundsMap = new Map();
@@ -224,6 +516,64 @@ export const computeFlowCandidateGeometry = ({
   return {
     nodes: candidateNodes,
     connectors: candidateConnectors
+  };
+};
+
+/**
+ * Searches the local safe region for a collision-free flow candidate placement.
+ */
+export const findSafeFlowCandidateGeometry = ({
+  compObjects,
+  compLevelMap,
+  orientation = 'horizontal',
+  compEdges = [],
+  nonMemberObjects = [],
+  ownership = null,
+  objectMap = null,
+  currentCompleteGeometry = null
+}) => {
+  // Compute bounding hull of existing nodes for local safe region
+  const nodeBoundsList = compObjects.map((o) => getObjectBounds(o));
+  const minX = Math.min(...nodeBoundsList.map((b) => b.x));
+  const minY = Math.min(...nodeBoundsList.map((b) => b.y));
+  const maxX = Math.max(...nodeBoundsList.map((b) => b.x + b.width));
+  const maxY = Math.max(...nodeBoundsList.map((b) => b.y + b.height));
+  const safeRegion = {
+    minX: Math.max(0, minX - 100),
+    minY: Math.max(0, minY - 100),
+    maxX: maxX + 100,
+    maxY: maxY + 100
+  };
+
+  // Baseline candidate placement (matches executor's exact placement logic)
+  const baselineGeom = computeFlowCandidateGeometry({
+    compObjects,
+    compLevelMap,
+    orientation,
+    compEdges,
+    offsetX: 0,
+    offsetY: 0
+  });
+
+  const baselineCompleteGeom = buildCompleteCandidateGeometry({
+    candidateGeometry: baselineGeom,
+    compObjects,
+    compEdges,
+    ownership,
+    objectMap
+  });
+
+  const baselineCollision = evaluateCompleteGeometryCollisions({
+    completeGeometry: baselineCompleteGeom,
+    nonMemberObjects,
+    currentCompleteGeometry
+  });
+
+  return {
+    candidateGeometry: baselineGeom,
+    completeGeometry: baselineCompleteGeom,
+    collisionResult: baselineCollision,
+    safeRegion
   };
 };
 
@@ -806,9 +1156,77 @@ export const calculateCompositionRisk = ({
   let risk = 0.5;
   if (hasUnknownConnectorEndpoints) risk += 2.5;
   if (nearCreativeContent) risk += 1.5;
-  if (crossingStructuralBoundary) risk += 2.0;
-  if (structureConfidence < 0.90) risk += 1.0;
   return Number(Math.min(5.0, risk).toFixed(2));
+};
+
+/**
+ * Evaluates text objects on canvas to determine if they are owned labels or protected/unrelated annotations.
+ * (Phase 4F.19.3A Section 6)
+ */
+export const evaluateTextSafety = (rawObjects, compObjects = [], ownership = null) => {
+  const structureContainerIds = new Set(compObjects.map((o) => o.id));
+  const nodeBoundsList = compObjects.map((o) => ({ id: o.id, ...getObjectBounds(o) }));
+
+  const textSafetyList = [];
+  rawObjects.forEach((obj) => {
+    if (getSemanticType(obj) !== 'text') return;
+    const textBounds = getObjectBounds(obj);
+    const containerId = ownership?.ownerByText?.get(obj.id) || null;
+    const isOwnedByStructure = containerId && structureContainerIds.has(containerId);
+
+    let minDist = Infinity;
+    let bestNode = null;
+    nodeBoundsList.forEach((nb) => {
+      const gap = getBoxesGap(textBounds, nb);
+      if (gap < minDist) {
+        minDist = gap;
+        bestNode = nb;
+      }
+    });
+
+    const isInsideNode = bestNode ? (
+      textBounds.x >= bestNode.x - 5 &&
+      textBounds.x + textBounds.width <= bestNode.x + bestNode.width + 5 &&
+      textBounds.y >= bestNode.y - 5 &&
+      textBounds.y + textBounds.height <= bestNode.y + bestNode.height + 5
+    ) : false;
+
+    const overlapWithNode = bestNode ? getBoxesIntersection(textBounds, bestNode).pct1 : 0;
+
+    let ownershipConfidence = 0.0;
+    let attachmentReason = 'External unlinked text; treated as protected/unrelated obstacle.';
+
+    if (isOwnedByStructure) {
+      const tier = ownership?.ownerTierByText?.get(obj.id) ?? 0;
+      if (tier === 0) {
+        ownershipConfidence = 1.0;
+        attachmentReason = `Explicitly attached to node '${containerId}' via relationship metadata.`;
+      } else if (tier === 1) {
+        ownershipConfidence = 0.98;
+        attachmentReason = `Shares compound element ID with node '${containerId}'.`;
+      } else {
+        ownershipConfidence = 0.90;
+        attachmentReason = `Spatially contained inside node '${containerId}'.`;
+      }
+    } else if (containerId) {
+      ownershipConfidence = 0.90;
+      attachmentReason = `Attached to external container '${containerId}'.`;
+    }
+
+    textSafetyList.push({
+      textId: obj.id,
+      text: obj.text || '',
+      containerId,
+      distanceToNearestNode: Number(minDist.toFixed(2)),
+      insideNode: isInsideNode,
+      overlapWithNode: Number(overlapWithNode.toFixed(3)),
+      ownershipConfidence,
+      attachmentReason,
+      isProtected: !isOwnedByStructure
+    });
+  });
+
+  return textSafetyList;
 };
 
 /**
@@ -829,6 +1247,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   // 1. Creative Content (Freehand strokes, doodles, sketches)
   const creativeObjects = rawObjects.filter((o) => {
     const sem = getSemanticType(o);
+    if (sem === 'connector' || o.isConnector === true || isConnectorPath(o)) return false;
     return sem === 'stroke' || o.isVectorStroke || o.metadata?.isVectorStroke;
   });
 
@@ -904,40 +1323,6 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     } else {
       unknownConnectors.push(conn.id);
     }
-  });
-
-  // Unknown connectors are standalone structural/preserved
-  unknownConnectors.forEach((cId) => {
-    claimedObjectIds.add(cId);
-    claimedConnectorIds.add(cId);
-    structures.push({
-      id: `struct_unknown_conn_${cId}`,
-      type: STRUCTURE_TYPES.STANDALONE,
-      objectIds: [cId],
-      connectorIds: [cId],
-      confidence: 0.95,
-      evidence: ['unattached-connector-no-topology'],
-      currentComposition: {
-        quality: 3.0,
-        readability: 3.0,
-        connectorAttachment: 1.5,
-        connectorAttachmentDetails: [{
-          connectorId: cId,
-          sourceShapeId: null,
-          targetShapeId: null,
-          topologyConfidence: 0.0,
-          sourceAttachmentError: 100,
-          targetAttachmentError: 100,
-          connectorAttachmentScore: 1.5,
-          visuallyAttached: false
-        }]
-      },
-      candidateCompositions: [{ template: TEMPLATE_TYPES.PRESERVE, quality: 3.0 }],
-      compositionBenefit: 0.0,
-      movementCost: 0.0,
-      risk: 3.5,
-      reason: `Connector '${cId}' has ambiguous or missing endpoints; preserved without topology invention.`
-    });
   });
 
   // 4. Graph Construction for Verified Connectors
@@ -1142,12 +1527,72 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         connectorAttachmentData
       });
 
-      const candidateGeometry = computeFlowCandidateGeometry({
+      const memberNodeIds = new Set(component);
+      const memberOwnedTextIds = new Set();
+      component.forEach((nId) => {
+        const texts = ownership?.ownedByOwner?.get(nId) || [];
+        texts.forEach((tId) => memberOwnedTextIds.add(tId));
+      });
+      const memberConnIds = new Set(compConns);
+
+      const nonMemberObjects = rawObjects.filter(
+        (o) => !memberNodeIds.has(o.id) && !memberOwnedTextIds.has(o.id) && !memberConnIds.has(o.id)
+      );
+
+      const currentLabels = [];
+      component.forEach((nId) => {
+        const textIds = ownership?.ownedByOwner?.get(nId) || [];
+        textIds.forEach((tId) => {
+          const tObj = objectMap.get(tId);
+          if (tObj) currentLabels.push({ id: tId, parentNodeId: nId, ...getObjectBounds(tObj) });
+        });
+      });
+
+      let curMinX = Infinity, curMinY = Infinity, curMaxX = -Infinity, curMaxY = -Infinity;
+      currentNodes.forEach((n) => {
+        curMinX = Math.min(curMinX, n.x); curMinY = Math.min(curMinY, n.y);
+        curMaxX = Math.max(curMaxX, n.x + n.width); curMaxY = Math.max(curMaxY, n.y + n.height);
+      });
+      currentLabels.forEach((l) => {
+        curMinX = Math.min(curMinX, l.x); curMinY = Math.min(curMinY, l.y);
+        curMaxX = Math.max(curMaxX, l.x + l.width); curMaxY = Math.max(curMaxY, l.y + l.height);
+      });
+      currentConnectors.forEach((c) => {
+        if (c.startPoint) {
+          curMinX = Math.min(curMinX, c.startPoint.x); curMinY = Math.min(curMinY, c.startPoint.y);
+          curMaxX = Math.max(curMaxX, c.startPoint.x); curMaxY = Math.max(curMaxY, c.startPoint.y);
+        }
+        if (c.endPoint) {
+          curMinX = Math.min(curMinX, c.endPoint.x); curMinY = Math.min(curMinY, c.endPoint.y);
+          curMaxX = Math.max(curMaxX, c.endPoint.x); curMaxY = Math.max(curMaxY, c.endPoint.y);
+        }
+      });
+      const currentCompleteBounds = {
+        x: curMinX, y: curMinY,
+        width: Math.max(1, curMaxX - curMinX), height: Math.max(1, curMaxY - curMinY),
+        cx: curMinX + (curMaxX - curMinX) / 2, cy: curMinY + (curMaxY - curMinY) / 2
+      };
+      const currentCompleteGeometry = {
+        candidateNodeBounds: currentNodes,
+        candidateLabelBounds: currentLabels,
+        candidateConnectorGeometry: currentConnectors,
+        candidateCompleteBounds: currentCompleteBounds
+      };
+
+      const primaryFlowResult = findSafeFlowCandidateGeometry({
         compObjects,
         compLevelMap,
         orientation,
-        compEdges
+        compEdges,
+        nonMemberObjects,
+        ownership,
+        objectMap,
+        currentCompleteGeometry
       });
+      const candidateGeometry = primaryFlowResult.candidateGeometry;
+      const primaryCompleteGeom = primaryFlowResult.completeGeometry;
+      const primaryCollision = primaryFlowResult.collisionResult;
+      const safeRegion = primaryFlowResult.safeRegion;
 
       const geoComparison = compareCompositionsGeometry({
         currentNodes,
@@ -1220,6 +1665,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       });
 
       const structureId = `struct_flow_${sortStrings(component)[0]}`;
+      const cand1Safe = primaryCollision.safe;
       const candidateCompositions = [
         {
           template: primaryTemplate,
@@ -1245,7 +1691,26 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           compositionBenefit: Number(benefit.toFixed(2)),
           movementCost,
           risk,
-          reason: `Flowchart graph of ${nodeCount} nodes organized into clean ${orientation} flow levels.`
+          reason: `Flowchart graph of ${nodeCount} nodes organized into clean ${orientation} flow levels.`,
+
+          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          candidateCompleteBounds: primaryCompleteGeom.candidateCompleteBounds,
+          candidateNodeBounds: primaryCompleteGeom.candidateNodeBounds,
+          candidateLabelBounds: primaryCompleteGeom.candidateLabelBounds,
+          candidateConnectorGeometry: primaryCompleteGeom.candidateConnectorGeometry,
+          protectedCollisionCount: primaryCollision.protectedCollisionCount,
+          protectedCollisionArea: primaryCollision.protectedCollisionArea,
+          minimumProtectedGap: primaryCollision.minimumProtectedGap,
+          candidateIntersectsProtectedObject: primaryCollision.candidateIntersectsProtectedObject,
+          currentProtectedCollisions: primaryCollision.currentProtectedCollisions,
+          candidateProtectedCollisions: primaryCollision.candidateProtectedCollisions,
+          newProtectedCollisions: primaryCollision.newProtectedCollisions,
+          resolvedProtectedCollisions: primaryCollision.resolvedProtectedCollisions,
+          collidedObjectIds: primaryCollision.collidedObjectIds,
+          collisionObjectIds: primaryCollision.collidedObjectIds,
+          safe: cand1Safe,
+          rejectionReason: cand1Safe ? null : 'protectedObjectCollision',
+          safeRegion
         }
       ];
 
@@ -1253,6 +1718,42 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       if (nodeCount <= 5 && !hasBranch && !hasMerge) {
         const altTemplate = orientation === 'horizontal' ? TEMPLATE_TYPES.FLOW_VERTICAL : TEMPLATE_TYPES.FLOW_HORIZONTAL;
         const altOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
+
+        const altFlowResult = findSafeFlowCandidateGeometry({
+          compObjects,
+          compLevelMap,
+          orientation: altOrientation,
+          compEdges,
+          nonMemberObjects,
+          ownership,
+          objectMap,
+          currentCompleteGeometry
+        });
+        const altCandGeom = altFlowResult.candidateGeometry;
+        const altCompleteGeom = altFlowResult.completeGeometry;
+        const altCollision = altFlowResult.collisionResult;
+        const altSafe = altCollision.safe;
+
+        const altGeoComparison = compareCompositionsGeometry({
+          currentNodes,
+          candidateNodes: altCandGeom.nodes,
+          currentConnectors,
+          candidateConnectors: altCandGeom.connectors
+        });
+
+        const altMovementCost = calculateMovementCost({
+          objectCount: nodeCount,
+          currentQuality: currentQualityMetrics.quality,
+          candidateQuality: 9.0,
+          isBranchingOrMerge: false
+        });
+
+        const altRisk = calculateCompositionRisk({
+          hasUnknownConnectorEndpoints: false,
+          nearCreativeContent: false,
+          structureConfidence: 0.96
+        });
+
         candidateCompositions.push({
           template: altTemplate,
           orientation: altOrientation,
@@ -1265,12 +1766,31 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
             nodes: currentNodes,
             connectors: currentConnectors
           },
-          candidateGeometry,
-          geoComparison,
+          candidateGeometry: altCandGeom,
+          geoComparison: altGeoComparison,
           compositionBenefit: Math.max(0, 9.0 - currentQualityMetrics.quality),
-          movementCost: movementCost + 0.8,
-          risk: risk + 0.4,
-          reason: `Alternative ${altTemplate === TEMPLATE_TYPES.FLOW_HORIZONTAL ? 'horizontal' : 'vertical'} flow candidate.`
+          movementCost: altMovementCost,
+          risk: altRisk,
+          reason: `Alternative ${altTemplate === TEMPLATE_TYPES.FLOW_HORIZONTAL ? 'horizontal' : 'vertical'} flow candidate.`,
+
+          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          candidateCompleteBounds: altCompleteGeom.candidateCompleteBounds,
+          candidateNodeBounds: altCompleteGeom.candidateNodeBounds,
+          candidateLabelBounds: altCompleteGeom.candidateLabelBounds,
+          candidateConnectorGeometry: altCompleteGeom.candidateConnectorGeometry,
+          protectedCollisionCount: altCollision.protectedCollisionCount,
+          protectedCollisionArea: altCollision.protectedCollisionArea,
+          minimumProtectedGap: altCollision.minimumProtectedGap,
+          candidateIntersectsProtectedObject: altCollision.candidateIntersectsProtectedObject,
+          currentProtectedCollisions: altCollision.currentProtectedCollisions,
+          candidateProtectedCollisions: altCollision.candidateProtectedCollisions,
+          newProtectedCollisions: altCollision.newProtectedCollisions,
+          resolvedProtectedCollisions: altCollision.resolvedProtectedCollisions,
+          collidedObjectIds: altCollision.collidedObjectIds,
+          collisionObjectIds: altCollision.collidedObjectIds,
+          safe: altSafe,
+          rejectionReason: altSafe ? null : 'protectedObjectCollision',
+          safeRegion: altFlowResult.safeRegion
         });
       }
 
@@ -1303,6 +1823,408 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           : `Flowchart structure with ${nodeCount} connected nodes already has clean flow composition (${currentQualityMetrics.quality}/10); preserved.`
       });
     }
+  });
+
+  // 5.1 Discover Flow Structures from Detached Flow Intent Associations
+  const unverifiedConnectors = unknownConnectors
+    .map((cId) => objectMap.get(cId))
+    .filter(Boolean)
+    .filter((o) => !claimedConnectorIds.has(o.id));
+
+  unverifiedConnectors.forEach((conn) => {
+    const detachedRes = findDetachedFlowAssociation(conn, candidateContainers, { visualStructures: structures });
+    if (!detachedRes || !detachedRes.association || detachedRes.association.associationConfidence < 0.90) {
+      return;
+    }
+
+    const association = detachedRes.association;
+    const srcId = association.sourceCandidateId;
+    const tgtId = association.targetCandidateId;
+    const srcObj = objectMap.get(srcId);
+    const tgtObj = objectMap.get(tgtId);
+
+    if (!srcObj || !tgtObj || srcId === tgtId) {
+      return;
+    }
+
+    const bSrc = getObjectBounds(srcObj);
+    const bTgt = getObjectBounds(tgtObj);
+    const dx = Math.abs(bTgt.cx - bSrc.cx);
+    const dy = Math.abs(bTgt.cy - bSrc.cy);
+    const orientation = dy > dx * 1.2 ? 'vertical' : 'horizontal';
+    const primaryTemplate = orientation === 'horizontal' ? TEMPLATE_TYPES.FLOW_HORIZONTAL : TEMPLATE_TYPES.FLOW_VERTICAL;
+
+    const compEdges = [{
+      connId: conn.id,
+      srcId,
+      tgtId,
+      confidence: association.associationConfidence
+    }];
+
+    const currentNodes = [
+      { id: srcId, ...bSrc },
+      { id: tgtId, ...bTgt }
+    ];
+
+    const shaftEndpoints = extractSemanticShaftEndpoints(conn);
+    const currentConnectors = [{
+      connId: conn.id,
+      srcId,
+      tgtId,
+      path: conn.path || '',
+      startPoint: shaftEndpoints ? shaftEndpoints.sourceAnchor : { x: bSrc.cx, y: bSrc.cy },
+      endPoint: shaftEndpoints ? shaftEndpoints.targetAnchor : { x: bTgt.cx, y: bTgt.cy },
+      shaftEndpoints
+    }];
+
+    let curMinX = Math.min(bSrc.x, bTgt.x);
+    let curMinY = Math.min(bSrc.y, bTgt.y);
+    let curMaxX = Math.max(bSrc.x + bSrc.width, bTgt.x + bTgt.width);
+    let curMaxY = Math.max(bSrc.y + bSrc.height, bTgt.y + bTgt.height);
+    if (currentConnectors[0].startPoint) {
+      curMinX = Math.min(curMinX, currentConnectors[0].startPoint.x);
+      curMinY = Math.min(curMinY, currentConnectors[0].startPoint.y);
+      curMaxX = Math.max(curMaxX, currentConnectors[0].startPoint.x);
+      curMaxY = Math.max(curMaxY, currentConnectors[0].startPoint.y);
+    }
+    if (currentConnectors[0].endPoint) {
+      curMinX = Math.min(curMinX, currentConnectors[0].endPoint.x);
+      curMinY = Math.min(curMinY, currentConnectors[0].endPoint.y);
+      curMaxX = Math.max(curMaxX, currentConnectors[0].endPoint.x);
+      curMaxY = Math.max(curMaxY, currentConnectors[0].endPoint.y);
+    }
+    const currentCompleteBounds = {
+      x: curMinX,
+      y: curMinY,
+      width: Math.max(1, curMaxX - curMinX),
+      height: Math.max(1, curMaxY - curMinY),
+      cx: curMinX + (curMaxX - curMinX) / 2,
+      cy: curMinY + (curMaxY - curMinY) / 2
+    };
+
+    const currentCompleteGeometry = {
+      candidateNodeBounds: currentNodes,
+      candidateLabelBounds: [],
+      candidateConnectorGeometry: currentConnectors,
+      candidateCompleteBounds: currentCompleteBounds
+    };
+
+    const connectorAttachmentData = [{
+      connId: conn.id,
+      sourceShapeId: srcId,
+      targetShapeId: tgtId,
+      sourceAnchor: currentConnectors[0].startPoint,
+      targetAnchor: currentConnectors[0].endPoint,
+      topologyConfidence: association.associationConfidence,
+      shaftPath: shaftEndpoints?.shaftPath || null,
+      arrowheadPath: shaftEndpoints?.arrowheadPath || null
+    }];
+
+    const currentQualityMetrics = evaluateCompositionQuality({
+      objects: [srcObj, tgtObj],
+      objectMap,
+      explicitEdges: compEdges,
+      structureType: STRUCTURE_TYPES.FLOW,
+      orientation,
+      levelAssignment: { [srcId]: 0, [tgtId]: 1 },
+      connectorAttachmentData
+    });
+
+    const repairPayload = computeConnectorRepair(conn, srcObj, tgtObj, {
+      connectorId: conn.id,
+      sourceShapeId: srcId,
+      targetShapeId: tgtId,
+      overallConfidence: association.associationConfidence,
+      confidence: association.associationConfidence,
+      routeType: association.routeType || 'straight'
+    });
+
+    const otherObjects = rawObjects.filter(
+      (o) => o.id !== conn.id && o.id !== srcId && o.id !== tgtId
+    );
+
+    let candA = null;
+    if (repairPayload && repairPayload.repairAccepted) {
+      const startPoint = repairPayload.sourceAnchor;
+      const endPoint = repairPayload.targetAnchor;
+      const fullPath = [...repairPayload.shaftPath, ...(repairPayload.arrowheadPath || [])];
+      const pathData = fullPath.map((cmd) => `${cmd[0]} ${cmd.slice(1).map((n) => typeof n === 'number' ? Number(n.toFixed(2)) : n).join(' ')}`).join(' ');
+      repairPayload.startPoint = startPoint;
+      repairPayload.endPoint = endPoint;
+      repairPayload.pathCommands = fullPath;
+      repairPayload.pathData = pathData;
+
+      const candACompleteGeom = {
+        candidateNodeBounds: [bSrc, bTgt],
+        candidateLabelBounds: [],
+        candidateConnectorGeometry: [{
+          connId: conn.id,
+          srcId,
+          tgtId,
+          startPoint,
+          endPoint,
+          path: pathData
+        }],
+        candidateCompleteBounds: {
+          x: Math.min(bSrc.x, bTgt.x, startPoint.x, endPoint.x),
+          y: Math.min(bSrc.y, bTgt.y, startPoint.y, endPoint.y),
+          width: Math.max(bSrc.x + bSrc.width, bTgt.x + bTgt.width, startPoint.x, endPoint.x) - Math.min(bSrc.x, bTgt.x, startPoint.x, endPoint.x),
+          height: Math.max(bSrc.y + bSrc.height, bTgt.y + bTgt.height, startPoint.y, endPoint.y) - Math.min(bSrc.y, bTgt.y, startPoint.y, endPoint.y),
+          cx: (bSrc.cx + bTgt.cx) / 2,
+          cy: (bSrc.cy + bTgt.cy) / 2
+        }
+      };
+
+      const candACollision = evaluateCompleteGeometryCollisions({
+        completeGeometry: candACompleteGeom,
+        nonMemberObjects: otherObjects,
+        currentCompleteGeometry
+      });
+
+      const candAGeoComparison = {
+        nodeDisplacements: { [srcId]: 0, [tgtId]: 0 },
+        totalNodeDisplacement: 0,
+        maxNodeDisplacement: 0,
+        connectorDisplacements: { [conn.id]: repairPayload.pathChanged ? 20 : 0 },
+        maxConnectorDisplacement: repairPayload.pathChanged ? 20 : 0,
+        hasNodeGeometryChange: false,
+        hasConnectorGeometryChange: repairPayload.pathChanged,
+        hasMeaningfulVisualChange: repairPayload.pathChanged
+      };
+
+      const candABenefit = repairPayload.pathChanged ? 3.0 : 0.0;
+      const candAMovementCost = 0.5;
+      const candARisk = 0.2;
+
+      candA = {
+        template: 'repair_connector_only',
+        actionType: 'repairConnector',
+        orientation,
+        levelAssignment: { [srcId]: 0, [tgtId]: 1 },
+        orderedNodeIds: [srcId, tgtId],
+        verifiedEdges: compEdges,
+        quality: 9.5,
+        currentQuality: currentQualityMetrics.quality,
+        currentGeometry: { nodes: currentNodes, connectors: currentConnectors },
+        candidateGeometry: {
+          nodes: currentNodes,
+          connectors: [{
+            connId: conn.id,
+            srcId,
+            tgtId,
+            startPoint,
+            endPoint,
+            path: pathData
+          }]
+        },
+        geoComparison: candAGeoComparison,
+        compositionBenefit: Number(candABenefit.toFixed(2)),
+        movementCost: candAMovementCost,
+        risk: candARisk,
+        confidence: association.associationConfidence,
+        reason: `Repaired detached connector '${conn.id}' attaching '${srcId}' to '${tgtId}'.`,
+        connectorRepairs: [repairPayload],
+        candidateCompleteBounds: candACompleteGeom.candidateCompleteBounds,
+        candidateNodeBounds: candACompleteGeom.candidateNodeBounds,
+        candidateLabelBounds: candACompleteGeom.candidateLabelBounds,
+        candidateConnectorGeometry: candACompleteGeom.candidateConnectorGeometry,
+        protectedCollisionCount: candACollision.protectedCollisionCount,
+        protectedCollisionArea: candACollision.protectedCollisionArea,
+        minimumProtectedGap: candACollision.minimumProtectedGap,
+        candidateIntersectsProtectedObject: candACollision.candidateIntersectsProtectedObject,
+        currentProtectedCollisions: candACollision.currentProtectedCollisions,
+        candidateProtectedCollisions: candACollision.candidateProtectedCollisions,
+        newProtectedCollisions: candACollision.newProtectedCollisions,
+        resolvedProtectedCollisions: candACollision.resolvedProtectedCollisions,
+        collidedObjectIds: candACollision.collidedObjectIds,
+        collisionObjectIds: candACollision.collidedObjectIds,
+        safe: candACollision.safe,
+        rejectionReason: candACollision.safe ? null : 'protectedObjectCollision'
+      };
+    }
+
+    const compObjects = [srcObj, tgtObj];
+    const compLevelMap = new Map([[srcId, 0], [tgtId, 1]]);
+    const candBFlowResult = findSafeFlowCandidateGeometry({
+      compObjects,
+      compLevelMap,
+      orientation,
+      compEdges,
+      nonMemberObjects: otherObjects,
+      ownership,
+      objectMap,
+      currentCompleteGeometry
+    });
+
+    const candBGeometry = candBFlowResult.candidateGeometry;
+    const candBCompleteGeom = candBFlowResult.completeGeometry;
+    const candBCollision = candBFlowResult.collisionResult;
+    const candBSafe = candBCollision.safe;
+
+    const candBGeoComparison = compareCompositionsGeometry({
+      currentNodes,
+      candidateNodes: candBGeometry.nodes,
+      currentConnectors,
+      candidateConnectors: candBGeometry.connectors
+    });
+
+    const candidateObjects = compObjects.map((orig) => {
+      const candNode = candBGeometry.nodes.find((n) => n.id === orig.id);
+      if (!candNode) return orig;
+      return {
+        ...orig,
+        position: { x: candNode.x, y: candNode.y },
+        left: candNode.x,
+        top: candNode.y,
+        bounds: {
+          x: candNode.x,
+          y: candNode.y,
+          width: candNode.width,
+          height: candNode.height
+        }
+      };
+    });
+    const candObjectMap = new Map(candidateObjects.map((o) => [o.id, o]));
+
+    const candBQualityMetrics = evaluateCompositionQuality({
+      objects: candidateObjects,
+      objectMap: candObjectMap,
+      explicitEdges: compEdges,
+      structureType: STRUCTURE_TYPES.FLOW,
+      orientation,
+      levelAssignment: { [srcId]: 0, [tgtId]: 1 },
+      connectorAttachmentData: candBGeometry.connectors.map((c) => ({
+        connId: c.connId,
+        sourceShapeId: c.srcId,
+        targetShapeId: c.tgtId,
+        sourceAnchor: c.startPoint,
+        targetAnchor: c.endPoint,
+        topologyConfidence: association.associationConfidence
+      }))
+    });
+
+    const candBBenefit = Math.max(0, candBQualityMetrics.quality - currentQualityMetrics.quality);
+    const candBMovementCost = calculateMovementCost({
+      objectCount: 2,
+      currentQuality: currentQualityMetrics.quality,
+      candidateQuality: candBQualityMetrics.quality
+    });
+    const candBRisk = 0.5;
+
+    const candB = {
+      template: primaryTemplate,
+      actionType: 'cleanFlowchart',
+      orientation,
+      levelAssignment: { [srcId]: 0, [tgtId]: 1 },
+      orderedNodeIds: [srcId, tgtId],
+      verifiedEdges: compEdges,
+      quality: candBQualityMetrics.quality,
+      currentQuality: currentQualityMetrics.quality,
+      currentGeometry: { nodes: currentNodes, connectors: currentConnectors },
+      candidateGeometry: candBGeometry,
+      geoComparison: candBGeoComparison,
+      compositionBenefit: Number(candBBenefit.toFixed(2)),
+      movementCost: candBMovementCost,
+      risk: candBRisk,
+      confidence: association.associationConfidence,
+      reason: `Reorganized detached flow structure between '${srcId}' and '${tgtId}' into aligned ${orientation} flow.`,
+      candidateCompleteBounds: candBCompleteGeom.candidateCompleteBounds,
+      candidateNodeBounds: candBCompleteGeom.candidateNodeBounds,
+      candidateLabelBounds: candBCompleteGeom.candidateLabelBounds,
+      candidateConnectorGeometry: candBCompleteGeom.candidateConnectorGeometry,
+      protectedCollisionCount: candBCollision.protectedCollisionCount,
+      protectedCollisionArea: candBCollision.protectedCollisionArea,
+      minimumProtectedGap: candBCollision.minimumProtectedGap,
+      candidateIntersectsProtectedObject: candBCollision.candidateIntersectsProtectedObject,
+      currentProtectedCollisions: candBCollision.currentProtectedCollisions,
+      candidateProtectedCollisions: candBCollision.candidateProtectedCollisions,
+      newProtectedCollisions: candBCollision.newProtectedCollisions,
+      resolvedProtectedCollisions: candBCollision.resolvedProtectedCollisions,
+      collidedObjectIds: candBCollision.collidedObjectIds,
+      collisionObjectIds: candBCollision.collidedObjectIds,
+      safe: candBSafe,
+      rejectionReason: candBSafe ? null : 'protectedObjectCollision',
+      safeRegion: candBFlowResult.safeRegion
+    };
+
+    const candidates = [];
+    if (candB) candidates.push(candB);
+    if (candA) candidates.push(candA);
+
+    candidates.sort((c1, c2) => {
+      if (c1.safe && !c2.safe) return -1;
+      if (!c1.safe && c2.safe) return 1;
+      const u1 = (c1.compositionBenefit || 0) * (c1.confidence || 0.9) - (c1.movementCost || 0) - (c1.risk || 1);
+      const u2 = (c2.compositionBenefit || 0) * (c2.confidence || 0.9) - (c2.movementCost || 0) - (c2.risk || 1);
+      return u2 - u1;
+    });
+
+    claimedObjectIds.add(srcId);
+    claimedObjectIds.add(tgtId);
+    claimedObjectIds.add(conn.id);
+    claimedConnectorIds.add(conn.id);
+
+    const winningCand = candidates[0] || candB;
+    const structureId = `struct_detached_flow_${conn.id}`;
+
+    structures.push({
+      id: structureId,
+      type: STRUCTURE_TYPES.FLOW,
+      provenance: 'detached-flow-intent',
+      objectIds: [srcId, tgtId],
+      nodeIds: [srcId, tgtId],
+      memberIds: [srcId, tgtId],
+      connectorIds: [conn.id],
+      orientation,
+      template: winningCand.template,
+      levelAssignment: { [srcId]: 0, [tgtId]: 1 },
+      orderedNodeIds: [srcId, tgtId],
+      verifiedEdges: compEdges,
+      confidence: association.associationConfidence,
+      evidence: ['detached-flow-intent', ...association.evidence],
+      detachedFlowAssociation: association,
+      currentComposition: currentQualityMetrics,
+      candidateCompositions: candidates,
+      compositionBenefit: winningCand.compositionBenefit,
+      movementCost: winningCand.movementCost,
+      risk: winningCand.risk,
+      safe: winningCand.safe,
+      reason: winningCand.reason
+    });
+  });
+
+  // Unknown connectors without topology recovery AND without detached flow association become standalone structural/preserved
+  unknownConnectors.filter((cId) => !claimedConnectorIds.has(cId)).forEach((cId) => {
+    claimedObjectIds.add(cId);
+    claimedConnectorIds.add(cId);
+    structures.push({
+      id: `struct_unknown_conn_${cId}`,
+      type: STRUCTURE_TYPES.STANDALONE,
+      objectIds: [cId],
+      connectorIds: [cId],
+      confidence: 0.95,
+      evidence: ['unattached-connector-no-topology'],
+      currentComposition: {
+        quality: 3.0,
+        readability: 3.0,
+        connectorAttachment: 1.5,
+        connectorAttachmentDetails: [{
+          connectorId: cId,
+          sourceShapeId: null,
+          targetShapeId: null,
+          topologyConfidence: 0.0,
+          sourceAttachmentError: 100,
+          targetAttachmentError: 100,
+          connectorAttachmentScore: 1.5,
+          visuallyAttached: false
+        }]
+      },
+      candidateCompositions: [{ template: TEMPLATE_TYPES.PRESERVE, quality: 3.0 }],
+      compositionBenefit: 0.0,
+      movementCost: 0.0,
+      risk: 3.5,
+      reason: `Connector '${cId}' has ambiguous or missing endpoints; preserved without topology invention.`
+    });
   });
 
   // 6. Discover CLUSTER Structures (Sticky Notes or Cards)
@@ -1400,7 +2322,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   });
 
   conceptGroups.forEach((g) => {
-    const unclaimedInGroup = g.objectIds.filter((id) => !claimedObjectIds.has(id) && objectMap.has(id));
+    const unclaimedInGroup = g.objectIds.filter((id) => !claimedObjectIds.has(id) && objectMap.has(id) && !ownership.attachedTextIds?.has(id) && !ownership.ownerByText?.has(id));
     if (unclaimedInGroup.length >= 2) {
       const items = unclaimedInGroup.map((id) => objectMap.get(id));
       const bounds = items.map((o) => getObjectBounds(o));
@@ -1588,7 +2510,26 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
           risk: candRisk,
           utilityScore: utility,
           reason: cand.reason || struct.reason,
-          evidence: [...(struct.evidence || []), `template:${cand.template}`]
+          evidence: [...(struct.evidence || []), `template:${cand.template}`],
+
+          // Phase 4F.19.3A: Complete candidate geometry & collision fields (Modification 2)
+          candidateCompleteBounds: cand.candidateCompleteBounds || null,
+          candidateNodeBounds: cand.candidateNodeBounds || [],
+          candidateLabelBounds: cand.candidateLabelBounds || [],
+          candidateConnectorGeometry: cand.candidateConnectorGeometry || [],
+          protectedCollisionCount: cand.protectedCollisionCount ?? 0,
+          protectedCollisionArea: cand.protectedCollisionArea ?? 0,
+          minimumProtectedGap: cand.minimumProtectedGap ?? Infinity,
+          candidateIntersectsProtectedObject: cand.candidateIntersectsProtectedObject ?? false,
+          currentProtectedCollisions: cand.currentProtectedCollisions ?? 0,
+          candidateProtectedCollisions: cand.candidateProtectedCollisions ?? 0,
+          newProtectedCollisions: cand.newProtectedCollisions ?? 0,
+          resolvedProtectedCollisions: cand.resolvedProtectedCollisions ?? 0,
+          collidedObjectIds: cand.collidedObjectIds || cand.collisionObjectIds || [],
+          collisionObjectIds: cand.collisionObjectIds || cand.collidedObjectIds || [],
+          safe: cand.safe ?? (cand.newProtectedCollisions === 0 && cand.candidateProtectedCollisions === 0),
+          rejectionReason: cand.rejectionReason || (cand.safe === false ? 'protectedObjectCollision' : null),
+          safeRegion: cand.safeRegion || null
         });
       }
     });
@@ -1603,6 +2544,10 @@ export default {
   evaluateCompositionQuality,
   extractSemanticShaftEndpoints,
   computeFlowCandidateGeometry,
+  findSafeFlowCandidateGeometry,
+  buildCompleteCandidateGeometry,
+  evaluateCompleteGeometryCollisions,
+  evaluateTextSafety,
   compareCompositionsGeometry,
   calculateMovementCost,
   calculateCompositionRisk,

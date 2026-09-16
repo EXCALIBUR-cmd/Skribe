@@ -2,7 +2,7 @@
 import { validateCleanupPlan } from './cleanupPlanTypes.js';
 import { getSemanticType, getShapeType } from './cleanupTypes.js';
 import { buildVisualObjectModel, resolveContainerOwnership } from './visualUnits.js';
-import { translatePathCommands, transformConnectorGeometry, parseConnectorPath } from './connectorGeometry.js';
+import { translatePathCommands, transformConnectorGeometry, parseConnectorPath, computePathBounds } from './connectorGeometry.js';
 
 const cloneDeep = (obj) => {
   if (obj === undefined) return undefined;
@@ -55,11 +55,12 @@ const unionBounds = (boundsList, padding = 40, rawObjects = []) => {
 const ACTION_PRIORITY = Object.freeze({
   attachText: 1,
   cleanFlowchart: 2,
-  arrangeGrid: 3,
-  align: 4,
-  equalizeSpacing: 5,
-  normalizeText: 6,
-  preserve: 7
+  repairConnector: 3,
+  arrangeGrid: 4,
+  align: 5,
+  equalizeSpacing: 6,
+  normalizeText: 7,
+  preserve: 8
 });
 
 const executeCleanFlowchart = ({
@@ -792,6 +793,65 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
 
     else if (action.type === 'preserve') {
       executedActions.push(action);
+    }
+
+    // Phase 4F.19.3: repairConnector
+    // The executor applies geometry verbatim from the planner payload.
+    // It MUST NOT infer sourceShapeId, targetShapeId, topology, or structure membership.
+    // If the repair payload is invalid, reject safely.
+    else if (action.type === 'repairConnector') {
+      const repairs = action.connectorRepairs || [];
+      let anyRepairApplied = false;
+
+      for (const repair of repairs) {
+        if (!repair || !repair.connectorId || !repair.repairAccepted) continue;
+
+        const connP = placementMap.get(repair.connectorId);
+        if (!connP) continue;
+
+        // Validate that the connector exists and the payload has required geometry
+        if (!Array.isArray(repair.shaftPath) || repair.shaftPath.length === 0) continue;
+        if (!repair.sourceAnchor || !repair.targetAnchor) continue;
+
+        // Build full path: shaft + arrowhead
+        const fullPath = [...repair.shaftPath.map((c) => [...c])];
+        if (Array.isArray(repair.arrowheadPath)) {
+          repair.arrowheadPath.forEach((c) => fullPath.push([...c]));
+        }
+
+        // Compute bounds from path
+        const pathBounds = computePathBounds(fullPath);
+        if (!pathBounds) continue;
+
+        // Apply the geometry to the placement
+        connP.position = { x: pathBounds.x, y: pathBounds.y };
+        connP.bounds = {
+          x: pathBounds.x,
+          y: pathBounds.y,
+          width: Math.max(2, pathBounds.width),
+          height: Math.max(2, pathBounds.height)
+        };
+        connP.pathCommands = fullPath;
+        connP.pathData = fullPath.map((cmd) => `${cmd[0]} ${cmd.slice(1).map((n) => typeof n === 'number' ? Number(n.toFixed(2)) : n).join(' ')}`).join(' ');
+        connP.path = fullPath;
+        connP.worldPath = fullPath;
+        connP.worldPathCommands = fullPath;
+        connP.sourceAnchor = repair.sourceAnchor;
+        connP.targetAnchor = repair.targetAnchor;
+        connP.shaftPath = repair.shaftPath;
+        connP.arrowheadPath = repair.arrowheadPath;
+        connP.routeType = repair.routeType;
+
+        // Record transformation
+        const hist = transformationHistory.get(repair.connectorId) || [];
+        hist.push({ actionId: action.id, type: 'repairConnector', dx: 0, dy: 0 });
+
+        anyRepairApplied = true;
+      }
+
+      if (anyRepairApplied) {
+        executedActions.push(action);
+      }
     }
   }
 

@@ -24,9 +24,10 @@ import { assertValidCleanupPlan } from './cleanupPlanTypes.js';
 const makeLinkedShape = (id, text, x, y, w = 120, h = 80, shapeType = 'rect') => {
   const shapeId = `shape_${id}`;
   const textId = `text_${id}`;
+  const th = 24;
   return [
     normalizeObject({ id: shapeId, type: 'rect', shapeType, left: x, top: y, width: w, height: h, relationshipMetadata: { attachedTextId: textId } }),
-    normalizeObject({ id: textId, type: 'text', text, left: x + 10, top: y + 25, width: w - 20, height: 24, relationshipMetadata: { parentShapeId: shapeId } })
+    normalizeObject({ id: textId, type: 'text', text, left: x + 10, top: y + (h - th) / 2, width: w - 20, height: th, relationshipMetadata: { parentShapeId: shapeId } })
   ];
 };
 
@@ -777,4 +778,310 @@ test('34. TEST 9 — Clean multi-connector flow: zero cleanup', () => {
   );
   assert.equal(result.summary.objectsMoved, 0, 'Zero objects moved');
   assert.equal(result.summary.connectorsRerouted, 0, 'Zero connectors rerouted');
+});
+
+// ============================================================================
+// Phase 4F.19.3A — Protected-Object-Aware Local Composition Tests
+// ============================================================================
+
+test('35. TEST 1 — Selected flow candidate intersects unrelated text -> candidate rejected', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  // Unrelated text obstacle placed directly where horizontal candidate places level 1 (s2 at x=300, y=95..175)
+  // Initially at x=250..370, y=100..140 so it doesn't overlap s1 (100..220), s2 (260..380, y=240..320), or s3 (420..540)
+  const obstacleText = normalizeObject({
+    id: 'txt_obstacle',
+    type: 'text',
+    text: 'Protected Unrelated Heading',
+    left: 250,
+    top: 100,
+    width: 120,
+    height: 40
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, obstacleText] } };
+  const structures = discoverVisualStructures(model);
+  const flowStruct = structures.find((s) => s.type === STRUCTURE_TYPES.FLOW);
+  assert.ok(flowStruct, 'Flow structure discovered');
+
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+  assert.ok(horizCandidate, 'Horizontal candidate generated');
+
+  // Candidate must be flagged unsafe due to collision with unrelated text
+  assert.equal(horizCandidate.safe, false, 'Candidate is marked safe: false');
+  assert.ok(horizCandidate.newProtectedCollisions > 0, 'Candidate introduces new protected collisions');
+  assert.ok(horizCandidate.collisionObjectIds.includes('txt_obstacle'), 'Collided object IDs contains obstacle text');
+
+  // Selection must reject colliding horizontal candidate
+  const plan = buildCleanupPlan(null, model);
+  const horizFlowAction = plan.actions.find((a) => a.type === 'cleanFlowchart' && a.orientation === 'horizontal');
+  assert.equal(horizFlowAction, undefined, 'Horizontal flow action was safely rejected');
+});
+
+test('36. TEST 2 — Selected flow candidate intersects unrelated shape -> candidate rejected', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  const obstacleShape = normalizeObject({
+    id: 'shape_obstacle',
+    type: 'rect',
+    left: 280,
+    top: 90,
+    width: 120,
+    height: 80
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, obstacleShape] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+  assert.equal(horizCandidate.safe, false, 'Candidate intersecting shape obstacle is marked unsafe');
+  assert.ok(horizCandidate.collisionObjectIds.includes('shape_obstacle'), 'Collided object IDs includes shape_obstacle');
+
+  const plan = buildCleanupPlan(null, model);
+  const horizFlowAction = plan.actions.find((a) => a.type === 'cleanFlowchart' && a.orientation === 'horizontal');
+  assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting shape obstacle is rejected');
+});
+
+test('37. TEST 3 — Candidate is clean but unrelated object occupies target area -> alternate safe candidate or reject', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'A', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'B', 280, 200);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+
+  // Both horizontal and vertical targets are blocked
+  const obstacleHoriz = normalizeObject({ id: 'obs_h', type: 'rect', left: 280, top: 90, width: 100, height: 80 });
+  const obstacleVert = normalizeObject({ id: 'obs_v', type: 'rect', left: 90, top: 240, width: 100, height: 80 });
+
+  const model = { board: { objects: [s1, t1, s2, t2, c1, obstacleHoriz, obstacleVert] } };
+  const plan = buildCleanupPlan(null, model);
+  const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
+  assert.equal(flowAction, undefined, 'All colliding candidates safely rejected');
+});
+
+test('38. TEST 4 — Current composition is already clean and candidate introduces collision -> zero action', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
+  const [s2, t2] = makeLinkedShape('n2', 'End', 280, 150);
+  const c1 = normalizeObject({
+    id: 'c1', type: 'path', isConnector: true,
+    sourceShapeId: s1.id, targetShapeId: s2.id,
+    path: [['M', 220, 190], ['L', 280, 190]]
+  });
+  const obstacle = normalizeObject({ id: 'obs_near', type: 'text', text: 'Preserved note', left: 450, top: 150, width: 100, height: 30 });
+
+  const model = { board: { objects: [s1, t1, s2, t2, c1, obstacle] } };
+  const plan = buildCleanupPlan(null, model);
+  const proposal = executeCleanupPlan(plan, model);
+  const result = buildCleanupResult(plan, proposal, model);
+
+  assert.equal(result.summary.resultType, 'ALREADY_WELL_ORGANIZED');
+  assert.equal(result.summary.objectsMoved, 0);
+});
+
+test('39. TEST 5 — Protected divider lies near composition -> candidate respects divider', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  // Divider line directly intersecting horizontal candidate placement
+  const divider = normalizeObject({
+    id: 'div_1',
+    type: 'line',
+    isStraightLine: true,
+    left: 270,
+    top: 80,
+    width: 5,
+    height: 150
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, divider] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+  assert.equal(horizCandidate.safe, false, 'Candidate intersecting divider line is marked unsafe');
+  assert.ok(horizCandidate.collisionObjectIds.includes('div_1'), 'Collided object IDs includes div_1');
+
+  const plan = buildCleanupPlan(null, model);
+  const horizFlowAction = plan.actions.find((a) => a.type === 'cleanFlowchart' && a.orientation === 'horizontal');
+  assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting divider line is rejected');
+});
+
+test('40. TEST 6 — Creative stroke lies near composition -> candidate respects stroke bounds / protected region', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  // Creative stroke right in the middle
+  const stroke = normalizeObject({
+    id: 'stroke_art',
+    type: 'stroke',
+    isVectorStroke: true,
+    left: 280,
+    top: 100,
+    width: 60,
+    height: 60
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, stroke] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+  assert.equal(horizCandidate.safe, false, 'Candidate intersecting creative stroke is marked unsafe');
+  assert.ok(horizCandidate.collisionObjectIds.includes('stroke_art'), 'Collided object IDs includes stroke_art');
+
+  const plan = buildCleanupPlan(null, model);
+  const horizFlowAction = plan.actions.find((a) => a.type === 'cleanFlowchart' && a.orientation === 'horizontal');
+  assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting creative stroke is rejected');
+});
+
+test('41. TEST 7 — External annotation text near flow -> text remains stationary and flow avoids it', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  const annotation = normalizeObject({
+    id: 'ann_text',
+    type: 'text',
+    text: 'Note: verify architecture',
+    left: 280,
+    top: 95,
+    width: 140,
+    height: 30
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, annotation] } };
+  const plan = buildCleanupPlan(null, model);
+  const proposal = executeCleanupPlan(plan, model);
+
+  // Annotation was untouched and stayed at original position
+  const annPlacement = proposal.placements.find((p) => p.objectId === 'ann_text');
+  assert.ok(annPlacement, 'Placement exists');
+  assert.equal(annPlacement.position.x, 280, 'Annotation X did not move');
+  assert.equal(annPlacement.position.y, 95, 'Annotation Y did not move');
+  assert.ok(plan.untouchedObjectIds.includes('ann_text'), 'Annotation is in untouchedObjectIds');
+});
+
+test('42. TEST 8 — Dependent label inside flow node -> label moves atomically and is not an obstacle', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  // Model without any external obstacle
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+
+  assert.ok(horizCandidate, 'Horizontal candidate generated');
+  // Labels inside nodes must NOT be treated as non-member obstacles
+  assert.equal(horizCandidate.safe, true, 'Candidate is safe when only dependent labels exist');
+  assert.equal(horizCandidate.newProtectedCollisions, 0, 'Zero protected collisions against own labels');
+});
+
+test('43. TEST 9 — Candidate visually better in isolation but causes protected collision -> candidate rejected', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 280); // severe stagger
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 80);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
+
+  const headingObstacle = normalizeObject({
+    id: 'txt_heading',
+    type: 'text',
+    text: 'BIG TITLE',
+    left: 280,
+    top: 90,
+    width: 200,
+    height: 50
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, headingObstacle] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+  const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+
+  // Even though composition benefit is high (> 3.0), hard safety invariant enforces rejection
+  assert.ok(horizCandidate.compositionBenefit > 2.5, 'High visual benefit');
+  assert.equal(horizCandidate.safe, false, 'Candidate marked unsafe');
+
+  const plan = buildCleanupPlan(null, model);
+  assert.equal(plan.actions.some((a) => a.type === 'cleanFlowchart'), false, 'Hard rejection prevents collision');
+});
+
+test('44. TEST 10 — Two candidate layouts: A collides with obstacle, B is safe -> B selected', () => {
+  // 2 nodes with A -> B
+  const [s1, t1] = makeLinkedShape('n1', 'Step 1', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Step 2', 300, 250);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+
+  // Place obstacle blocking horizontal alignment (at x=260..360, y=90..150)
+  const obstacleHoriz = normalizeObject({
+    id: 'obs_horiz',
+    type: 'rect',
+    left: 260,
+    top: 90,
+    width: 100,
+    height: 60
+  });
+
+  const model = { board: { objects: [s1, t1, s2, t2, c1, obstacleHoriz] } };
+  const structures = discoverVisualStructures(model);
+  const candidates = generateCompositionCandidates(structures);
+
+  const candA = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
+  const candB = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_VERTICAL);
+
+  assert.ok(candA, 'Horizontal candidate exists');
+  assert.ok(candB, 'Vertical candidate exists');
+  assert.equal(candA.safe, false, 'Candidate A collides with obstacle');
+  assert.equal(candB.safe, true, 'Candidate B is safe');
+
+  const plan = buildCleanupPlan(null, model);
+  const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
+  assert.ok(flowAction, 'A safe flowchart action was selected');
+  assert.equal(flowAction.orientation, 'vertical', 'Vertical candidate selected over colliding horizontal');
+});
+
+test('45. TEST 11 — Real-board fixture (board1_real.json) preserves SKRIBE heading and returns NO_SAFE_CLEANUP_FOUND', async () => {
+  const fs = await import('fs');
+  const boardData = JSON.parse(fs.readFileSync('C:/Skribe/scratch/board1_real.json', 'utf8'));
+  const normalizedObjects = boardData.objects.map((obj, index) => normalizeObject(obj, index));
+  const { detectRelationships } = await import('./detectRelationships.js');
+  const resolvedObjects = detectRelationships(normalizedObjects);
+  const wsModel = { version: 1, board: { objects: resolvedObjects } };
+
+  const plan = buildCleanupPlan(wsModel);
+  const layout = executeCleanupPlan(plan, wsModel);
+  const result = buildCleanupResult(plan, layout, wsModel);
+
+  // 1. Invariant: no flow candidate collides with SKRIBE heading
+  const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
+  assert.equal(flowAction, undefined, 'Flow action rejected due to protected-object collision with heading');
+
+  // 2. Zero objects moved, zero connectors rerouted
+  assert.equal(result.summary.objectsMoved, 0, 'Zero objects moved');
+  assert.equal(result.summary.connectorsRerouted, 0, 'Zero connectors rerouted');
+
+  // 3. Result semantics: NO_SAFE_CLEANUP_FOUND
+  assert.equal(result.summary.resultType, 'NO_SAFE_CLEANUP_FOUND', 'Result type is NO_SAFE_CLEANUP_FOUND');
+
+  // 4. Preserved objects include SKRIBE heading, Collaborate, Showcase your Creativity, and connectors
+  assert.ok(plan.untouchedObjectIds.includes('obj_1788868926754_eb910'), 'SKRIBE heading preserved untouched');
+  assert.ok(plan.untouchedObjectIds.includes('obj_1788868516042_m2oim'), 'Collaborate text preserved untouched');
+  assert.ok(plan.untouchedObjectIds.includes('obj_1788868719352_co4a5'), 'Showcase text preserved untouched');
 });

@@ -188,34 +188,28 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
   const hasMeaningfulMovement = objectsMoved > 0 || connectorsRerouted > 0;
   const hasMeaningfulLabels = onlyLabels && meaningfulAttachTextCount > 0;
 
-  if (actionResults.length > 0 && (hasMeaningfulMovement || hasMeaningfulLabels)) {
+  if (actionResults.length > 0 && (hasMeaningfulMovement || hasMeaningfulLabels || (actionTypeCounts.repairConnector > 0 && connectorsRerouted > 0))) {
     resultType = 'MEANINGFULLY_CLEANED';
   } else if (actionResults.length === 0 || (!hasMeaningfulMovement && !hasMeaningfulLabels)) {
-    // Check if composition issues were detected but no safe cleanup was generated.
-    // A structure with quality < 8.0 is a meaningful visual defect.
+    // Phase 4F.19.3A Modification 1:
+    // Determine NO_SAFE_CLEANUP_FOUND based strictly on actual opportunity/candidate evidence,
+    // NOT an arbitrary global quality < 8.0 threshold.
+    const opportunities = cleanupPlan?.diagnostics?.opportunities || [];
+    const candidates = cleanupPlan?.diagnostics?.compositionCandidates || [];
+    const rejectedOpps = cleanupPlan?.diagnostics?.rejectedOpportunities || [];
     const structures = cleanupPlan?.diagnostics?.structures || [];
-    const hasUnresolvedDefect = structures.some((s) => {
-      if (['creative', 'structural'].includes(s.type)) return false;
-      // An unattached/floating connector is an unresolved visual defect
-      if (s.id?.startsWith('struct_unknown_conn_') || s.evidence?.includes('unattached-connector-no-topology')) {
+
+    // 1. Actionable defect / cleanup opportunity detected:
+    const hasActionableOpportunity = opportunities.some((o) => {
+      if (['brokenFlow', 'overlap', 'clutteredCluster', 'connectorCrossing', 'connectorAttachmentDefect'].includes(o.type)) {
         return true;
       }
-      if (s.type === 'standalone') return false;
-      return (
-        s.currentComposition &&
-        typeof s.currentComposition.quality === 'number' &&
-        s.currentComposition.quality < 8.0
-      );
+      if (o.type === 'detachedText') {
+        return o.metadata?.isOutsideContainer || (o.metadata?.distFromCenter ?? 0) > 4;
+      }
+      return false;
     });
 
-    // Also check for unresolved connector attachment issues
-    const hasConnectorDefect = structures.some((s) =>
-      s.currentComposition &&
-      typeof s.currentComposition.connectorAttachment === 'number' &&
-      s.currentComposition.connectorAttachment < 8.0
-    );
-
-    // Also check if any connector on the board has unattached / floating endpoints
     const hasFloatingConnectors = rawObjects.some((o) => {
       const sem = getSemanticType(o);
       if (sem === 'connector' || o.isConnector) {
@@ -226,14 +220,36 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
       return false;
     });
 
-    if (hasUnresolvedDefect || hasConnectorDefect || hasFloatingConnectors) {
+    const hasDetachedConnectors = structures.some((s) => {
+      const att = s.currentComposition?.connectorAttachment;
+      if (att !== null && att !== undefined && att < 8.0) return true;
+      const details = s.currentComposition?.connectorAttachmentDetails || [];
+      return details.some((d) => (d.sourceAttachmentError ?? 0) > 10 || (d.targetAttachmentError ?? 0) > 10);
+    });
+
+    const hasActionableCandidate = candidates.some((c) =>
+      typeof c.compositionBenefit === 'number' && c.compositionBenefit >= 1.5
+    );
+
+    const actionableDefectDetected = hasActionableOpportunity || hasFloatingConnectors || hasDetachedConnectors || hasActionableCandidate;
+
+    // 2. No candidate passed the required safety/confidence/risk gates:
+    const noSafeCandidateAccepted = actionResults.length === 0 || (!hasMeaningfulMovement && !hasMeaningfulLabels);
+
+    // State-based classification: an observed defect with no safe repair = NO_SAFE_CLEANUP_FOUND.
+    // This gate does NOT require candidatesConsidered > 0. A floating connector with
+    // unresolved topology produces zero formal candidates but is still a visible defect.
+    if (actionableDefectDetected && noSafeCandidateAccepted) {
       resultType = 'NO_SAFE_CLEANUP_FOUND';
+    } else {
+      resultType = 'ALREADY_WELL_ORGANIZED';
     }
   }
 
   const actionParts = [];
   if (meaningfulAttachTextCount > 0) actionParts.push(`Fixed ${meaningfulAttachTextCount} label${meaningfulAttachTextCount > 1 ? 's' : ''}`);
   if (actionTypeCounts.cleanFlowchart) actionParts.push(`Cleaned ${actionTypeCounts.cleanFlowchart} flowchart${actionTypeCounts.cleanFlowchart > 1 ? 's' : ''}`);
+  if (actionTypeCounts.repairConnector) actionParts.push(`Repaired ${actionTypeCounts.repairConnector} connector${actionTypeCounts.repairConnector > 1 ? 's' : ''}`);
   if (actionTypeCounts.arrangeGrid) actionParts.push(`Arranged ${actionTypeCounts.arrangeGrid} note cluster${actionTypeCounts.arrangeGrid > 1 ? 's' : ''}`);
   if (actionTypeCounts.align) actionParts.push(`Aligned ${actionTypeCounts.align} shape group${actionTypeCounts.align > 1 ? 's' : ''}`);
   if (actionTypeCounts.equalizeSpacing) actionParts.push(`Equalized ${actionTypeCounts.equalizeSpacing} sequence${actionTypeCounts.equalizeSpacing > 1 ? 's' : ''}`);

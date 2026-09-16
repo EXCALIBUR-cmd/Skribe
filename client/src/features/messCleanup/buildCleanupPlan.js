@@ -18,17 +18,19 @@ import {
   discoverVisualStructures,
   generateCompositionCandidates
 } from './discoverVisualStructures.js';
+import { generateConnectorRepairs } from './connectorRepair.js';
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
 
 export const ACTION_PRIORITY = Object.freeze({
   attachText: 1,
   cleanFlowchart: 2,
-  arrangeGrid: 3,
-  align: 4,
-  equalizeSpacing: 5,
-  normalizeText: 6,
-  preserve: 7
+  repairConnector: 3,
+  arrangeGrid: 4,
+  align: 5,
+  equalizeSpacing: 6,
+  normalizeText: 7,
+  preserve: 8
 });
 
 export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {}) => {
@@ -338,6 +340,42 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );
 
+  // Phase 4F.19.3: Generate connector repairs for verified connectors
+  // Repairs are generated ONCE here and stored in the plan.
+  // The SAME payload is used for preview, approval, and apply (Amendment 2).
+  const repairResult = generateConnectorRepairs(wsModel, visualStructures, options);
+  const connectorRepairActions = [];
+
+  if (repairResult.connectorRepairs.length > 0) {
+    for (const repair of repairResult.connectorRepairs) {
+      // Skip if connector is already owned by a layout action (e.g. cleanFlowchart)
+      if (layoutOwnership.has(repair.connectorId)) continue;
+
+      const repairAction = {
+        id: `act_connRepair_${repair.connectorId}`,
+        type: 'repairConnector',
+        objectIds: [repair.connectorId],
+        ownedObjectIds: [repair.connectorId],
+        confidence: repair.topologyConfidence,
+        reason: `Verified connector geometry repair: source attachment ${repair.sourceAttachmentBefore.toFixed(1)}px → ${repair.sourceAttachmentAfter.toFixed(1)}px, target attachment ${repair.targetAttachmentBefore.toFixed(1)}px → ${repair.targetAttachmentAfter.toFixed(1)}px`,
+        evidence: [`topology_confidence:${repair.topologyConfidence.toFixed(3)}`, `route_type:${repair.routeType}`],
+        connectorRepairs: [repair]
+      };
+
+      connectorRepairActions.push(repairAction);
+      allModifiedObjectIds.add(repair.connectorId);
+      layoutOwnership.set(repair.connectorId, repairAction.id);
+      ownershipByObject.set(repair.connectorId, repairAction.id);
+    }
+  }
+
+  // Recalculate untouched after adding connector repairs
+  const finalUntouchedObjectIds = sortStrings(
+    allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
+  );
+
+  const finalExecutableActions = [...executableActions, ...connectorRepairActions];
+
   const allSuppressedActions = [...suppressedActions];
   const allSuppressionReasons = [...suppressionReasons];
 
@@ -365,25 +403,28 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     rejectedOpportunities: [...(budgetRejected || []), ...(resolutionRejected || [])],
     budgetReport,
     usefulActionMetrics: {
-      structuralActionCount: executableActions.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length,
-      spatialActionCount: executableActions.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length,
-      cosmeticActionCount: executableActions.filter((a) => ['normalizeText', 'attachText'].includes(a.type)).length
+      structuralActionCount: finalExecutableActions.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length,
+      spatialActionCount: finalExecutableActions.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length,
+      cosmeticActionCount: finalExecutableActions.filter((a) => ['normalizeText', 'attachText'].includes(a.type)).length,
+      connectorRepairCount: connectorRepairActions.length
     },
-    actionCount: executableActions.length,
-    highConfidenceActionCount: executableActions.filter((a) => a.confidence >= HIGH_CONFIDENCE).length,
-    untouchedObjectCount: untouchedObjectIds.length,
-    unsupportedActionCount: allOpportunities.length - executableActions.length,
-    actionOrder: executableActions.map((a) => a.id),
+    actionCount: finalExecutableActions.length,
+    highConfidenceActionCount: finalExecutableActions.filter((a) => a.confidence >= HIGH_CONFIDENCE).length,
+    untouchedObjectCount: finalUntouchedObjectIds.length,
+    unsupportedActionCount: allOpportunities.length - finalExecutableActions.length,
+    actionOrder: finalExecutableActions.map((a) => a.id),
     ownershipByObject: Object.fromEntries(ownershipByObject.entries()),
     conflictsDetected,
     suppressedActions: allSuppressedActions,
-    suppressionReasons: allSuppressionReasons
+    suppressionReasons: allSuppressionReasons,
+    connectorRepairDiagnostics: repairResult.diagnostics,
+    rejectedConnectorRepairs: repairResult.rejectedRepairs
   };
 
   const plan = {
     version: 1,
-    actions: executableActions,
-    untouchedObjectIds,
+    actions: finalExecutableActions,
+    untouchedObjectIds: finalUntouchedObjectIds,
     diagnostics
   };
 
