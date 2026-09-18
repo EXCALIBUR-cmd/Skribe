@@ -474,6 +474,7 @@ export const MessCleanupPreviewModal = ({
                           <path
                             key={`line_${item.originalObjectId || 'l'}_${idx}`}
                             d={svgPath}
+                            fill="none"
                             stroke={item.stroke || '#64748b'}
                             strokeWidth={item.strokeWidth !== null && item.strokeWidth !== undefined ? Math.max(1, item.strokeWidth * scale) : Math.max(1, 2 * scale)}
                             strokeDasharray={item.strokeDashArray ? item.strokeDashArray.map((d) => Math.max(1, d * scale)).join(' ') : undefined}

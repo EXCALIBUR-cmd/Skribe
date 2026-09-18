@@ -296,8 +296,15 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
       return { action: null, rejectedReason: repairPayload?.repairRejectedReason || 'Connector repair could not be computed' };
     }
 
+    const ownership = context.ownership;
+    const memberOwnedTextIds = new Set();
+    const srcTexts = ownership?.ownedByOwner?.get(assoc.sourceCandidateId) || [];
+    srcTexts.forEach((tId) => memberOwnedTextIds.add(tId));
+    const tgtTexts = ownership?.ownedByOwner?.get(assoc.targetCandidateId) || [];
+    tgtTexts.forEach((tId) => memberOwnedTextIds.add(tId));
+
     const nonMemberObjects = Array.from(objectMap.values()).filter(
-      (o) => o.id !== connId && o.id !== assoc.sourceCandidateId && o.id !== assoc.targetCandidateId
+      (o) => o.id !== connId && o.id !== assoc.sourceCandidateId && o.id !== assoc.targetCandidateId && !memberOwnedTextIds.has(o.id)
     );
     const safety = validateConnectorRepairSafety(repairPayload, nonMemberObjects, new Set([connId, assoc.sourceCandidateId, assoc.targetCandidateId]));
     if (!safety.safe) {
@@ -320,7 +327,7 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
     };
   }
 
-  
+
   if (opportunity.category === 'composition' || opportunity.structureId) {
     const actId = opportunity.id.startsWith('cand_')
       ? opportunity.id.replace(/^cand_/, 'act_')

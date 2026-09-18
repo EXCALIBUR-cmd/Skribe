@@ -91,7 +91,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   });
 
-  
+
   const visualStructures = discoverVisualStructures(wsModel, semanticScene, options);
   const compositionCandidates = generateCompositionCandidates(visualStructures, options);
   const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, options);
@@ -311,6 +311,24 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
       continue;
     }
 
+    if (action.type === 'repairConnector') {
+      const connId = action.objectIds[0];
+      const conflictingOwner = layoutOwnership.has(connId);
+      if (conflictingOwner) {
+        suppressedActions.push(action.id);
+        suppressionReasons.push({
+          actionId: action.id,
+          reason: `Connector '${connId}' is already owned by higher-priority action '${layoutOwnership.get(connId)}'`
+        });
+        continue;
+      }
+      action.ownedObjectIds = [connId];
+      resolvedActions.push(action);
+      layoutOwnership.set(connId, action.id);
+      ownershipByObject.set(connId, action.id);
+      continue;
+    }
+
     if (action.type === 'preserve') {
       const targetIds = action.objectIds || [];
       const conflictingOwner = targetIds.find((id) => layoutOwnership.has(id));
@@ -340,15 +358,15 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );
 
-  
-  
-  
-  const repairResult = generateConnectorRepairs(wsModel, visualStructures, options);
+
+
+
+  const repairResult = generateConnectorRepairs(wsModel, visualStructures, { ...options, ownership });
   const connectorRepairActions = [];
 
   if (repairResult.connectorRepairs.length > 0) {
     for (const repair of repairResult.connectorRepairs) {
-      
+
       if (layoutOwnership.has(repair.connectorId)) continue;
 
       const repairAction = {
@@ -357,7 +375,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
         objectIds: [repair.connectorId],
         ownedObjectIds: [repair.connectorId],
         confidence: repair.topologyConfidence,
-        reason: `Verified connector geometry repair: source attachment ${repair.sourceAttachmentBefore.toFixed(1)}px → ${repair.sourceAttachmentAfter.toFixed(1)}px, target attachment ${repair.targetAttachmentBefore.toFixed(1)}px → ${repair.targetAttachmentAfter.toFixed(1)}px`,
+        reason: `Verified connector geometry repair: source attachment ${repair.sourceAttachmentBefore.toFixed(1)}px â†’ ${repair.sourceAttachmentAfter.toFixed(1)}px, target attachment ${repair.targetAttachmentBefore.toFixed(1)}px â†’ ${repair.targetAttachmentAfter.toFixed(1)}px`,
         evidence: [`topology_confidence:${repair.topologyConfidence.toFixed(3)}`, `route_type:${repair.routeType}`],
         connectorRepairs: [repair]
       };
@@ -369,7 +387,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   }
 
-  
+
   const finalUntouchedObjectIds = sortStrings(
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );

@@ -59,7 +59,7 @@ export const buildVisualObjectModel = (workspaceModel) => {
       y: bounds.y + bounds.height / 2
     };
 
-    
+
     let rotation = rawRotation;
     if (kind === 'text') {
       const parentId = obj.relationshipMetadata?.parentShapeId;
@@ -111,18 +111,77 @@ const isPointInside = (point, box, tolerance = 10) => (
   point.y <= box.y + box.height + tolerance
 );
 
+export const findExternalLabelAssociation = (textVo, containers, claims) => {
+  if (textVo.originalObject?.metadata?.isAnnotation) return null;
+
+  const candidates = [];
+  containers.forEach((c) => {
+    if (textVo.bounds.width > c.bounds.width * 1.5) return;
+
+    const dx = Math.max(0, c.bounds.x - (textVo.bounds.x + textVo.bounds.width), textVo.bounds.x - (c.bounds.x + c.bounds.width));
+    const dy = Math.max(0, c.bounds.y - (textVo.bounds.y + textVo.bounds.height), textVo.bounds.y - (c.bounds.y + c.bounds.height));
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 40) return;
+
+    const textCX = textVo.bounds.x + textVo.bounds.width / 2;
+    const textCY = textVo.bounds.y + textVo.bounds.height / 2;
+    const cCX = c.bounds.x + c.bounds.width / 2;
+    const cCY = c.bounds.y + c.bounds.height / 2;
+
+    let placement = null;
+    let alignError = 1;
+
+    if (textCY < c.bounds.y) {
+      placement = 'above';
+      alignError = Math.min(Math.abs(textCX - cCX), Math.abs(textVo.bounds.x - c.bounds.x), Math.abs((textVo.bounds.x + textVo.bounds.width) - (c.bounds.x + c.bounds.width))) / c.bounds.width;
+    } else if (textCY > c.bounds.y + c.bounds.height) {
+      placement = 'below';
+      alignError = Math.min(Math.abs(textCX - cCX), Math.abs(textVo.bounds.x - c.bounds.x), Math.abs((textVo.bounds.x + textVo.bounds.width) - (c.bounds.x + c.bounds.width))) / c.bounds.width;
+    } else if (textCX < c.bounds.x) {
+      placement = 'left';
+      alignError = Math.min(Math.abs(textCY - cCY), Math.abs(textVo.bounds.y - c.bounds.y), Math.abs((textVo.bounds.y + textVo.bounds.height) - (c.bounds.y + c.bounds.height))) / c.bounds.height;
+    } else if (textCX > c.bounds.x + c.bounds.width) {
+      placement = 'right';
+      alignError = Math.min(Math.abs(textCY - cCY), Math.abs(textVo.bounds.y - c.bounds.y), Math.abs((textVo.bounds.y + textVo.bounds.height) - (c.bounds.y + c.bounds.height))) / c.bounds.height;
+    }
+
+    if (!placement || alignError > 0.5) return;
+
+    const proxScore = Math.max(0, 1 - (dist / 40));
+    const alignScore = Math.max(0, 1 - alignError);
+    const score = (proxScore * 0.4) + (alignScore * 0.6);
+
+    candidates.push({ containerId: c.objectId, score, placement });
+  });
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  if (candidates.length === 0) return null;
+  const best = candidates[0];
+  if (best.score < 0.80) return null;
+  if (candidates.length > 1 && best.score - candidates[1].score < 0.05) return null;
+
+  return {
+    containerId: best.containerId,
+    relationshipType: 'inferred-external',
+    confidence: best.score,
+    placement: best.placement
+  };
+};
+
 export const resolveContainerOwnership = (visualObjects, objectMap) => {
   const isContainer = (vo) => !!vo && (vo.kind === 'shape' || vo.kind === 'sticky-note');
   const isText = (vo) => !!vo && vo.kind === 'text';
   const isStroke = (vo) => !!vo && (vo.kind === 'freehand' || vo.semanticType === 'stroke');
   const areaOf = (vo) => Math.max(1, vo.bounds.width) * Math.max(1, vo.bounds.height);
 
-  const claims = new Map(); 
-  const claim = (childId, ownerId, tier, area) => {
+  const claims = new Map();
+  const claim = (childId, ownerId, tier, area, relType = 'explicit') => {
     if (!childId || !ownerId || childId === ownerId) return;
     const prev = claims.get(childId);
     if (!prev || tier < prev.tier || (tier === prev.tier && area < prev.area)) {
-      claims.set(childId, { ownerId, tier, area });
+      claims.set(childId, { ownerId, tier, area, relationshipType: relType });
     }
   };
 
@@ -172,18 +231,28 @@ export const resolveContainerOwnership = (visualObjects, objectMap) => {
     if (best) claim(vo.objectId, best.objectId, 2, bestArea);
   });
 
+  visualObjects.forEach((vo) => {
+    if (!isText(vo) || claims.has(vo.objectId)) return;
+    const assoc = findExternalLabelAssociation(vo, containers, claims);
+    if (assoc) {
+      claim(vo.objectId, assoc.containerId, 3, areaOf(objectMap.get(assoc.containerId)), assoc.relationshipType);
+    }
+  });
+
   const ownerByText = new Map();
   const ownedByOwner = new Map();
   const ownerTierByText = new Map();
+  const relationshipTypeByText = new Map();
   claims.forEach((info, childId) => {
     ownerByText.set(childId, info.ownerId);
     ownerTierByText.set(childId, info.tier);
+    relationshipTypeByText.set(childId, info.relationshipType);
     if (!ownedByOwner.has(info.ownerId)) ownedByOwner.set(info.ownerId, []);
     ownedByOwner.get(info.ownerId).push(childId);
   });
   ownedByOwner.forEach((ids) => ids.sort((a, b) => String(a).localeCompare(String(b))));
 
-  return { ownedByOwner, ownerByText, ownerTierByText };
+  return { ownedByOwner, ownerByText, ownerTierByText, relationshipTypeByText };
 };
 
 export const assertShapeGeometryIntegrity = (unit) => {
@@ -215,7 +284,7 @@ export const assertPlacementsWithinCanvas = (proposal) => {
     const pMaxX = pBounds.x + pBounds.width;
     const pMaxY = pBounds.y + pBounds.height;
 
-    const tolerance = 2; 
+    const tolerance = 2;
     if (
       pBounds.x < canvas.x - tolerance ||
       pBounds.y < canvas.y - tolerance ||
@@ -260,7 +329,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null, opti
       relationshipMetadata: origObj.relationshipMetadata || {},
       position: { x: localPos.x, y: localPos.y },
       rotation,
-      scale: { x: 1, y: 1 }, 
+      scale: { x: 1, y: 1 },
       anchor,
       size,
       bounds: getPlacementBounds(localPos, size, anchor, rotation),
@@ -487,7 +556,7 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null, opti
     atomicUnits.push(unit);
   });
 
-  const NOTE_TEXT_PADDING = 18; 
+  const NOTE_TEXT_PADDING = 18;
   visualObjects.forEach((vo) => {
     if (assignedIds.has(vo.objectId) || vo.kind !== 'sticky-note') return;
 
@@ -675,10 +744,10 @@ export const reconstructVisualUnits = (visualObjects, semanticScene = null, opti
     assignedIds.add(vo.objectId);
   });
 
-  
-  
-  
-  
+
+
+
+
   const unitIdByObject = new Map();
   atomicUnits.forEach((u) => u.localPlacements.forEach((p) => unitIdByObject.set(p.objectId, u.unitId)));
   ownerByText.forEach((ownerId, textId) => {

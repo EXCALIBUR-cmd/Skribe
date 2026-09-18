@@ -11,8 +11,8 @@ import { buildCleanupPlan, ACTION_PRIORITY } from './buildCleanupPlan.js';
 import { normalizeObject } from './normalizeObjects.js';
 
 test('1. Explicit graph produces cleanFlowchart', () => {
-  const shapeA = normalizeObject({ id: 'shape_A', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
-  const shapeB = normalizeObject({ id: 'shape_B', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const shapeA = normalizeObject({ id: 'shape_A', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const shapeB = normalizeObject({ id: 'shape_B', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
   const conn = normalizeObject({
     id: 'conn_AB',
     type: 'path',
@@ -76,30 +76,32 @@ test('3. Shape -> sticky note relationship is an annotation/callout and not a fl
 });
 
 test('4. Multi-node chain produces high confidence (>= 0.98)', () => {
-  const shapeA = normalizeObject({ id: 'shape_A', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
-  const shapeB = normalizeObject({ id: 'shape_B', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
-  const shapeC = normalizeObject({ id: 'shape_C', type: 'rect', left: 500, top: 100, width: 100, height: 80 });
-  const conn1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: 'shape_A', targetShapeId: 'shape_B', left: 200, top: 140, width: 100, height: 10 });
-  const conn2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: 'shape_B', targetShapeId: 'shape_C', left: 400, top: 140, width: 100, height: 10 });
+  const s1 = normalizeObject({ id: 's1', type: 'rect', left: 500, top: 100, width: 100, height: 80 });
+  const s2 = normalizeObject({ id: 's2', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const s3 = normalizeObject({ id: 's3', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
 
-  const model = { board: { objects: [shapeA, shapeB, shapeC, conn1, conn2] } };
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: 's1', targetShapeId: 's2', left: 200, top: 140, width: 100, height: 10 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: 's2', targetShapeId: 's3', left: 400, top: 140, width: 100, height: 10 });
+
+  const model = { board: { objects: [s1, s2, s3, c1, c2] } };
   const plan = buildCleanupPlan(null, model);
 
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
   assert.ok(flowAction);
   assert.equal(flowAction.confidence, 0.98);
-  assert.deepEqual(flowAction.objectIds.sort(), ['shape_A', 'shape_B', 'shape_C']);
+  assert.deepEqual(flowAction.objectIds.sort(), ['s1', 's2', 's3']);
   assert.deepEqual(flowAction.connectorIds.sort(), ['c1', 'c2']);
 });
 
 test('5. Branching DAG produces high confidence', () => {
-  const root = normalizeObject({ id: 'root', type: 'rect', left: 100, top: 200, width: 100, height: 80 });
-  const b1 = normalizeObject({ id: 'b1', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
-  const b2 = normalizeObject({ id: 'b2', type: 'rect', left: 300, top: 300, width: 100, height: 80 });
-  const conn1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: 'root', targetShapeId: 'b1', left: 200, top: 150, width: 100, height: 50 });
-  const conn2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: 'root', targetShapeId: 'b2', left: 200, top: 250, width: 100, height: 50 });
+  const root = normalizeObject({ id: 'root', type: 'rect', left: 500, top: 100, width: 100, height: 80 });
+  const b1 = normalizeObject({ id: 'b1', type: 'rect', left: 300, top: 20, width: 100, height: 80 });
+  const b2 = normalizeObject({ id: 'b2', type: 'rect', left: 300, top: 180, width: 100, height: 80 });
 
-  const model = { board: { objects: [root, b1, b2, conn1, conn2] } };
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: 'root', targetShapeId: 'b1', left: 200, top: 60, width: 100, height: 40 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: 'root', targetShapeId: 'b2', left: 200, top: 140, width: 100, height: 40 });
+
+  const model = { board: { objects: [root, b1, b2, c1, c2] } };
   const plan = buildCleanupPlan(null, model);
 
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
@@ -118,18 +120,17 @@ test('6. Unknown connector is preserved', () => {
 });
 
 test('7. Explicit connector metadata increases confidence', () => {
-  const shapeA = normalizeObject({ id: 'shape_A', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
-  const shapeB = normalizeObject({ id: 'shape_B', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const sA = normalizeObject({ id: 'sA', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const sB = normalizeObject({ id: 'sB', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
+
+  // Valid explicit connector
   const conn = normalizeObject({
-    id: 'conn_explicit',
-    type: 'path',
-    isConnector: true,
-    sourceShapeId: 'shape_A',
-    targetShapeId: 'shape_B',
+    id: 'conn_AB', type: 'path', isConnector: true,
+    sourceShapeId: 'sA', targetShapeId: 'sB',
     left: 200, top: 140, width: 100, height: 10
   });
 
-  const model = { board: { objects: [shapeA, shapeB, conn] } };
+  const model = { board: { objects: [sA, sB, conn] } };
   const plan = buildCleanupPlan(null, model);
 
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
@@ -138,14 +139,19 @@ test('7. Explicit connector metadata increases confidence', () => {
 });
 
 test('8. Semantic graph context increases confidence', () => {
-  const shapeA = normalizeObject({ id: 'shape_A', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
-  const shapeB = normalizeObject({ id: 'shape_B', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
-  const conn = normalizeObject({ id: 'conn_1', type: 'path', isConnector: true, sourceShapeId: 'shape_A', targetShapeId: 'shape_B', left: 200, top: 140, width: 100, height: 10 });
+  const sA = normalizeObject({ id: 'sA', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const sB = normalizeObject({ id: 'sB', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
+
+  const conn = normalizeObject({
+    id: 'conn_AB', type: 'path', isConnector: true,
+    sourceShapeId: 'sA', targetShapeId: 'sB',
+    left: 200, top: 140, width: 100, height: 10
+  });
   const scene = {
-    groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['shape_A', 'shape_B', 'conn_1'] }]
+    groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['sA', 'sB', 'conn_AB'] }]
   };
 
-  const model = { board: { objects: [shapeA, shapeB, conn] } };
+  const model = { board: { objects: [sA, sB, conn] } };
   const plan = buildCleanupPlan(scene, model);
 
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');

@@ -292,3 +292,73 @@ test('6. All Golden Board shapes, labels, connectors, strokes, and divider rende
 
   assert.equal(visibleCount, rawObjects.length, 'All 30 golden board objects are visible in preview');
 });
+
+test('TEST 1 ï¿½ TEXT PRESERVATION', () => {
+  const shape = { id: 's1', type: 'rect', left: 100, top: 100, width: 200, height: 100 };
+  const text = { id: 't1', type: 'text', text: 'Visible Text', left: 110, top: 110, width: 180, height: 20 };
+  const model = { board: { objects: [shape, text].map(normalizeObject) } };
+  const proposal = createLayoutProposal(null, model);
+  const renderModel = buildPreviewRenderModel(model, proposal);
+
+  assert.equal(renderModel.objects[0].originalObjectId, 's1');
+  assert.equal(renderModel.objects[1].originalObjectId, 't1');
+  assert.equal(renderModel.objects[1].text, 'Visible Text');
+  assert.equal(renderModel.objects[1].type, 'text');
+});
+
+test('TEST 2 ï¿½ EXTERNAL LABEL PRESERVATION', () => {
+  const shape = { id: 's1', type: 'rect', left: 100, top: 100, width: 200, height: 100 };
+  const extText = { id: 't1', type: 'text', text: 'External Label', left: 100, top: 50, width: 200, height: 20 };
+  const model = { board: { objects: [shape, extText].map(normalizeObject) } };
+  const plan = buildCleanupPlan(null, model);
+  const proposal = createLayoutProposal(null, model);
+  const renderModel = buildPreviewRenderModel(model, proposal);
+
+  assert.equal(renderModel.objects[0].originalObjectId, 's1');
+  assert.equal(renderModel.objects[1].originalObjectId, 't1');
+
+  const textPlanActions = plan.actions.filter(a => a.objectIds.includes('t1'));
+  assert.equal(textPlanActions.some(a => a.type === 'attachText'), false, 'no attachText generated');
+
+  const shapePlace = proposal.placements.find(p => p.objectId === 's1');
+  const textPlace = proposal.placements.find(p => p.objectId === 't1');
+  assert.equal(shapePlace.position.x - 100, textPlace.position.x - 100);
+});
+
+test('TEST 3 ï¿½ FREEHAND FIDELITY', () => {
+  const stroke = { id: 'line_1', type: 'path', left: 100, top: 100, width: 50, height: 50, path: [['M', 0, 0], ['L', 50, 50]], stroke: 'black', strokeWidth: 4, fill: 'transparent' };
+  const model = { board: { objects: [stroke].map(normalizeObject) } };
+  const proposal = createLayoutProposal(null, model);
+  const renderModel = buildPreviewRenderModel(model, proposal);
+
+  const prev = renderModel.objects[0];
+  assert.equal(prev.type, 'line');
+  assert.equal(prev.stroke, 'black');
+  assert.equal(prev.strokeWidth, 4);
+  assert.equal(prev.fill, 'transparent');
+});
+
+test('TEST 4 ï¿½ FREEHAND NON-MOVEMENT', () => {
+  const stroke = { id: 'line_1', type: 'path', left: 100, top: 100, width: 50, height: 50, path: [['M', 0, 0], ['L', 50, 50]] };
+  const model = { board: { objects: [stroke].map(normalizeObject) } };
+  const proposal = createLayoutProposal(null, model);
+
+  const placement = proposal.placements.find(p => p.objectId === 'line_1');
+  assert.equal(placement.bounds.x, 100);
+  assert.equal(placement.bounds.y, 100);
+});
+
+test('TEST 5 ï¿½ COMBINED BOARD', () => {
+  const rect = { id: 'rect1', type: 'rect', left: 100, top: 100, width: 100, height: 100 };
+  const text = { id: 'text1', type: 'text', text: 'Label', left: 110, top: 110, width: 80, height: 20 };
+  const circle = { id: 'circ1', type: 'circle', left: 400, top: 100, width: 100, height: 100 };
+  const conn = { id: 'conn1', type: 'path', isConnector: true, sourceShapeId: 'rect1', targetShapeId: 'circ1', left: 200, top: 150, width: 200, height: 10 };
+  const stroke = { id: 'stroke1', type: 'path', left: 300, top: 300, width: 50, height: 50, path: [['M',0,0],['L',50,50]] };
+
+  const model = { board: { objects: [rect, text, circle, conn, stroke].map(normalizeObject) } };
+  const proposal = createLayoutProposal(null, model);
+  const renderModel = buildPreviewRenderModel(model, proposal);
+
+  const ids = renderModel.objects.map(o => o.originalObjectId);
+  assert.deepEqual(ids, ['rect1', 'text1', 'circ1', 'conn1', 'stroke1']);
+});

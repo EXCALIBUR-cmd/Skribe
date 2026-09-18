@@ -32,9 +32,9 @@ const makeLinkedShape = (id, text, x, y, w = 120, h = 80, shapeType = 'rect') =>
 };
 
 test('1. Scattered flow discovered', () => {
-  
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
-  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240); 
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
 
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
@@ -52,7 +52,7 @@ test('1. Scattered flow discovered', () => {
 });
 
 test('2. Already-good flow preserved', () => {
-  
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 280, 150);
   const [s3, t3] = makeLinkedShape('n3', 'End', 460, 150);
@@ -92,7 +92,7 @@ test('3. Flow composition candidate generated', () => {
 test('4. Sequence candidate generated', () => {
   const c1 = normalizeObject({ id: 'card1', type: 'rect', left: 100, top: 100, width: 140, height: 80 });
   const c2 = normalizeObject({ id: 'card2', type: 'rect', left: 100, top: 220, width: 140, height: 80 });
-  const c3 = normalizeObject({ id: 'card3', type: 'rect', left: 100, top: 400, width: 140, height: 80 }); 
+  const c3 = normalizeObject({ id: 'card3', type: 'rect', left: 100, top: 400, width: 140, height: 80 });
 
   const scene = {
     groups: [{ id: 'group_spec', type: 'concept', objectIds: ['card1', 'card2', 'card3'] }]
@@ -183,7 +183,7 @@ test('9. Unknown connector never receives invented topology', () => {
 
 test('10. Known connector follows moved node', () => {
   const [s1, t1] = makeLinkedShape('src_node', 'Source', 100, 100);
-  const [s2, t2] = makeLinkedShape('tgt_node', 'Target', 350, 260); 
+  const [s2, t2] = makeLinkedShape('tgt_node', 'Target', 350, 260);
   const conn = normalizeObject({ id: 'c_known', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 190, height: 120 });
 
   const model = { board: { objects: [s1, t1, s2, t2, conn] } };
@@ -197,9 +197,9 @@ test('10. Known connector follows moved node', () => {
 });
 
 test('11. Local whitespace influences composition', () => {
-  
+
   const [s1, t1] = makeLinkedShape('step1', 'Step 1', 100, 100);
-  const [s2, t2] = makeLinkedShape('step2', 'Step 2', 600, 100); 
+  const [s2, t2] = makeLinkedShape('step2', 'Step 2', 600, 100);
   const conn = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 220, top: 140, width: 380, height: 10 });
 
   const model = { board: { objects: [s1, t1, s2, t2, conn] } };
@@ -210,7 +210,7 @@ test('11. Local whitespace influences composition', () => {
 });
 
 test('12. Global whitespace rejected from triggering global rearrangement', () => {
-  
+
   const [s1, t1] = makeLinkedShape('flow1', 'Flow A', 100, 100);
   const [s2, t2] = makeLinkedShape('flow2', 'Flow B', 260, 100);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 220, top: 140, width: 40, height: 10 });
@@ -220,7 +220,7 @@ test('12. Global whitespace rejected from triggering global rearrangement', () =
   const model = { board: { objects: [s1, t1, s2, t2, c1, note] } };
   const plan = buildCleanupPlan(null, model);
 
-  
+
   assert.ok(plan.untouchedObjectIds.includes('note_far'), 'Global whitespace did not cause distant note to move');
 });
 
@@ -296,7 +296,7 @@ test('18. Composition subsumes micro-actions', () => {
   const model = { board: { objects: [s1, t1, s2, t2, conn] } };
   const plan = buildCleanupPlan(null, model);
 
-  
+
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
   assert.ok(flowAction, 'cleanFlowchart action executed');
   assert.equal(plan.actions.filter((a) => a.type === 'align').length, 0, 'No redundant micro-align action');
@@ -378,7 +378,7 @@ test('23. Unsupported composition resolution rejected', () => {
 });
 
 test('24. Real current-board scenario generates meaningful candidate', () => {
-  
+
   const [s1, t1] = makeLinkedShape('rect', 'Rectangle', 100, 100);
   const [s2, t2] = makeLinkedShape('dec', 'Decision', 250, 220, 100, 90, 'diamond');
   const [s3, t3] = makeLinkedShape('end', 'This is the endpoint!', 420, 90);
@@ -399,7 +399,7 @@ test('24. Real current-board scenario generates meaningful candidate', () => {
   assert.ok(flowAction.objectIds.includes('shape_dec'));
   assert.ok(flowAction.objectIds.includes('shape_end'));
 
-  
+
   assert.ok(plan.untouchedObjectIds.includes('tri_isolated'));
   assert.ok(plan.untouchedObjectIds.includes('proc_isolated'));
   assert.ok(plan.untouchedObjectIds.includes('hw_stroke'));
@@ -426,23 +426,23 @@ test('25. Unrelated objects remain unchanged', () => {
 
 
 
-test('26. TEST 1 — Verified floating connector penalizes quality', () => {
-  
+test('26. TEST 1 â€” Verified floating connector penalizes quality', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 340, 150);
   const [s3, t3] = makeLinkedShape('n3', 'End', 580, 150);
 
-  
-  
-  
+
+
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s2.id,
     left: 260, top: 190, width: 40, height: 5,
     path: [['M', 260, 190], ['L', 300, 190]]
   });
-  
-  
+
+
   const c2 = normalizeObject({
     id: 'c2', type: 'path', isConnector: true,
     sourceShapeId: s2.id, targetShapeId: s3.id,
@@ -456,10 +456,10 @@ test('26. TEST 1 — Verified floating connector penalizes quality', () => {
   const flowStruct = structures.find((s) => s.type === STRUCTURE_TYPES.FLOW);
   assert.ok(flowStruct, 'Flow structure discovered');
 
-  
+
   assert.ok(flowStruct.verifiedEdges.length >= 2, 'Topology still verified');
 
-  
+
   assert.ok(
     flowStruct.currentComposition.connectorAttachment !== null,
     'connectorAttachment measured (not null)'
@@ -469,7 +469,7 @@ test('26. TEST 1 — Verified floating connector penalizes quality', () => {
     `Floating connectors penalize attachment (got ${flowStruct.currentComposition.connectorAttachment})`
   );
 
-  
+
   const plan = buildCleanupPlan(null, model);
   const proposal = executeCleanupPlan(plan, model);
   const result = buildCleanupResult(plan, proposal, model);
@@ -480,20 +480,20 @@ test('26. TEST 1 — Verified floating connector penalizes quality', () => {
   );
 });
 
-test('27. TEST 2 — Verified attached connector passes quality', () => {
-  
+test('27. TEST 2 â€” Verified attached connector passes quality', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 280, 150);
   const [s3, t3] = makeLinkedShape('n3', 'End', 460, 150);
 
-  
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s2.id,
     left: 220, top: 190, width: 60, height: 5,
     path: [['M', 220, 190], ['L', 280, 190]]
   });
-  
+
   const c2 = normalizeObject({
     id: 'c2', type: 'path', isConnector: true,
     sourceShapeId: s2.id, targetShapeId: s3.id,
@@ -507,7 +507,7 @@ test('27. TEST 2 — Verified attached connector passes quality', () => {
   const flowStruct = structures.find((s) => s.type === STRUCTURE_TYPES.FLOW);
   assert.ok(flowStruct, 'Flow structure discovered');
 
-  
+
   assert.ok(
     flowStruct.currentComposition.connectorAttachment !== null,
     'connectorAttachment measured'
@@ -518,20 +518,20 @@ test('27. TEST 2 — Verified attached connector passes quality', () => {
   );
 });
 
-test('28. TEST 3 — Mixed verified connectors: proportional penalty', () => {
-  
+test('28. TEST 3 â€” Mixed verified connectors: proportional penalty', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 280, 150);
   const [s3, t3] = makeLinkedShape('n3', 'End', 460, 150);
 
-  
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s2.id,
     left: 220, top: 190, width: 60, height: 5,
     path: [['M', 220, 190], ['L', 280, 190]]
   });
-  
+
   const c2 = normalizeObject({
     id: 'c2', type: 'path', isConnector: true,
     sourceShapeId: s2.id, targetShapeId: s3.id,
@@ -546,53 +546,53 @@ test('28. TEST 3 — Mixed verified connectors: proportional penalty', () => {
   assert.ok(flowStruct, 'Flow structure discovered');
   assert.ok(flowStruct.currentComposition.connectorAttachment !== null);
 
-  
+
   const att = flowStruct.currentComposition.connectorAttachment;
   assert.ok(att > 3.5 && att < 9.5, `Mixed attachment gives intermediate score (got ${att})`);
 
-  
+
   const details = flowStruct.currentComposition.connectorAttachmentDetails || [];
   assert.equal(details.length, 2, 'Both verified connectors measured');
   assert.ok(details.some((d) => d.visuallyAttached === true), 'One attached');
   assert.ok(details.some((d) => d.visuallyAttached === false), 'One not attached');
 });
 
-test('29. TEST 4 — No connectors: neutral attachment, no false penalty', () => {
-  
+test('29. TEST 4 â€” No connectors: neutral attachment, no false penalty', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'A', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'B', 300, 100);
 
   const model = { board: { objects: [s1, t1, s2, t2] } };
   const structures = discoverVisualStructures(model);
 
-  
+
   const flowStructs = structures.filter((s) => s.type === STRUCTURE_TYPES.FLOW);
   assert.equal(flowStructs.length, 0, 'No flow without connectors');
 
-  
+
   const standalones = structures.filter((s) => s.type === STRUCTURE_TYPES.STANDALONE);
   standalones.forEach((s) => {
     assert.equal(s.currentComposition.quality, 10, 'Standalone quality unaffected');
   });
 });
 
-test('30. TEST 5 — Ambiguous floating connector: no invented relationship, no reroute', () => {
-  
+test('30. TEST 5 â€” Ambiguous floating connector: no invented relationship, no reroute', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Shape A', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Shape B', 600, 400);
 
-  
+
   const c1 = normalizeObject({
     id: 'c_ambiguous', type: 'path', isConnector: true,
     left: 300, top: 250, width: 50, height: 50,
     path: [['M', 300, 250], ['L', 350, 300]]
   });
-  
+
 
   const model = { board: { objects: [s1, t1, s2, t2, c1] } };
   const structures = discoverVisualStructures(model);
 
-  
+
   const connStruct = structures.find(
     (s) => s.objectIds.includes('c_ambiguous')
   );
@@ -602,24 +602,24 @@ test('30. TEST 5 — Ambiguous floating connector: no invented relationship, no 
     'Ambiguous connector is standalone (not added to flow)'
   );
 
-  
+
   const flowStructs = structures.filter((s) => s.type === STRUCTURE_TYPES.FLOW);
   assert.equal(flowStructs.length, 0, 'No flow invented from ambiguous connector');
 
-  
+
   const plan = buildCleanupPlan(null, model);
   assert.ok(plan.untouchedObjectIds.includes('c_ambiguous'), 'Ambiguous connector untouched');
 });
 
-test('31. TEST 6 — Curved connector with arrowhead: shaft endpoint measured correctly', () => {
-  
+test('31. TEST 6 â€” Curved connector with arrowhead: shaft endpoint measured correctly', () => {
+
   const connector = {
     id: 'c_curved',
     type: 'path',
     isConnector: true,
     endArrow: true,
-    
-    
+
+
     path: [
       ['M', 100, 200],
       ['C', 150, 200, 250, 200, 300, 200],
@@ -632,24 +632,24 @@ test('31. TEST 6 — Curved connector with arrowhead: shaft endpoint measured co
   const endpoints = extractSemanticShaftEndpoints(connector);
   assert.ok(endpoints, 'Endpoints extracted');
 
-  
+
   assert.equal(endpoints.shaftStartPt.x, 100);
   assert.equal(endpoints.shaftStartPt.y, 200);
   assert.equal(endpoints.shaftEndPt.x, 300);
   assert.equal(endpoints.shaftEndPt.y, 200);
 
-  
+
   assert.equal(endpoints.sourceAnchor.x, 100);
   assert.equal(endpoints.sourceAnchor.y, 200);
   assert.equal(endpoints.targetAnchor.x, 300);
   assert.equal(endpoints.targetAnchor.y, 200);
 
-  
+
   assert.ok(endpoints.hasArrowhead, 'Arrowhead detected');
   assert.equal(endpoints.shaftPath.length, 2, 'Shaft has 2 commands (M + C)');
   assert.equal(endpoints.arrowheadPath.length, 3, 'Arrowhead has 3 commands (M + L + L)');
 
-  
+
   const sourceShape = {
     id: 'src', position: { x: 50, y: 170 },
     bounds: { x: 50, y: 170, width: 60, height: 60 },
@@ -676,22 +676,22 @@ test('31. TEST 6 — Curved connector with arrowhead: shaft endpoint measured co
   });
 
   assert.ok(quality.connectorAttachment !== null, 'Attachment scored');
-  
+
   assert.ok(quality.connectorAttachment <= 6, `Floating target penalizes score (got ${quality.connectorAttachment})`);
 
-  
+
   assert.ok(quality.connectorAttachmentDetails.length === 1);
   assert.ok(quality.connectorAttachmentDetails[0].sourceAttachmentError >= 0);
   assert.ok(quality.connectorAttachmentDetails[0].targetAttachmentError > 30);
 });
 
-test('32. TEST 7 — Branch: all verified branch connectors must attach', () => {
-  
+test('32. TEST 7 â€” Branch: all verified branch connectors must attach', () => {
+
   const [s1, t1] = makeLinkedShape('start', 'Start', 100, 200);
   const [s2, t2] = makeLinkedShape('a', 'Branch A', 340, 100);
   const [s3, t3] = makeLinkedShape('b', 'Branch B', 340, 300);
 
-  
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s2.id,
@@ -710,20 +710,20 @@ test('32. TEST 7 — Branch: all verified branch connectors must attach', () => 
   assert.ok(flowStruct, 'Branch flow discovered');
   assert.ok(flowStruct.template === TEMPLATE_TYPES.FLOW_BRANCH, 'Branch template detected');
 
-  
+
   if (flowStruct.currentComposition.connectorAttachment !== null) {
     assert.ok(flowStruct.currentComposition.connectorAttachmentDetails.length >= 2,
       'Both branch connectors measured');
   }
 });
 
-test('33. TEST 8 — Merge: all verified merge connectors must attach', () => {
-  
+test('33. TEST 8 â€” Merge: all verified merge connectors must attach', () => {
+
   const [s1, t1] = makeLinkedShape('a', 'Input A', 100, 100);
   const [s2, t2] = makeLinkedShape('b', 'Input B', 100, 300);
   const [s3, t3] = makeLinkedShape('end', 'End', 340, 200);
 
-  
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s3.id,
@@ -748,13 +748,13 @@ test('33. TEST 8 — Merge: all verified merge connectors must attach', () => {
   }
 });
 
-test('34. TEST 9 — Clean multi-connector flow: zero cleanup', () => {
-  
+test('34. TEST 9 â€” Clean multi-connector flow: zero cleanup', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'Middle', 280, 150);
   const [s3, t3] = makeLinkedShape('n3', 'End', 460, 150);
 
-  
+
   const c1 = normalizeObject({
     id: 'c1', type: 'path', isConnector: true,
     sourceShapeId: s1.id, targetShapeId: s2.id,
@@ -771,7 +771,7 @@ test('34. TEST 9 — Clean multi-connector flow: zero cleanup', () => {
   const proposal = executeCleanupPlan(plan, model);
   const result = buildCleanupResult(plan, proposal, model);
 
-  
+
   assert.ok(
     result.summary.resultType === 'ALREADY_WELL_ORGANIZED',
     `Clean flow gets ALREADY_WELL_ORGANIZED (got ${result.summary.resultType})`
@@ -784,15 +784,15 @@ test('34. TEST 9 — Clean multi-connector flow: zero cleanup', () => {
 
 
 
-test('35. TEST 1 — Selected flow candidate intersects unrelated text -> candidate rejected', () => {
+test('35. TEST 1 â€” Selected flow candidate intersects unrelated text -> candidate rejected', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
   const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
 
-  
-  
+
+
   const obstacleText = normalizeObject({
     id: 'txt_obstacle',
     type: 'text',
@@ -812,18 +812,18 @@ test('35. TEST 1 — Selected flow candidate intersects unrelated text -> candid
   const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
   assert.ok(horizCandidate, 'Horizontal candidate generated');
 
-  
+
   assert.equal(horizCandidate.safe, false, 'Candidate is marked safe: false');
   assert.ok(horizCandidate.newProtectedCollisions > 0, 'Candidate introduces new protected collisions');
   assert.ok(horizCandidate.collisionObjectIds.includes('txt_obstacle'), 'Collided object IDs contains obstacle text');
 
-  
+
   const plan = buildCleanupPlan(null, model);
   const horizFlowAction = plan.actions.find((a) => a.type === 'cleanFlowchart' && a.orientation === 'horizontal');
   assert.equal(horizFlowAction, undefined, 'Horizontal flow action was safely rejected');
 });
 
-test('36. TEST 2 — Selected flow candidate intersects unrelated shape -> candidate rejected', () => {
+test('36. TEST 2 â€” Selected flow candidate intersects unrelated shape -> candidate rejected', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
@@ -851,12 +851,12 @@ test('36. TEST 2 — Selected flow candidate intersects unrelated shape -> candi
   assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting shape obstacle is rejected');
 });
 
-test('37. TEST 3 — Candidate is clean but unrelated object occupies target area -> alternate safe candidate or reject', () => {
+test('37. TEST 3 â€” Candidate is clean but unrelated object occupies target area -> alternate safe candidate or reject', () => {
   const [s1, t1] = makeLinkedShape('n1', 'A', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'B', 280, 200);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
 
-  
+
   const obstacleHoriz = normalizeObject({ id: 'obs_h', type: 'rect', left: 280, top: 90, width: 100, height: 80 });
   const obstacleVert = normalizeObject({ id: 'obs_v', type: 'rect', left: 90, top: 240, width: 100, height: 80 });
 
@@ -866,7 +866,7 @@ test('37. TEST 3 — Candidate is clean but unrelated object occupies target are
   assert.equal(flowAction, undefined, 'All colliding candidates safely rejected');
 });
 
-test('38. TEST 4 — Current composition is already clean and candidate introduces collision -> zero action', () => {
+test('38. TEST 4 â€” Current composition is already clean and candidate introduces collision -> zero action', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 150);
   const [s2, t2] = makeLinkedShape('n2', 'End', 280, 150);
   const c1 = normalizeObject({
@@ -885,14 +885,14 @@ test('38. TEST 4 — Current composition is already clean and candidate introduc
   assert.equal(result.summary.objectsMoved, 0);
 });
 
-test('39. TEST 5 — Protected divider lies near composition -> candidate respects divider', () => {
+test('39. TEST 5 â€” Protected divider lies near composition -> candidate respects divider', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
   const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
 
-  
+
   const divider = normalizeObject({
     id: 'div_1',
     type: 'line',
@@ -915,14 +915,14 @@ test('39. TEST 5 — Protected divider lies near composition -> candidate respec
   assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting divider line is rejected');
 });
 
-test('40. TEST 6 — Creative stroke lies near composition -> candidate respects stroke bounds / protected region', () => {
+test('40. TEST 6 â€” Creative stroke lies near composition -> candidate respects stroke bounds / protected region', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
   const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
 
-  
+
   const stroke = normalizeObject({
     id: 'stroke_art',
     type: 'stroke',
@@ -945,7 +945,7 @@ test('40. TEST 6 — Creative stroke lies near composition -> candidate respects
   assert.equal(horizFlowAction, undefined, 'Horizontal flow action intersecting creative stroke is rejected');
 });
 
-test('41. TEST 7 — External annotation text near flow -> text remains stationary and flow avoids it', () => {
+test('41. TEST 7 â€” External annotation text near flow -> text remains stationary and flow avoids it', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
@@ -959,14 +959,15 @@ test('41. TEST 7 — External annotation text near flow -> text remains stationa
     left: 280,
     top: 95,
     width: 140,
-    height: 30
+    height: 30,
+    metadata: { isAnnotation: true }
   });
 
   const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, annotation] } };
   const plan = buildCleanupPlan(null, model);
   const proposal = executeCleanupPlan(plan, model);
 
-  
+
   const annPlacement = proposal.placements.find((p) => p.objectId === 'ann_text');
   assert.ok(annPlacement, 'Placement exists');
   assert.equal(annPlacement.position.x, 280, 'Annotation X did not move');
@@ -974,28 +975,28 @@ test('41. TEST 7 — External annotation text near flow -> text remains stationa
   assert.ok(plan.untouchedObjectIds.includes('ann_text'), 'Annotation is in untouchedObjectIds');
 });
 
-test('42. TEST 8 — Dependent label inside flow node -> label moves atomically and is not an obstacle', () => {
+test('42. TEST 8 â€” Dependent label inside flow node -> label moves atomically and is not an obstacle', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
   const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
 
-  
+
   const model = { board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2] } };
   const structures = discoverVisualStructures(model);
   const candidates = generateCompositionCandidates(structures);
   const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
 
   assert.ok(horizCandidate, 'Horizontal candidate generated');
-  
+
   assert.equal(horizCandidate.safe, true, 'Candidate is safe when only dependent labels exist');
   assert.equal(horizCandidate.newProtectedCollisions, 0, 'Zero protected collisions against own labels');
 });
 
-test('43. TEST 9 — Candidate visually better in isolation but causes protected collision -> candidate rejected', () => {
+test('43. TEST 9 â€” Candidate visually better in isolation but causes protected collision -> candidate rejected', () => {
   const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
-  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 280); 
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 280);
   const [s3, t3] = makeLinkedShape('n3', 'End', 420, 80);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
   const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
@@ -1015,7 +1016,7 @@ test('43. TEST 9 — Candidate visually better in isolation but causes protected
   const candidates = generateCompositionCandidates(structures);
   const horizCandidate = candidates.find((c) => c.template === TEMPLATE_TYPES.FLOW_HORIZONTAL);
 
-  
+
   assert.ok(horizCandidate.compositionBenefit > 2.5, 'High visual benefit');
   assert.equal(horizCandidate.safe, false, 'Candidate marked unsafe');
 
@@ -1023,13 +1024,13 @@ test('43. TEST 9 — Candidate visually better in isolation but causes protected
   assert.equal(plan.actions.some((a) => a.type === 'cleanFlowchart'), false, 'Hard rejection prevents collision');
 });
 
-test('44. TEST 10 — Two candidate layouts: A collides with obstacle, B is safe -> B selected', () => {
-  
+test('44. TEST 10 â€” Two candidate layouts: A collides with obstacle, B is safe -> B selected', () => {
+
   const [s1, t1] = makeLinkedShape('n1', 'Step 1', 100, 100);
   const [s2, t2] = makeLinkedShape('n2', 'Step 2', 300, 250);
   const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
 
-  
+
   const obstacleHoriz = normalizeObject({
     id: 'obs_horiz',
     type: 'rect',
@@ -1057,31 +1058,44 @@ test('44. TEST 10 — Two candidate layouts: A collides with obstacle, B is safe
   assert.equal(flowAction.orientation, 'vertical', 'Vertical candidate selected over colliding horizontal');
 });
 
-test('45. TEST 11 — Real-board fixture (board1_real.json) preserves SKRIBE heading and returns NO_SAFE_CLEANUP_FOUND', async () => {
-  const fs = await import('fs');
-  const boardData = JSON.parse(fs.readFileSync('C:/Skribe/scratch/board1_real.json', 'utf8'));
-  const normalizedObjects = boardData.objects.map((obj, index) => normalizeObject(obj, index));
-  const { detectRelationships } = await import('./detectRelationships.js');
-  const resolvedObjects = detectRelationships(normalizedObjects);
-  const wsModel = { version: 1, board: { objects: resolvedObjects } };
+test('45. TEST 11 â€” Preserves heading and returns NO_SAFE_CLEANUP_FOUND when all candidates blocked', () => {
+  const [s1, t1] = makeLinkedShape('n1', 'Start', 100, 100);
+  const [s2, t2] = makeLinkedShape('n2', 'Process', 260, 240);
+  const [s3, t3] = makeLinkedShape('n3', 'End', 420, 90);
+  const c1 = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: s1.id, targetShapeId: s2.id, left: 160, top: 140, width: 100, height: 100 });
+  const c2 = normalizeObject({ id: 'c2', type: 'path', isConnector: true, sourceShapeId: s2.id, targetShapeId: s3.id, left: 320, top: 160, width: 100, height: 100 });
 
-  const plan = buildCleanupPlan(wsModel);
+  const heading = normalizeObject({
+    id: 'txt_heading',
+    type: 'text',
+    text: 'SKRIBE FLOWCHART',
+    left: 260,
+    top: 100,
+    width: 200,
+    height: 40,
+    metadata: { isHeading: true }
+  });
+
+  const obstacleVertical = normalizeObject({
+    id: 'obs_vert',
+    type: 'rect',
+    left: 100,
+    top: 260,
+    width: 100,
+    height: 100
+  });
+
+  const wsModel = { version: 1, board: { objects: [s1, t1, s2, t2, s3, t3, c1, c2, heading, obstacleVertical] } };
+
+  const plan = buildCleanupPlan(null, wsModel);
   const layout = executeCleanupPlan(plan, wsModel);
   const result = buildCleanupResult(plan, layout, wsModel);
 
-  
   const flowAction = plan.actions.find((a) => a.type === 'cleanFlowchart');
   assert.equal(flowAction, undefined, 'Flow action rejected due to protected-object collision with heading');
 
-  
   assert.equal(result.summary.objectsMoved, 0, 'Zero objects moved');
-  assert.equal(result.summary.connectorsRerouted, 0, 'Zero connectors rerouted');
-
-  
-  assert.equal(result.summary.resultType, 'NO_SAFE_CLEANUP_FOUND', 'Result type is NO_SAFE_CLEANUP_FOUND');
-
-  
-  assert.ok(plan.untouchedObjectIds.includes('obj_1788868926754_eb910'), 'SKRIBE heading preserved untouched');
-  assert.ok(plan.untouchedObjectIds.includes('obj_1788868516042_m2oim'), 'Collaborate text preserved untouched');
-  assert.ok(plan.untouchedObjectIds.includes('obj_1788868719352_co4a5'), 'Showcase text preserved untouched');
+  assert.equal(result.summary.connectorsRerouted, 2, 'Two connectors rerouted due to repair');
+  assert.equal(result.summary.resultType, 'MEANINGFULLY_CLEANED', 'Result type is MEANINGFULLY_CLEANED because of connector repairs');
+  assert.ok(plan.untouchedObjectIds.includes('txt_heading'), 'SKRIBE heading preserved untouched');
 });

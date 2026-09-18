@@ -10,8 +10,8 @@ import { getObjectBounds } from './cleanupOpportunities.js';
 
 
 export const REPAIR_TOPOLOGY_THRESHOLD = 0.85;
-export const ATTACHMENT_TOLERANCE = 5; 
-export const REPAIR_SKIP_TOLERANCE = 5; 
+export const ATTACHMENT_TOLERANCE = 5;
+export const REPAIR_SKIP_TOLERANCE = 5;
 
 
 
@@ -22,20 +22,20 @@ export const computeShapeBoundaryIntersection = (shapeObj, fromPoint, toPoint) =
   const g = getShapeBoundaryGeometry(shapeObj);
   const shapeType = (g.shapeType || 'rect').toLowerCase();
 
-  
+
   const cx = g.cx;
   const cy = g.cy;
 
-  
+
   const dx = fromPoint.x - cx;
   const dy = fromPoint.y - cy;
 
   if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-    
+
     const tdx = toPoint.x - cx;
     const tdy = toPoint.y - cy;
     if (Math.abs(tdx) < 0.001 && Math.abs(tdy) < 0.001) {
-      
+
       return { x: g.right, y: cy };
     }
     return computeShapeBoundaryIntersection(shapeObj, toPoint, fromPoint);
@@ -61,7 +61,7 @@ export const computeShapeBoundaryIntersection = (shapeObj, fromPoint, toPoint) =
     return intersectRoundedRect(g, dx, dy);
   }
 
-  
+
   return intersectRect(g, dx, dy);
 };
 
@@ -70,7 +70,7 @@ const intersectRect = (g, dx, dy) => {
   const hw = g.width / 2;
   const hh = g.height / 2;
 
-  
+
   let t = Infinity;
 
   if (Math.abs(dx) > 0.001) {
@@ -103,15 +103,15 @@ const intersectRect = (g, dx, dy) => {
 
 
 const intersectRoundedRect = (g, dx, dy) => {
-  
+
   const cornerRadius = Math.min(g.width, g.height) * 0.15;
   const hw = g.width / 2;
   const hh = g.height / 2;
 
-  
+
   const rectPt = intersectRect(g, dx, dy);
 
-  
+
   const localX = rectPt.x - g.cx;
   const localY = rectPt.y - g.cy;
 
@@ -119,7 +119,7 @@ const intersectRoundedRect = (g, dx, dy) => {
   const inCornerY = Math.abs(localY) > (hh - cornerRadius);
 
   if (inCornerX && inCornerY) {
-    
+
     const cornerCx = g.cx + Math.sign(localX) * (hw - cornerRadius);
     const cornerCy = g.cy + Math.sign(localY) * (hh - cornerRadius);
 
@@ -142,11 +142,11 @@ const intersectDiamond = (g, dx, dy) => {
   const hw = g.width / 2;
   const hh = g.height / 2;
 
-  
-  
-  
-  
-  
+
+
+
+
+
   const denom = Math.abs(dx) / hw + Math.abs(dy) / hh;
   if (denom < 0.001) {
     return { x: g.cx + hw, y: g.cy };
@@ -164,7 +164,7 @@ const intersectDiamond = (g, dx, dy) => {
 const intersectCircle = (cx, cy, rx, ry, dx, dy) => {
   if (rx < 0.001 || ry < 0.001) return { x: cx, y: cy };
 
-  
+
   const ndx = dx / rx;
   const ndy = dy / ry;
   const len = Math.hypot(ndx, ndy);
@@ -179,9 +179,9 @@ const intersectCircle = (cx, cy, rx, ry, dx, dy) => {
 
 const intersectTriangle = (g, dx, dy) => {
   const vertices = [
-    { x: 0, y: -g.height / 2 },         
-    { x: g.width / 2, y: g.height / 2 },   
-    { x: -g.width / 2, y: g.height / 2 }   
+    { x: 0, y: -g.height / 2 },
+    { x: g.width / 2, y: g.height / 2 },
+    { x: -g.width / 2, y: g.height / 2 }
   ];
 
   return intersectConvexPolygon(g.cx, g.cy, vertices, dx, dy);
@@ -191,15 +191,15 @@ const intersectTriangle = (g, dx, dy) => {
 const intersectHexagon = (g, dx, dy) => {
   const hw = g.width / 2;
   const hh = g.height / 2;
-  
-  const inset = hw * 0.25; 
+
+  const inset = hw * 0.25;
   const vertices = [
-    { x: -hw + inset, y: -hh },  
-    { x: hw - inset, y: -hh },   
-    { x: hw, y: 0 },             
-    { x: hw - inset, y: hh },    
-    { x: -hw + inset, y: hh },   
-    { x: -hw, y: 0 }             
+    { x: -hw + inset, y: -hh },
+    { x: hw - inset, y: -hh },
+    { x: hw, y: 0 },
+    { x: hw - inset, y: hh },
+    { x: -hw + inset, y: hh },
+    { x: -hw, y: 0 }
   ];
 
   return intersectConvexPolygon(g.cx, g.cy, vertices, dx, dy);
@@ -213,9 +213,9 @@ const intersectConvexPolygon = (cx, cy, vertices, dx, dy) => {
     const v1 = vertices[i];
     const v2 = vertices[(i + 1) % vertices.length];
 
-    
-    
-    
+
+
+
     const edgeDx = v2.x - v1.x;
     const edgeDy = v2.y - v1.y;
 
@@ -233,7 +233,7 @@ const intersectConvexPolygon = (cx, cy, vertices, dx, dy) => {
   }
 
   if (!Number.isFinite(bestT) || bestT <= 0) {
-    
+
     bestT = 1;
   }
 
@@ -255,10 +255,10 @@ export const computeIdealConnectorAnchors = (sourceShape, targetShape, routeHint
   const srcCenter = { x: srcBounds.cx, y: srcBounds.cy };
   const tgtCenter = { x: tgtBounds.cx, y: tgtBounds.cy };
 
-  
+
   const sourceAnchor = computeShapeBoundaryIntersection(sourceShape, tgtCenter, srcCenter);
 
-  
+
   const targetAnchor = computeShapeBoundaryIntersection(targetShape, srcCenter, tgtCenter);
 
   return { sourceAnchor, targetAnchor };
@@ -333,7 +333,7 @@ const generateCurvedShaftPath = (sourceAnchor, targetAnchor, originalParsed) => 
     return generateStraightShaftPath(sourceAnchor, targetAnchor);
   }
 
-  
+
   const origStart = originalParsed.startPt;
   const origEnd = originalParsed.endPt;
   const origDx = origEnd.x - origStart.x;
@@ -344,7 +344,7 @@ const generateCurvedShaftPath = (sourceAnchor, targetAnchor, originalParsed) => 
   const origCp1 = { x: Number(curveCmd[1]), y: Number(curveCmd[2]) };
   const origCp2 = { x: Number(curveCmd[3]), y: Number(curveCmd[4]) };
 
-  
+
   const cp1Proj = origLenSq > 0.001
     ? ((origCp1.x - origStart.x) * origDx + (origCp1.y - origStart.y) * origDy) / origLenSq
     : 0.35;
@@ -359,7 +359,7 @@ const generateCurvedShaftPath = (sourceAnchor, targetAnchor, originalParsed) => 
     ? ((origCp2.y - origStart.y) * origDx - (origCp2.x - origStart.x) * origDy) / origLen
     : 0;
 
-  
+
   const newDx = targetAnchor.x - sourceAnchor.x;
   const newDy = targetAnchor.y - sourceAnchor.y;
   const newLen = Math.max(1, Math.sqrt(newDx * newDx + newDy * newDy));
@@ -413,7 +413,7 @@ const generateArrowheadPath = (shaftEndPt, tangent, strokeWidth = 3) => {
 export const computeConnectorRepair = (connector, sourceShape, targetShape, topology) => {
   const connectorId = connector.id;
 
-  
+
   if (!topology.sourceShapeId || !topology.targetShapeId) {
     return {
       repairAccepted: false,
@@ -431,7 +431,7 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     };
   }
 
-  
+
   const srcStatus = topology.metadataValidation?.source;
   const tgtStatus = topology.metadataValidation?.target;
   const invalidStatuses = ['INVALID', 'STALE', 'AMBIGUOUS'];
@@ -452,13 +452,13 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     };
   }
 
-  
+
   const current = getCurrentShaftEndpoints(connector);
 
-  
+
   const { sourceAnchor, targetAnchor } = computeIdealConnectorAnchors(sourceShape, targetShape);
 
-  
+
   const sourceAttachmentBefore = Math.hypot(current.shaftStart.x - sourceAnchor.x, current.shaftStart.y - sourceAnchor.y);
   const targetAttachmentBefore = Math.hypot(current.shaftEnd.x - targetAnchor.x, current.shaftEnd.y - targetAnchor.y);
 
@@ -473,7 +473,7 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     };
   }
 
-  
+
   const routeType = detectRouteType(connector);
   let shaftPath;
 
@@ -483,7 +483,7 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     shaftPath = generateStraightShaftPath(sourceAnchor, targetAnchor);
   }
 
-  
+
   const hasEndArrow = connector.endArrow !== false;
   const hasStartArrow = Boolean(connector.startArrow);
   const strokeWidth = connector.strokeWidth || connector.visual?.strokeWidth || 3;
@@ -536,7 +536,7 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     arrowheadPath = [...arrowheadPath, ...startArrowCmds];
   }
 
-  
+
   const sourceAttachmentAfter = Math.hypot(
     shaftPath[0][1] - sourceAnchor.x,
     shaftPath[0][2] - sourceAnchor.y
@@ -571,7 +571,7 @@ export const computeConnectorRepair = (connector, sourceShape, targetShape, topo
     shaftPath: shaftPath.map((cmd) => [...cmd]),
     arrowheadPath: arrowheadPath.map((cmd) => [...cmd]),
 
-    
+
     currentShaftStart: { ...current.shaftStart },
     currentShaftEnd: { ...current.shaftEnd },
     candidateShaftStart: { x: sourceAnchor.x, y: sourceAnchor.y },
@@ -602,7 +602,7 @@ export const validateConnectorRepairSafety = (repairPayload, protectedObjects, m
     return { safe: true, collidedObjectIds: [] };
   }
 
-  
+
   const padding = 5;
   const repairedBounds = {
     x: pathBounds.x - padding,
@@ -621,17 +621,17 @@ export const validateConnectorRepairSafety = (repairPayload, protectedObjects, m
     if (obj.id === repairPayload.targetShapeId) continue;
 
     const sem = getSemanticType(obj);
-    
+
     if (sem === 'connector') continue;
 
     const objBounds = getObjectBounds(obj);
 
-    
+
     const xOverlap = Math.max(0, Math.min(repairedBounds.x + repairedBounds.width, objBounds.x + objBounds.width) - Math.max(repairedBounds.x, objBounds.x));
     const yOverlap = Math.max(0, Math.min(repairedBounds.y + repairedBounds.height, objBounds.y + objBounds.height) - Math.max(repairedBounds.y, objBounds.y));
     const overlapArea = xOverlap * yOverlap;
 
-    if (overlapArea > 4) { 
+    if (overlapArea > 4) {
       collidedObjectIds.push(obj.id);
     }
   }
@@ -657,14 +657,22 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
   const connectorRepairs = [];
   const rejectedRepairs = [];
 
-  
+
+  const ownership = options.ownership;
   const allStructureMemberIds = new Set();
+  const allStructureOwnedTextIds = new Set();
+
   (structures || []).forEach((s) => {
-    (s.nodeIds || []).forEach((id) => allStructureMemberIds.add(id));
+    (s.nodeIds || []).forEach((id) => {
+      allStructureMemberIds.add(id);
+      const texts = ownership?.ownedByOwner?.get(id) || [];
+      texts.forEach((tId) => allStructureOwnedTextIds.add(tId));
+    });
     (s.connectorIds || []).forEach((id) => allStructureMemberIds.add(id));
   });
 
   const protectedObjects = rawObjects.filter((o) => {
+    if (allStructureOwnedTextIds.has(o.id)) return false;
     const sem = getSemanticType(o);
     return sem !== 'connector' || !allStructureMemberIds.has(o.id);
   });
@@ -677,8 +685,8 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
       conn.relationshipMetadata?.targetShapeId
     );
 
-    
-    
+
+
     let effectiveTopology = null;
     if (hasMetadataTopology) {
       effectiveTopology = recoverConnectorTopology(conn, shapeObjects);
@@ -700,7 +708,7 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
       }
     }
 
-    
+
     if (!effectiveTopology || !effectiveTopology.sourceShapeId || !effectiveTopology.targetShapeId) {
       rejectedRepairs.push({
         connectorId: conn.id,
@@ -724,7 +732,7 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
       continue;
     }
 
-    
+
     const unknownStruct = (structures || []).find(
       (s) => s.id === `struct_unknown_conn_${conn.id}` || (s.type === 'standalone' && s.connectorIds?.includes(conn.id))
     );
@@ -763,7 +771,7 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
       continue;
     }
 
-    
+
     const repair = computeConnectorRepair(conn, sourceShape, targetShape, effectiveTopology);
 
     if (!repair.repairAccepted) {
@@ -778,7 +786,7 @@ export const generateConnectorRepairs = (workspaceModel, structures = [], option
       continue;
     }
 
-    
+
     const memberIds = new Set([conn.id, effectiveTopology.sourceShapeId, effectiveTopology.targetShapeId]);
     const safety = validateConnectorRepairSafety(repair, protectedObjects, memberIds);
 
@@ -850,7 +858,7 @@ export const validateRepairPayloadSchema = (repair) => {
     return { valid: false, errors: ['Repair payload must be a non-null object'] };
   }
 
-  
+
   const required = ['connectorId', 'sourceShapeId', 'targetShapeId', 'topologyConfidence', 'routeType', 'sourceAnchor', 'targetAnchor', 'shaftPath'];
   for (const field of required) {
     if (repair[field] === undefined || repair[field] === null) {
@@ -858,7 +866,7 @@ export const validateRepairPayloadSchema = (repair) => {
     }
   }
 
-  
+
   const allAllowed = new Set([...REPAIR_PAYLOAD_ALLOWED_FIELDS, ...REPAIR_DIAGNOSTIC_FIELDS]);
   for (const key of Object.keys(repair)) {
     if (!allAllowed.has(key)) {
@@ -866,7 +874,7 @@ export const validateRepairPayloadSchema = (repair) => {
     }
   }
 
-  
+
   if (repair.sourceAnchor && (typeof repair.sourceAnchor.x !== 'number' || typeof repair.sourceAnchor.y !== 'number')) {
     errors.push('sourceAnchor must have numeric x and y');
   }
@@ -874,17 +882,17 @@ export const validateRepairPayloadSchema = (repair) => {
     errors.push('targetAnchor must have numeric x and y');
   }
 
-  
+
   if (repair.shaftPath && !Array.isArray(repair.shaftPath)) {
     errors.push('shaftPath must be an array');
   }
 
-  
+
   if (repair.arrowheadPath !== undefined && repair.arrowheadPath !== null && !Array.isArray(repair.arrowheadPath)) {
     errors.push('arrowheadPath must be an array');
   }
 
-  
+
   if (typeof repair.topologyConfidence === 'number') {
     if (repair.topologyConfidence < REPAIR_TOPOLOGY_THRESHOLD) {
       errors.push(`topologyConfidence ${repair.topologyConfidence} below required threshold ${REPAIR_TOPOLOGY_THRESHOLD}`);
@@ -902,7 +910,7 @@ export const compareRepairGeometry = (previewRepair, appliedRepair, tolerance = 
     return { equivalent: false, mismatches: ['One or both payloads are null'] };
   }
 
-  
+
   const exactFields = ['connectorId', 'sourceShapeId', 'targetShapeId', 'routeType'];
   for (const field of exactFields) {
     if (previewRepair[field] !== appliedRepair[field]) {
@@ -910,7 +918,7 @@ export const compareRepairGeometry = (previewRepair, appliedRepair, tolerance = 
     }
   }
 
-  
+
   const comparePoint = (name, p1, p2) => {
     if (!p1 || !p2) {
       mismatches.push(`${name}: one is null`);
@@ -924,7 +932,7 @@ export const compareRepairGeometry = (previewRepair, appliedRepair, tolerance = 
   comparePoint('sourceAnchor', previewRepair.sourceAnchor, appliedRepair.sourceAnchor);
   comparePoint('targetAnchor', previewRepair.targetAnchor, appliedRepair.targetAnchor);
 
-  
+
   const comparePaths = (name, path1, path2) => {
     const p1 = path1 || [];
     const p2 = path2 || [];

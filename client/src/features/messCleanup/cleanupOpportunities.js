@@ -515,6 +515,8 @@ export const detectDetachedTextOpportunities = (objects, objectMap, ownership) =
       if (!textObj || getSemanticType(textObj) !== 'text') return;
       const bText = getObjectBounds(textObj);
 
+      if (ownership.ownerTierByText?.get(tId) === 3 && ownership.relationshipTypeByText?.get(tId) === 'inferred-external') return;
+
       const relMeta = containerObj.relationshipMetadata || {};
       const textRelMeta = textObj.relationshipMetadata || {};
       const hasExplicitBinding = relMeta.attachedTextId === tId ||
@@ -696,7 +698,7 @@ export const detectConnectorAttachmentDefectOpportunities = (objects, objectMap)
     const srcResolved = srcId && objectMap.has(srcId);
     const tgtResolved = tgtId && objectMap.has(tgtId);
 
-    
+
     if (!srcResolved || !tgtResolved) {
       const floatingEndpoints = [];
       if (!srcResolved) floatingEndpoints.push('source');
@@ -794,7 +796,7 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
 
   const budget = createBoardMovementBudget(objectCount, options);
 
-  
+
   const formattedOpps = rawOpportunities.map((opp) => ({
     ...opp,
     category: opp.category || 'anomaly',
@@ -807,11 +809,11 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
     utilityScore: typeof cand.utilityScore === 'number' ? cand.utilityScore : scoreOpportunity(cand)
   }));
 
-  
+
   const allItems = [...formattedCandidates, ...formattedOpps];
 
   const sorted = allItems.sort((a, b) => {
-    
+
     const isCompA = a.category === 'composition';
     const isCompB = b.category === 'composition';
     if (isCompA !== isCompB) {
@@ -858,8 +860,8 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
 
     const isComposition = opp.category === 'composition';
 
-    
-    
+
+
     if (isComposition && (opp.safe === false || (opp.newProtectedCollisions && opp.newProtectedCollisions > 0) || opp.candidateIntersectsProtectedObject)) {
       const collIds = opp.collidedObjectIds || opp.collisionObjectIds || [];
       rejectedOpportunities.push({
@@ -874,7 +876,7 @@ export const rankAndSelectOpportunities = (opportunities, options = {}) => {
       continue;
     }
 
-    
+
     if (isComposition && opp.compositionBenefit !== undefined && opp.compositionBenefit <= 0) {
       rejectedOpportunities.push({
         id: opp.id,

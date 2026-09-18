@@ -1,4 +1,12 @@
-const sortById = (items) => [...items].sort((a, b) => String(a.objectId).localeCompare(String(b.objectId)));
+const sortByOriginalOrder = (items, originalObjects) => {
+  const indexMap = new Map(originalObjects.map((obj, i) => [obj.id, i]));
+  return [...items].sort((a, b) => {
+    const idxA = indexMap.has(a.objectId) ? indexMap.get(a.objectId) : Infinity;
+    const idxB = indexMap.has(b.objectId) ? indexMap.get(b.objectId) : Infinity;
+    if (idxA !== idxB) return idxA - idxB;
+    return String(a.objectId).localeCompare(String(b.objectId));
+  });
+};
 
 export const worldToPreview = (point, renderBounds, scale, padding = 24) => ({
   x: (point.x - renderBounds.x) * scale + padding,
@@ -8,7 +16,7 @@ export const worldToPreview = (point, renderBounds, scale, padding = 24) => ({
 export const buildPreviewRenderModel = (workspaceModel, layoutProposal) => {
   const objects = workspaceModel?.board?.objects || [];
   const objectMap = new Map(objects.filter((object) => object?.id).map((object) => [object.id, object]));
-  const placements = sortById(layoutProposal?.placements || []);
+  const placements = sortByOriginalOrder(layoutProposal?.placements || [], objects);
 
   return {
     bounds: layoutProposal?.canvasBounds || { x: 0, y: 0, width: 1, height: 1 },

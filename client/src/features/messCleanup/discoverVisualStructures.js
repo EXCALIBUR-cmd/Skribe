@@ -41,9 +41,9 @@ export const extractSemanticShaftEndpoints = (connector) => {
   const parsed = parseConnectorPath(pathInput);
   if (!parsed || !parsed.mainCommands || parsed.mainCommands.length === 0) return null;
 
-  
-  
-  
+
+
+
   const isReversed = Boolean(connector.startArrow && !connector.endArrow);
 
   return {
@@ -239,9 +239,12 @@ export const evaluateCompleteGeometryCollisions = ({
     let collides = false;
     let obsCollisionArea = 0;
 
-    
+
     for (const node of candidateNodeBounds) {
       const inter = getBoxesIntersection(node, obsBounds);
+      if (obs.id === 'ann_text') {
+        console.log('[DEBUG] node:', node.id, 'obsBounds:', obsBounds, 'inter:', inter);
+      }
       const isMeaningful = isTextObs
         ? (inter.area > 25 || (inter.xOverlap > 5 && inter.yOverlap > 5))
         : (inter.area > 50 || (inter.xOverlap > 5 && inter.yOverlap > 5));
@@ -252,7 +255,7 @@ export const evaluateCompleteGeometryCollisions = ({
       }
     }
 
-    
+
     for (const label of candidateLabelBounds) {
       const inter = getBoxesIntersection(label, obsBounds);
       const isMeaningful = isTextObs
@@ -265,7 +268,7 @@ export const evaluateCompleteGeometryCollisions = ({
       }
     }
 
-    
+
     for (const conn of candidateConnectorGeometry) {
       if (!conn.startPoint || !conn.endPoint) continue;
       if (isLineObs) {
@@ -284,7 +287,7 @@ export const evaluateCompleteGeometryCollisions = ({
         }
       }
 
-      
+
       if (pointInsideBox(conn.endPoint, obsBounds, 2)) {
         collides = true;
         obsCollisionArea += 50;
@@ -501,7 +504,7 @@ export const findSafeFlowCandidateGeometry = ({
   objectMap = null,
   currentCompleteGeometry = null
 }) => {
-  
+
   const nodeBoundsList = compObjects.map((o) => getObjectBounds(o));
   const minX = Math.min(...nodeBoundsList.map((b) => b.x));
   const minY = Math.min(...nodeBoundsList.map((b) => b.y));
@@ -514,7 +517,7 @@ export const findSafeFlowCandidateGeometry = ({
     maxY: maxY + 100
   };
 
-  
+
   const baselineGeom = computeFlowCandidateGeometry({
     compObjects,
     compLevelMap,
@@ -650,8 +653,8 @@ export const evaluateCompositionQuality = ({
   const hasMultiNodeLevels = hasLevels && Array.from(levelMap.values()).some((arr) => arr.length >= 2);
 
   if (hasMultiNodeLevels) {
-    
-    
+
+
     const intraLevelAlignScores = [];
     levelMap.forEach((lvlNodes) => {
       if (lvlNodes.length >= 2) {
@@ -673,7 +676,7 @@ export const evaluateCompositionQuality = ({
       }
     });
 
-    
+
     const centeringScores = [];
     const sortedLevels = Array.from(levelMap.keys()).sort((a, b) => a - b);
     for (let i = 0; i < sortedLevels.length - 1; i++) {
@@ -719,7 +722,7 @@ export const evaluateCompositionQuality = ({
     const allAlign = [...intraLevelAlignScores, ...centeringScores];
     alignment = allAlign.length > 0 ? allAlign.reduce((s, v) => s + v, 0) / allAlign.length : 10;
 
-    
+
     const interLevelGaps = [];
     for (let i = 0; i < sortedLevels.length - 1; i++) {
       const l1 = levelMap.get(sortedLevels[i]);
@@ -735,7 +738,7 @@ export const evaluateCompositionQuality = ({
       }
     }
 
-    
+
     const siblingGaps = [];
     sortedLevels.forEach((lvl) => {
       const nodes = levelMap.get(lvl);
@@ -779,7 +782,7 @@ export const evaluateCompositionQuality = ({
 
     spacing = (interSpacingScore + siblingSpacingScore) / 2;
   } else {
-    
+
     if (boundsList.length >= 2) {
       if (orientation === 'horizontal') {
         const cyVals = boundsList.map((b) => b.cy);
@@ -800,7 +803,7 @@ export const evaluateCompositionQuality = ({
       }
     }
 
-    
+
     if (boundsList.length >= 3) {
       const sorted = orientation === 'horizontal'
         ? [...boundsList].sort((a, b) => a.x - b.x)
@@ -820,7 +823,7 @@ export const evaluateCompositionQuality = ({
       const gapRatio = minGap > 0 ? maxGap / minGap : 1;
 
       if (minGap < 0) {
-        spacing = 2.0; 
+        spacing = 2.0;
       } else if (gapDiff <= 6) {
         spacing = 10;
       } else if (gapDiff <= 15) {
@@ -835,7 +838,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  
+
   let directionalClarity = 10;
   if (structureType === STRUCTURE_TYPES.FLOW && explicitEdges.length > 0) {
     let backwardCount = 0;
@@ -862,7 +865,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  
+
   let connectorCrossings = 10;
   if (explicitEdges.length >= 2) {
     let crossings = 0;
@@ -891,7 +894,7 @@ export const evaluateCompositionQuality = ({
     connectorCrossings = Math.max(1, 10 - crossings * 3.5);
   }
 
-  
+
   let relativeOrdering = 10;
   if (boundsList.length >= 2) {
     if (structureType === STRUCTURE_TYPES.SEQUENCE || structureType === STRUCTURE_TYPES.FLOW) {
@@ -901,7 +904,7 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  
+
   let whitespace = 10;
   if (boundsList.length >= 2) {
     let maxLocalGap = 0;
@@ -913,7 +916,7 @@ export const evaluateCompositionQuality = ({
         if (dist > maxLocalGap) maxLocalGap = dist;
       }
     }
-    
+
     if (maxLocalGap > 700) {
       whitespace = 2.0;
     } else if (maxLocalGap > 500) {
@@ -925,8 +928,8 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  
-  
+
+
   if (boundsList.length === 2 && spacing === 10) {
     const b0 = boundsList[0];
     const b1 = boundsList[1];
@@ -940,7 +943,7 @@ export const evaluateCompositionQuality = ({
       const bot = b0.y <= b1.y ? b1 : b0;
       edgeGap = bot.y - (top.y + top.height);
     }
-    
+
     if (edgeGap > 500) {
       spacing = 2.5;
     } else if (edgeGap > 300) {
@@ -952,12 +955,12 @@ export const evaluateCompositionQuality = ({
     }
   }
 
-  
+
   const hierarchy = 9.0;
 
-  
-  
-  
+
+
+
   let connectorAttachment = null;
   const connectorAttachmentDetails = [];
 
@@ -992,7 +995,7 @@ export const evaluateCompositionQuality = ({
 
       perConnectorScores.push(score);
 
-      
+
       const srcBoundaryPoint = srcShape ? {
         x: cd.sourceAnchor?.x ?? 0,
         y: cd.sourceAnchor?.y ?? 0
@@ -1023,13 +1026,13 @@ export const evaluateCompositionQuality = ({
     connectorAttachment = perConnectorScores.reduce((s, v) => s + v, 0) / perConnectorScores.length;
   }
 
-  
-  
-  
+
+
+
   const effectiveAttachment = connectorAttachment !== null ? connectorAttachment : 10;
 
-  
-  
+
+
   const readability = Number((
     alignment * 0.22 +
     spacing * 0.22 +
@@ -1040,21 +1043,21 @@ export const evaluateCompositionQuality = ({
     hierarchy * 0.05
   ).toFixed(2));
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   const minCore = Math.min(alignment, spacing, directionalClarity, whitespace, effectiveAttachment);
   const weighted = (
     alignment * 0.20 +
@@ -1092,12 +1095,12 @@ export const calculateMovementCost = ({
   candidateQuality,
   isBranchingOrMerge = false
 }) => {
-  
+
   let cost = objectCount * 0.35;
   if (isBranchingOrMerge) cost += 0.5;
 
-  
-  
+
+
   if (currentQuality >= 8.5) {
     cost += 2.0;
   }
@@ -1198,7 +1201,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   const claimedObjectIds = new Set();
   const claimedConnectorIds = new Set();
 
-  
+
   const creativeObjects = rawObjects.filter((o) => {
     const sem = getSemanticType(o);
     if (sem === 'connector' || o.isConnector === true || isConnectorPath(o)) return false;
@@ -1225,7 +1228,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   }
 
-  
+
   const structuralObjects = rawObjects.filter((o) => {
     const sem = getSemanticType(o);
     return sem === 'line' || o.isSkribeLine || o.metadata?.isSkribeLine || o.isStraightLine || o.metadata?.isStraightLine;
@@ -1249,7 +1252,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  
+
   const connectorObjects = rawObjects.filter((o) => getSemanticType(o) === 'connector');
   const explicitEdges = [];
   const unknownConnectors = [];
@@ -1279,7 +1282,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  
+
   const adj = new Map();
   const connMap = new Map();
   explicitEdges.forEach((e) => {
@@ -1293,7 +1296,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     connMap.get(pairKey).push(e.connId);
   });
 
-  
+
   const visited = new Set();
   const sortedGraphNodes = [...adj.keys()].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -1329,7 +1332,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         (e) => component.includes(e.srcId) && component.includes(e.tgtId)
       );
 
-      
+
       let totalDx = 0;
       let totalDy = 0;
       compEdges.forEach((e) => {
@@ -1341,7 +1344,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
 
       const orientation = totalDy > totalDx * 1.2 ? 'vertical' : 'horizontal';
 
-      
+
       const outDegrees = new Map();
       const inDegrees = new Map();
       const compAdj = new Map();
@@ -1363,8 +1366,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       if (hasBranch) primaryTemplate = TEMPLATE_TYPES.FLOW_BRANCH;
       if (hasMerge) primaryTemplate = TEMPLATE_TYPES.FLOW_MERGE;
 
-      
-      
+
+
       let compRoots = component.filter((id) => inDegrees.get(id) === 0);
       if (compRoots.length === 0) {
         compRoots = [[...component].sort((a, b) => (inDegrees.get(a) - inDegrees.get(b)) || String(a).localeCompare(String(b)))[0]];
@@ -1431,15 +1434,15 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
 
       const currentNodes = compObjects.map((obj) => ({ id: obj.id, ...getObjectBounds(obj) }));
 
-      
-      
-      
+
+
+
       const currentConnectors = compEdges.map((e) => {
         const connObj = objectMap.get(e.connId);
         const srcB = getObjectBounds(objectMap.get(e.srcId));
         const tgtB = getObjectBounds(objectMap.get(e.tgtId));
 
-        
+
         const shaftEndpoints = connObj ? extractSemanticShaftEndpoints(connObj) : null;
 
         return {
@@ -1453,11 +1456,11 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         };
       });
 
-      
-      
-      
-      
-      
+
+
+
+
+
       const connectorAttachmentData = currentConnectors
         .filter((cc) => cc.shaftEndpoints !== null)
         .map((cc) => ({
@@ -1492,6 +1495,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       const nonMemberObjects = rawObjects.filter(
         (o) => !memberNodeIds.has(o.id) && !memberOwnedTextIds.has(o.id) && !memberConnIds.has(o.id)
       );
+      console.log('[DEBUG] nonMemberObjects:', nonMemberObjects.map(o => o.id));
 
       const currentLabels = [];
       component.forEach((nId) => {
@@ -1572,9 +1576,9 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         };
       });
 
-      
-      
-      
+
+
+
       const candidateConnAttData = candidateGeometry.connectors.map((cc) => ({
         connId: cc.connId,
         sourceShapeId: cc.srcId,
@@ -1597,9 +1601,9 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       const candidateQuality = candidateQualityMetrics.quality;
       let benefit = Math.max(0, Number((candidateQuality - currentQualityMetrics.quality).toFixed(2)));
 
-      
-      
-      
+
+
+
       if (!geoComparison.hasMeaningfulVisualChange) {
         benefit = 0;
       }
@@ -1647,7 +1651,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           risk,
           reason: `Flowchart graph of ${nodeCount} nodes organized into clean ${orientation} flow levels.`,
 
-          
+
           candidateCompleteBounds: primaryCompleteGeom.candidateCompleteBounds,
           candidateNodeBounds: primaryCompleteGeom.candidateNodeBounds,
           candidateLabelBounds: primaryCompleteGeom.candidateLabelBounds,
@@ -1668,7 +1672,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         }
       ];
 
-      
+
       if (nodeCount <= 5 && !hasBranch && !hasMerge) {
         const altTemplate = orientation === 'horizontal' ? TEMPLATE_TYPES.FLOW_VERTICAL : TEMPLATE_TYPES.FLOW_HORIZONTAL;
         const altOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
@@ -1727,7 +1731,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           risk: altRisk,
           reason: `Alternative ${altTemplate === TEMPLATE_TYPES.FLOW_HORIZONTAL ? 'horizontal' : 'vertical'} flow candidate.`,
 
-          
+
           candidateCompleteBounds: altCompleteGeom.candidateCompleteBounds,
           candidateNodeBounds: altCompleteGeom.candidateNodeBounds,
           candidateLabelBounds: altCompleteGeom.candidateLabelBounds,
@@ -1779,7 +1783,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  
+
   const unverifiedConnectors = unknownConnectors
     .map((cId) => objectMap.get(cId))
     .filter(Boolean)
@@ -1893,8 +1897,14 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       routeType: association.routeType || 'straight'
     });
 
+    const memberOwnedTextIds = new Set();
+    const srcTexts = ownership?.ownedByOwner?.get(srcId) || [];
+    srcTexts.forEach((tId) => memberOwnedTextIds.add(tId));
+    const tgtTexts = ownership?.ownedByOwner?.get(tgtId) || [];
+    tgtTexts.forEach((tId) => memberOwnedTextIds.add(tId));
+
     const otherObjects = rawObjects.filter(
-      (o) => o.id !== conn.id && o.id !== srcId && o.id !== tgtId
+      (o) => o.id !== conn.id && o.id !== srcId && o.id !== tgtId && !memberOwnedTextIds.has(o.id)
     );
 
     let candA = null;
@@ -2147,7 +2157,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  
+
   unknownConnectors.filter((cId) => !claimedConnectorIds.has(cId)).forEach((cId) => {
     claimedObjectIds.add(cId);
     claimedConnectorIds.add(cId);
@@ -2181,13 +2191,13 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   });
 
-  
+
   const notesGroups = (semanticScene?.groups || []).filter((g) => {
     const isUnassigned = (g.id && g.id.includes('unassigned')) || (g.purpose && g.purpose.toLowerCase().includes('unassigned'));
     return !isUnassigned && g.type === 'notes' && Array.isArray(g.objectIds) && g.objectIds.length >= 2;
   });
 
-  
+
   const unclaimedNotes = rawObjects.filter((o) => {
     if (claimedObjectIds.has(o.id)) return false;
     const sem = getSemanticType(o);
@@ -2195,7 +2205,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   });
 
   if (unclaimedNotes.length >= 2) {
-    
+
     const noteClusters = [];
     const noteVisited = new Set();
 
@@ -2269,7 +2279,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     });
   }
 
-  
+
   const conceptGroups = (semanticScene?.groups || []).filter((g) => {
     const isUnassigned = (g.id && g.id.includes('unassigned')) || (g.purpose && g.purpose.toLowerCase().includes('unassigned'));
     return !isUnassigned && ['concept', 'diagram'].includes(g.type) && Array.isArray(g.objectIds) && g.objectIds.length >= 2;
@@ -2337,7 +2347,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  
+
   const annotations = (semanticScene?.annotations || []).filter((ann) => {
     return ann.objectId && Array.isArray(ann.targetObjectIds) && ann.targetObjectIds.length > 0;
   });
@@ -2374,12 +2384,12 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
     }
   });
 
-  
+
   rawObjects.forEach((obj) => {
     if (claimedObjectIds.has(obj.id)) return;
     const sem = getSemanticType(obj);
 
-    
+
     const parent = ownership.ownerByText.get(obj.id);
     if (parent && claimedObjectIds.has(parent)) {
       return;
@@ -2413,7 +2423,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
   const maxRisk = options.maxRisk ?? 2.0;
 
   visualStructures.forEach((struct) => {
-    
+
     if (![STRUCTURE_TYPES.FLOW, STRUCTURE_TYPES.SEQUENCE, STRUCTURE_TYPES.CLUSTER, STRUCTURE_TYPES.ANNOTATION].includes(struct.type)) {
       return;
     }
@@ -2430,7 +2440,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
       const candCost = cand.movementCost ?? struct.movementCost ?? 1.0;
       const candRisk = cand.risk ?? struct.risk ?? 1.0;
 
-      
+
       if (
         candConfidence >= minCandidateConfidence &&
         benefit >= minCompositionBenefit &&
@@ -2463,7 +2473,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
           reason: cand.reason || struct.reason,
           evidence: [...(struct.evidence || []), `template:${cand.template}`],
 
-          
+
           candidateCompleteBounds: cand.candidateCompleteBounds || null,
           candidateNodeBounds: cand.candidateNodeBounds || [],
           candidateLabelBounds: cand.candidateLabelBounds || [],

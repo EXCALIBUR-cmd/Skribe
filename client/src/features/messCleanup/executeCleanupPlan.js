@@ -137,7 +137,7 @@ const executeCleanFlowchart = ({
 
   const connectorEndpoints = new Map();
 
-  
+
   if (Array.isArray(action.verifiedEdges)) {
     action.verifiedEdges.forEach((e) => {
       if (e.connId && e.srcId && e.tgtId && nodeSet.has(e.srcId) && nodeSet.has(e.tgtId) && e.srcId !== e.tgtId) {
@@ -213,7 +213,7 @@ const executeCleanFlowchart = ({
 
   let isVertical = false;
   if (action.orientation === 'vertical' || action.orientation === 'horizontal') {
-    
+
     isVertical = action.orientation === 'vertical';
   } else if (connectorEndpoints.size > 0) {
     isVertical = totalDy > totalDx * 1.1;
@@ -228,7 +228,7 @@ const executeCleanFlowchart = ({
   const levelMap = new Map();
 
   if (action.levelAssignment && typeof action.levelAssignment === 'object') {
-    
+
     Object.entries(action.levelAssignment).forEach(([id, lvl]) => {
       if (nodeSet.has(id)) {
         levelMap.set(id, Number(lvl));
@@ -238,8 +238,8 @@ const executeCleanFlowchart = ({
       if (!levelMap.has(id)) levelMap.set(id, 0);
     });
   } else {
-    
-    
+
+
     const hasResolvedEdges = connectorEndpoints.size > 0 || Array.from(adj.values()).some((arr) => arr.length > 0);
     if (!hasResolvedEdges) {
       return {
@@ -445,6 +445,10 @@ const executeCleanFlowchart = ({
             y: minY,
             width: Math.max(2, maxX - minX),
             height: Math.max(2, maxY - minY)
+          };
+          connP.center = {
+            x: connP.bounds.x + connP.bounds.width / 2,
+            y: connP.bounds.y + connP.bounds.height / 2
           };
           connP.pathCommands = transformed.pathCommands;
           connP.pathData = transformed.pathStr;
@@ -795,10 +799,10 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
       executedActions.push(action);
     }
 
-    
-    
-    
-    
+
+
+
+
     else if (action.type === 'repairConnector') {
       const repairs = action.connectorRepairs || [];
       let anyRepairApplied = false;
@@ -809,27 +813,31 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         const connP = placementMap.get(repair.connectorId);
         if (!connP) continue;
 
-        
+
         if (!Array.isArray(repair.shaftPath) || repair.shaftPath.length === 0) continue;
         if (!repair.sourceAnchor || !repair.targetAnchor) continue;
 
-        
+
         const fullPath = [...repair.shaftPath.map((c) => [...c])];
         if (Array.isArray(repair.arrowheadPath)) {
           repair.arrowheadPath.forEach((c) => fullPath.push([...c]));
         }
 
-        
+
         const pathBounds = computePathBounds(fullPath);
         if (!pathBounds) continue;
 
-        
+
         connP.position = { x: pathBounds.x, y: pathBounds.y };
         connP.bounds = {
           x: pathBounds.x,
           y: pathBounds.y,
           width: Math.max(2, pathBounds.width),
           height: Math.max(2, pathBounds.height)
+        };
+        connP.center = {
+          x: connP.bounds.x + connP.bounds.width / 2,
+          y: connP.bounds.y + connP.bounds.height / 2
         };
         connP.pathCommands = fullPath;
         connP.pathData = fullPath.map((cmd) => `${cmd[0]} ${cmd.slice(1).map((n) => typeof n === 'number' ? Number(n.toFixed(2)) : n).join(' ')}`).join(' ');
@@ -842,7 +850,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         connP.arrowheadPath = repair.arrowheadPath;
         connP.routeType = repair.routeType;
 
-        
+
         const hist = transformationHistory.get(repair.connectorId) || [];
         hist.push({ actionId: action.id, type: 'repairConnector', dx: 0, dy: 0 });
 
