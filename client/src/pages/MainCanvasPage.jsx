@@ -739,7 +739,12 @@ export const MainCanvasPage = () => {
         });
       }
 
-      const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot);
+      const activeObjects = canvas?.getActiveObjects?.() || [];
+      const selectedObjectIds = activeObjects.map(o => o.id || o.skribeId).filter(Boolean);
+      const scopeType = selectedObjectIds.length > 0 ? 'SELECTION' : 'BOARD';
+      const cleanupContext = { scopeType, selectedObjectIds };
+
+      const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot, { cleanupContext });
       const layoutProposal = createLayoutProposal(organizationPlan, workspaceModel);
       runBindingDiagnostic(workspaceModel, organizationPlan, null);
 

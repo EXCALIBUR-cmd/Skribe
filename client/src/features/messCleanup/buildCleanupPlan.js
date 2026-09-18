@@ -16,7 +16,8 @@ import {
 import { resolveCleanupOpportunities } from './resolveCleanupOpportunity.js';
 import {
   discoverVisualStructures,
-  generateCompositionCandidates
+  generateCompositionCandidates,
+  TEMPLATE_TYPES
 } from './discoverVisualStructures.js';
 import { generateConnectorRepairs } from './connectorRepair.js';
 
@@ -92,7 +93,22 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
   });
 
 
-  const visualStructures = discoverVisualStructures(wsModel, semanticScene, options);
+  let visualStructures = discoverVisualStructures(wsModel, semanticScene, options);
+
+  if (options.cleanupContext?.scopeType === 'SELECTION') {
+    const selectedIds = new Set(options.cleanupContext.selectedObjectIds || []);
+    visualStructures.forEach(struct => {
+      const hasSelectedMember = struct.objectIds.some(id => selectedIds.has(id)) ||
+                                struct.connectorIds?.some(id => selectedIds.has(id));
+      if (!hasSelectedMember && struct.type !== 'creative' && struct.type !== 'structural') {
+        struct.cleanupEligibility = 'outside-scope';
+        struct.candidateCompositions = [{ template: TEMPLATE_TYPES.PRESERVE, quality: 10 }];
+        struct.compositionBenefit = 0;
+        struct.reason = 'Structure is outside of active selection scope';
+      }
+    });
+  }
+
   const compositionCandidates = generateCompositionCandidates(visualStructures, options);
   const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, options);
 

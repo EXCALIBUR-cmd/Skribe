@@ -31,7 +31,7 @@ const expandClusterToUnits = (cluster, unitsByObjectId) => {
   return [...expanded];
 };
 
-export const runLocalSemanticAnalysis = (workspaceModel) => {
+export const runLocalSemanticAnalysis = (workspaceModel, options = {}) => {
   const objects = [...(workspaceModel?.board?.objects || [])]
     .filter((object) => object && object.id)
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -364,22 +364,22 @@ export const runLocalSemanticAnalysis = (workspaceModel) => {
   };
 };
 
-export const analyzeWorkspace = (workspaceModel, screenshot = null) => {
+export const analyzeWorkspace = (workspaceModel, screenshot = null, options = {}) => {
   if (screenshot && typeof screenshot === 'string' && screenshot.trim()) {
     return (async () => {
       try {
-        const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot);
+        const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot, options);
         return validateOrganizationPlan(workspaceModel, rawPlan);
       } catch (err) {
         console.warn(
           `[MessCleanup] External AI semantic analysis unavailable (${err.message}). Falling back gracefully to deterministic local semantic engine.`
         );
-        return runLocalSemanticAnalysis(workspaceModel);
+        return runLocalSemanticAnalysis(workspaceModel, options);
       }
     })();
   }
 
-  return runLocalSemanticAnalysis(workspaceModel);
+  return runLocalSemanticAnalysis(workspaceModel, options);
 };
 
 export default analyzeWorkspace;

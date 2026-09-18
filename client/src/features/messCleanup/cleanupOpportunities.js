@@ -750,7 +750,7 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, option
   const outliers = detectIsolatedOutlierOpportunities(rawObjects, objectMap);
   const connectorAttachmentDefects = detectConnectorAttachmentDefectOpportunities(rawObjects, objectMap);
 
-  const allOpportunities = [
+  let allOpportunities = [
     ...overlaps,
     ...brokenFlows,
     ...crossings,
@@ -762,6 +762,16 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, option
     ...cosmeticTexts,
     ...outliers
   ];
+
+  if (options.cleanupContext?.scopeType === 'SELECTION') {
+    const selectedIds = new Set(options.cleanupContext.selectedObjectIds || []);
+    allOpportunities = allOpportunities.filter(opp => {
+      // Keep opportunity if any of its objectIds or connectorIds are in the selection
+      const hasSelectedObj = opp.objectIds?.some(id => selectedIds.has(id));
+      const hasSelectedConn = opp.connectorIds?.some(id => selectedIds.has(id));
+      return hasSelectedObj || hasSelectedConn;
+    });
+  }
 
   return allOpportunities;
 };

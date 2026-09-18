@@ -431,33 +431,98 @@ export const MessCleanupPreviewModal = ({
           </button>
         </header>
 
-        {}
-        {cleanupResult && (
-          <div className="bg-primary-container/20 border-b border-outline-variant/40 px-5 py-2.5 flex items-center justify-between gap-4 text-xs">
-            <div className="flex items-center gap-2 text-on-surface font-medium truncate">
-              <span className="material-symbols-outlined text-primary text-base shrink-0">check_circle</span>
-              <span className="truncate">{cleanupResult.summary.humanSummary}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-on-surface-variant font-semibold shrink-0">
-              <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface">
-                <span className="w-2 h-2 rounded-full bg-primary"></span>
-                {cleanupResult.summary.objectsMoved ?? cleanupResult.summary.modifiedObjectCount} moved
-              </span>
-              {(cleanupResult.summary.connectorsRerouted > 0) && (
-                <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface">
-                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                  {cleanupResult.summary.connectorsRerouted} rerouted
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1 bg-surface-container-high px-2.5 py-1 rounded-full text-[11px] text-on-surface-variant">
-                <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                {cleanupResult.summary.objectsPreserved ?? cleanupResult.summary.untouchedObjectCount} preserved
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
+          {cleanupResult && (
+            <aside className="w-[320px] shrink-0 border-r border-outline-variant/60 bg-surface flex flex-col overflow-y-auto">
+              <div className="px-5 py-4 border-b border-outline-variant/40 bg-primary-container/10">
+                <div className="flex items-center gap-2 mb-2 text-on-surface font-medium">
+                  <span className="material-symbols-outlined text-primary text-[20px]">auto_awesome</span>
+                  <span className="text-sm font-bold">Structure Summary</span>
+                </div>
+                <div className="flex flex-col gap-1.5 text-[12px] text-on-surface-variant">
+                  <div className="flex items-center justify-between">
+                    <span>Objects Moved</span>
+                    <span className="font-semibold bg-primary/10 text-primary px-2 py-0.5 rounded-full">{cleanupResult.summary.objectsMoved ?? cleanupResult.summary.modifiedObjectCount}</span>
+                  </div>
+                  {(cleanupResult.summary.connectorsRerouted > 0) && (
+                    <div className="flex items-center justify-between">
+                      <span>Connectors Rerouted</span>
+                      <span className="font-semibold bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full">{cleanupResult.summary.connectorsRerouted}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
+              <div className="flex-1 p-5 space-y-5">
+                {(() => {
+                  const structures = layoutProposal?.metadata?.cleanupPlan?.diagnostics?.structures || [];
+                  const eligibleStructures = structures.filter(s => s.cleanupEligibility !== 'outside-scope' && s.type !== 'creative' && s.type !== 'structural');
+                  const protectedCount = structures.filter(s => s.type === 'creative' || s.type === 'structural' || s.cleanupEligibility === 'outside-scope').length;
+
+                  if (eligibleStructures.length === 0) {
+                    return (
+                      <div className="text-[12px] text-on-surface-variant">
+                        No safe structural cleanup opportunities found.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">
+                        Discovered Structures
+                      </div>
+
+                      <div className="space-y-3">
+                        {eligibleStructures.map(struct => {
+                          const hasPreserveOnly = struct.candidateCompositions?.every(c => c.template === 'preserve');
+                          const isRejected = !hasPreserveOnly && !cleanupResult.actions.some(a => a.objectIds?.some(id => struct.objectIds.includes(id)) || a.ownedObjectIds?.some(id => struct.objectIds.includes(id)));
+
+                          let statusText = 'Proposed Changes';
+                          let statusColor = 'text-primary';
+                          if (hasPreserveOnly) {
+                            statusText = 'Already Organized';
+                            statusColor = 'text-green-600';
+                          } else if (isRejected) {
+                            statusText = 'No Safe Cleanup';
+                            statusColor = 'text-red-600';
+                          }
+
+                          return (
+                            <div key={struct.id} className="bg-surface border border-outline-variant/40 rounded shadow-sm p-3 flex flex-col gap-1.5">
+                              <div className="flex justify-between items-center text-[12px]">
+                                <span className="font-bold text-on-surface capitalize">{struct.type.replace('_', ' ')}</span>
+                                <span className={`text-[10px] font-semibold ${statusColor}`}>{statusText}</span>
+                              </div>
+                              <div className="text-[11px] text-on-surface-variant">
+                                {struct.objectIds.length} objects, {struct.connectorIds?.length || 0} connectors
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {protectedCount > 0 && (
+                        <div className="mt-5 pt-4 border-t border-outline-variant/40 text-[11px] text-on-surface-variant">
+                          <span className="font-semibold text-on-surface">{protectedCount} items</span> protected or outside scope.
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </aside>
+          )}
+
+          {/* Canvas Area */}
+          <div
+            className="relative flex-1 overflow-auto bg-slate-50/50 p-6 flex justify-center items-center"
+            style={{
+              backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
+              backgroundSize: '24px 24px'
+            }}
+          >
           {loading && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-on-surface-variant">Preparing preview...</div>}
           {!loading && error && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-error">{error}</div>}
           {!loading && !error && (
@@ -593,6 +658,7 @@ export const MessCleanupPreviewModal = ({
               </div>
             </div>
           )}
+          </div>
         </div>
 
         <footer className="flex items-center justify-end gap-3 border-t border-outline-variant/60 px-5 py-4">
