@@ -321,7 +321,17 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
         confidence: assoc.associationConfidence,
         reason: `Repaired detached connector '${connId}' attaching '${assoc.sourceCandidateId}' to '${assoc.targetCandidateId}' (confidence ${(assoc.associationConfidence * 100).toFixed(0)}%).`,
         evidence: [...(opportunity.evidence || []), ...assoc.evidence, 'detached-flow-repair'],
-        connectorRepairs: [repairPayload]
+        connectorRepairs: [
+          (function(r) {
+            const cleaned = { ...r };
+            delete cleaned.startPoint;
+            delete cleaned.endPoint;
+            delete cleaned.pathCommands;
+            delete cleaned.pathData;
+            delete cleaned.pathChanged;
+            return cleaned;
+          })(repairPayload)
+        ]
       },
       rejectedReason: null
     };
@@ -346,7 +356,15 @@ export const resolveCleanupOpportunity = (opportunity, context = {}) => {
             confidence: opportunity.confidence,
             reason: opportunity.reason,
             evidence: opportunity.evidence,
-            connectorRepairs: opportunity.connectorRepairs || []
+            connectorRepairs: (opportunity.connectorRepairs || []).map(r => {
+              const cleaned = { ...r };
+              delete cleaned.startPoint;
+              delete cleaned.endPoint;
+              delete cleaned.pathCommands;
+              delete cleaned.pathData;
+              delete cleaned.pathChanged;
+              return cleaned;
+            })
           },
           rejectedReason: null
         };

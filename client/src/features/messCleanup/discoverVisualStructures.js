@@ -2490,7 +2490,8 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
           collisionObjectIds: cand.collisionObjectIds || cand.collidedObjectIds || [],
           safe: cand.safe ?? (cand.newProtectedCollisions === 0 && cand.candidateProtectedCollisions === 0),
           rejectionReason: cand.rejectionReason || (cand.safe === false ? 'protectedObjectCollision' : null),
-          safeRegion: cand.safeRegion || null
+          safeRegion: cand.safeRegion || null,
+          connectorRepairs: cand.connectorRepairs || struct.connectorRepairs || []
         });
       }
     });
