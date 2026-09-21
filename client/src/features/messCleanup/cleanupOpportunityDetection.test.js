@@ -140,8 +140,15 @@ test('8. Flowchart disorder detected only with verified topology', () => {
     groups: [{ id: 'g_flow', type: 'flowchart', objectIds: ['n1', 'n2', 'c1'] }]
   };
   const objectMap = new Map([['n1', n1], ['n2', n2], ['c1', c1]]);
+  const mockStructs = [{
+    id: 'struct_flow',
+    type: 'flow',
+    objectIds: ['n1', 'n2'],
+    connectorIds: ['c1'],
+    relationships: [{ type: 'connectedTo', sourceObjectId: 'n1', targetObjectId: 'n2', connectorId: 'c1' }]
+  }];
 
-  const opps = detectBrokenFlowOpportunities([n1, n2, c1], objectMap, scene);
+  const opps = detectBrokenFlowOpportunities(mockStructs, objectMap, scene);
   assert.equal(opps.length, 1);
   assert.equal(opps[0].type, OPPORTUNITY_TYPES.BROKEN_FLOW);
   assert.ok(opps[0].metadata.hasDisorder);
@@ -325,8 +332,8 @@ test('22. Unsupported resolution remains untouched without synthetic action', ()
 });
 
 test('23. Real-board mixed whiteboard opportunity detection', () => {
-  const f1 = normalizeObject({ id: 'f1', type: 'rect', left: 100, top: 100, width: 100, height: 80 });
-  const f2 = normalizeObject({ id: 'f2', type: 'rect', left: 300, top: 120, width: 100, height: 80 });
+  const f1 = normalizeObject({ id: 'f1', type: 'rect', left: 300, top: 100, width: 100, height: 80 });
+  const f2 = normalizeObject({ id: 'f2', type: 'rect', left: 100, top: 120, width: 100, height: 80 });
   const conn = normalizeObject({ id: 'c1', type: 'path', isConnector: true, sourceShapeId: 'f1', targetShapeId: 'f2', left: 200, top: 140, width: 100, height: 10 });
   const n1 = normalizeObject({ id: 'n1', type: 'note', isStickyNote: true, left: 100, top: 400, width: 150, height: 150 });
   const n2 = normalizeObject({ id: 'n2', type: 'note', isStickyNote: true, left: 280, top: 400, width: 150, height: 150 });

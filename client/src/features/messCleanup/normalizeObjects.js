@@ -294,6 +294,8 @@ export const normalizeObject = (object, zIndex = 0) => {
     visible: object.visible !== false,
     shadow: object.shadow ? cloneJsonValue(object.shadow) : null,
     backgroundColor: getColorString(object.backgroundColor),
+    pathData: object.pathData || object.connector?.pathData || null,
+    pathCommands: object.pathCommands || object.connector?.pathCommands || null,
     startArrow: object.startArrow || object.connector?.startArrow || false,
     endArrow: object.endArrow !== undefined ? !!object.endArrow : (object.connector?.endArrow !== undefined ? !!object.connector.endArrow : (semanticType === 'connector')),
     hasExplicitArrow: Boolean(

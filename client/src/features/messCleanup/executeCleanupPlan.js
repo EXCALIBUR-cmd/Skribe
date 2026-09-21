@@ -644,10 +644,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         const dx = targetX - pText.bounds.x;
         const dy = targetY - pText.bounds.y;
 
-        pText.position.x = targetX;
-        pText.position.y = targetY;
-        pText.bounds.x = targetX;
-        pText.bounds.y = targetY;
+        translatePlacement(textId, dx, dy, action.id, 'attachText');
         pText.rotation = 0;
 
         pShape.relationshipMetadata = pShape.relationshipMetadata || {};
@@ -655,9 +652,6 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         pShape.relationshipMetadata.attachedTextId = textId;
         pText.relationshipMetadata.parentShapeId = shapeId;
 
-        translationDeltas.set(textId, { dx, dy });
-        const hist = transformationHistory.get(textId) || [];
-        hist.push({ actionId: action.id, type: 'attachText', dx, dy });
         executedActions.push(action);
       }
     }

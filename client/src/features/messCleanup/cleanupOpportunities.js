@@ -135,24 +135,17 @@ export const detectOverlapOpportunities = (objects, objectMap, ownership) => {
   return opportunities;
 };
 
-export const detectBrokenFlowOpportunities = (objects, objectMap, semanticScene) => {
+export const detectBrokenFlowOpportunities = (visualStructures, objectMap, semanticScene) => {
   const opportunities = [];
-  const connectorObjects = objects.filter((o) => getSemanticType(o) === 'connector');
   const explicitEdges = [];
 
-  connectorObjects.forEach((conn) => {
-    const srcId = conn.sourceShapeId || conn.relationshipMetadata?.sourceShapeId || null;
-    const tgtId = conn.targetShapeId || conn.relationshipMetadata?.targetShapeId || null;
-
-    if (srcId && tgtId && objectMap.has(srcId) && objectMap.has(tgtId)) {
-      const srcObj = objectMap.get(srcId);
-      const tgtObj = objectMap.get(tgtId);
-      const srcSem = getSemanticType(srcObj);
-      const tgtSem = getSemanticType(tgtObj);
-
-      if (srcSem === 'shape' && tgtSem === 'shape' && !srcObj.isStickyNote && !tgtObj.isStickyNote) {
-        explicitEdges.push({ connId: conn.id, srcId, tgtId });
-      }
+  (visualStructures || []).forEach((struct) => {
+    if (struct.relationships && Array.isArray(struct.relationships)) {
+      struct.relationships.forEach((rel) => {
+        if (rel.type === 'connectedTo' && rel.connectorId && rel.sourceObjectId && rel.targetObjectId) {
+          explicitEdges.push({ connId: rel.connectorId, srcId: rel.sourceObjectId, tgtId: rel.targetObjectId });
+        }
+      });
     }
   });
 
@@ -731,7 +724,7 @@ export const detectConnectorAttachmentDefectOpportunities = (objects, objectMap)
   return opportunities;
 };
 
-export const detectCleanupOpportunities = (workspaceModel, semanticScene, options = {}) => {
+export const detectCleanupOpportunities = (workspaceModel, semanticScene, visualStructures = [], options = {}) => {
   const rawObjects = workspaceModel?.board?.objects || workspaceModel?.objects || [];
   const objectMap = new Map(rawObjects.map((o) => [o.id, o]));
 
@@ -740,7 +733,7 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, option
   const ownership = resolveContainerOwnership(visualObjects, voMap);
 
   const overlaps = detectOverlapOpportunities(rawObjects, objectMap, ownership);
-  const brokenFlows = detectBrokenFlowOpportunities(rawObjects, objectMap, semanticScene);
+  const brokenFlows = detectBrokenFlowOpportunities(visualStructures, objectMap, semanticScene);
   const crossings = detectConnectorCrossingOpportunities(rawObjects, objectMap);
   const alignments = detectAlignmentOpportunities(rawObjects, objectMap, semanticScene);
   const spacings = detectSpacingOpportunities(rawObjects, objectMap, semanticScene);

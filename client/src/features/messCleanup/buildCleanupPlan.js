@@ -110,7 +110,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
   }
 
   const compositionCandidates = generateCompositionCandidates(visualStructures, options);
-  const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, options);
+  const allOpportunities = detectCleanupOpportunities(wsModel, semanticScene, visualStructures, options);
 
   const {
     selectedOpportunities,

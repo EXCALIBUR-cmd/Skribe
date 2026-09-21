@@ -165,3 +165,16 @@ export const isVerticalDividerUnit = (u, options = {}) => {
     : NOTEBOOK_CONSTANTS.VERTICAL_DIVIDER_MIN_ASPECT_RATIO;
   return u.height >= minHeight && (u.height / Math.max(1, u.width)) >= minAspect;
 };
+
+export const createCanvasStructure = (config = {}) => {
+  return {
+    id: config.id || `struct_${Math.random().toString(36).substr(2, 9)}`,
+    type: config.type || 'unknown',
+    objectIds: config.objectIds || [],
+    connectorIds: config.connectorIds || [],
+    relationships: config.relationships || [],
+    confidence: typeof config.confidence === 'number' ? config.confidence : 1.0,
+    evidence: config.evidence || [],
+    bounds: config.bounds || null
+  };
+};
