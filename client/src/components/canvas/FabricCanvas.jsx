@@ -776,15 +776,16 @@ export const FabricCanvas = forwardRef(({
       canvas.selection = false;
       canvas.skipTargetFind = true;
     } else {
-      canvas.skipTargetFind = false;
       const currentTool = activeToolRef.current;
       if (currentTool === 'draw' || currentTool === 'line') {
+        canvas.skipTargetFind = true;
         canvas.isDrawingMode = false;
         canvas.selection = false;
         canvas.defaultCursor = 'crosshair';
         canvas.hoverCursor = 'crosshair';
         canvas.setCursor('crosshair');
       } else if (currentTool === 'eraser') {
+        canvas.skipTargetFind = false;
         const eraserCursor = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23ef4444' stroke='%23ffffff' stroke-width='1.5'><path d='M16.24 3.56l4.95 4.95a2 2 0 0 1 0 2.83L11.8 20.73a2 2 0 0 1-2.83 0l-4.95-4.95a2 2 0 0 1 0-2.83L13.41 3.56a2 2 0 0 1 2.83 0z'/><path d='M18 13l-4 4'/></svg>\") 4 20, pointer";
         canvas.isDrawingMode = false;
         canvas.selection = false;
@@ -792,6 +793,7 @@ export const FabricCanvas = forwardRef(({
         canvas.hoverCursor = eraserCursor;
         canvas.setCursor(eraserCursor);
       } else {
+        canvas.skipTargetFind = currentTool !== 'select';
         eraserManager.clearHoverPreview(canvas);
         canvas.isDrawingMode = false;
         canvas.selection = currentTool === 'select';
@@ -3488,7 +3490,6 @@ export const FabricCanvas = forwardRef(({
 
         canvas.add(pathObj);
         notifyLocalObjectAdded(pathObj);
-        canvas.setActiveObject(pathObj);
         canvas.requestRenderAll();
         saveState();
         if (onToolComplete) onToolComplete();
@@ -3523,7 +3524,6 @@ export const FabricCanvas = forwardRef(({
             }
             canvas.add(finalStrokeObj);
             notifyLocalPathCreated(finalStrokeObj);
-            canvas.setActiveObject(finalStrokeObj);
             canvas.requestRenderAll();
             saveState();
           }

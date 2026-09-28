@@ -643,4 +643,394 @@ export const invertWorldPathCommands = (pathInput, object = {}) => {
   });
 };
 
+export const getShapePolygonVertices = (shape) => {
+  const x = shape.bounds?.x ?? shape.position?.x ?? shape.left ?? 0;
+  const y = shape.bounds?.y ?? shape.position?.y ?? shape.top ?? 0;
+  const w = shape.bounds?.width ?? shape.size?.width ?? shape.width ?? 0;
+  const h = shape.bounds?.height ?? shape.size?.height ?? shape.height ?? 0;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const type = String(shape.shapeType || shape.type || 'rect').toLowerCase();
+
+  if (type === 'triangle') {
+    return [
+      { x: cx, y: y },
+      { x: x + w, y: y + h },
+      { x: x, y: y + h }
+    ];
+  }
+  if (type === 'diamond') {
+    return [
+      { x: cx, y: y },
+      { x: x + w, y: cy },
+      { x: cx, y: y + h },
+      { x: x, y: cy }
+    ];
+  }
+  if (type === 'hexagon' || type === 'polygon') {
+    if (Array.isArray(shape.points) && shape.points.length >= 3) {
+      return shape.points.map((p) => ({ x: x + p.x, y: y + p.y }));
+    }
+    return [
+      { x: x + w * 0.25, y: y },
+      { x: x + w * 0.75, y: y },
+      { x: x + w, y: cy },
+      { x: x + w * 0.75, y: y + h },
+      { x: x + w * 0.25, y: y + h },
+      { x: x, y: cy }
+    ];
+  }
+  return [
+    { x: x, y: y },
+    { x: x + w, y: y },
+    { x: x + w, y: y + h },
+    { x: x, y: y + h }
+  ];
+};
+
+const ccwPoint = (p1, p2, p3) => (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x);
+
+export const segmentsIntersectPoints = (p1, p2, p3, p4) => {
+  const EPSILON = 1e-4;
+  if (
+    Math.hypot(p1.x - p3.x, p1.y - p3.y) < EPSILON ||
+    Math.hypot(p1.x - p4.x, p1.y - p4.y) < EPSILON ||
+    Math.hypot(p2.x - p3.x, p2.y - p3.y) < EPSILON ||
+    Math.hypot(p2.x - p4.x, p2.y - p4.y) < EPSILON
+  ) {
+    return false;
+  }
+  return (ccwPoint(p1, p3, p4) !== ccwPoint(p2, p3, p4)) && (ccwPoint(p1, p2, p3) !== ccwPoint(p1, p2, p4));
+};
+
+export const distPointToSegment = (p, a, b) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+};
+
+export const isPointInPolygon = (pt, vertices) => {
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+    const xi = vertices[i].x;
+    const yi = vertices[i].y;
+    const xj = vertices[j].x;
+    const yj = vertices[j].y;
+    const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+      (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+export const isPointInsideShapeInterior = (pt, shape, margin = 2) => {
+  const x = shape.bounds?.x ?? shape.position?.x ?? shape.left ?? 0;
+  const y = shape.bounds?.y ?? shape.position?.y ?? shape.top ?? 0;
+  const w = shape.bounds?.width ?? shape.size?.width ?? shape.width ?? 0;
+  const h = shape.bounds?.height ?? shape.size?.height ?? shape.height ?? 0;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const type = String(shape.shapeType || shape.type || 'rect').toLowerCase();
+
+  if (type === 'circle') {
+    const rx = Math.max(1, w / 2 - margin);
+    const ry = Math.max(1, h / 2 - margin);
+    return (((pt.x - cx) / rx) ** 2 + ((pt.y - cy) / ry) ** 2) < 1;
+  }
+
+  const vertices = getShapePolygonVertices(shape);
+  if (!isPointInPolygon(pt, vertices)) return false;
+
+  for (let i = 0; i < vertices.length; i++) {
+    const v1 = vertices[i];
+    const v2 = vertices[(i + 1) % vertices.length];
+    if (distPointToSegment(pt, v1, v2) <= margin) return false;
+  }
+  return true;
+};
+
+export const segmentIntersectsShape = (p1, p2, shape) => {
+  const x = shape.bounds?.x ?? shape.position?.x ?? shape.left ?? 0;
+  const y = shape.bounds?.y ?? shape.position?.y ?? shape.top ?? 0;
+  const w = shape.bounds?.width ?? shape.size?.width ?? shape.width ?? 0;
+  const h = shape.bounds?.height ?? shape.size?.height ?? shape.height ?? 0;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const type = String(shape.shapeType || shape.type || 'rect').toLowerCase();
+
+  const minSegX = Math.min(p1.x, p2.x);
+  const maxSegX = Math.max(p1.x, p2.x);
+  const minSegY = Math.min(p1.y, p2.y);
+  const maxSegY = Math.max(p1.y, p2.y);
+
+  if (maxSegX < x - 2 || minSegX > x + w + 2 || maxSegY < y - 2 || minSegY > y + h + 2) {
+    return false;
+  }
+
+  if (type === 'circle') {
+    const r = Math.min(w, h) / 2;
+    const dist = distPointToSegment({ x: cx, y: cy }, p1, p2);
+    if (dist < r - 1) return true;
+    return false;
+  }
+
+  const vertices = getShapePolygonVertices(shape);
+  for (let i = 0; i < vertices.length; i++) {
+    const v1 = vertices[i];
+    const v2 = vertices[(i + 1) % vertices.length];
+    if (segmentsIntersectPoints(p1, p2, v1, v2)) {
+      return true;
+    }
+  }
+
+  const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+  if (isPointInsideShapeInterior(mid, shape, 1)) {
+    return true;
+  }
+
+  return false;
+};
+
+const sampleCubicBezierCurve = (p0, p1, p2, p3, steps = 8) => {
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const mt = 1 - t;
+    const x = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
+    const y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
+    pts.push({ x, y });
+  }
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    segs.push({ p1: pts[i], p2: pts[i + 1] });
+  }
+  return segs;
+};
+
+const sampleQuadraticBezierCurve = (p0, p1, p2, steps = 6) => {
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const mt = 1 - t;
+    const x = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x;
+    const y = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
+    pts.push({ x, y });
+  }
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    segs.push({ p1: pts[i], p2: pts[i + 1] });
+  }
+  return segs;
+};
+
+export const extractConnectorSegments = (connector) => {
+  const pathCommands = connector.worldPathCommands || connector.worldPath || connector.pathCommands || connector.path || [];
+  let commands = [];
+  if (Array.isArray(pathCommands)) {
+    commands = pathCommands;
+  } else if (typeof pathCommands === 'string') {
+    const parsed = parseConnectorPath(pathCommands);
+    commands = parsed?.allCommands || [];
+  }
+
+  const shaftSegments = [];
+  const arrowheadSegments = [];
+  let isArrow = false;
+  let curPt = { x: 0, y: 0 };
+  let subpathStart = { x: 0, y: 0 };
+  let mCount = 0;
+
+  for (const cmd of commands) {
+    const op = cmd[0];
+    if (op === 'M' || op === 'm') {
+      mCount++;
+      if (mCount > 1) {
+        isArrow = true;
+      }
+      curPt = { x: Number(cmd[1]), y: Number(cmd[2]) };
+      subpathStart = { ...curPt };
+    } else if (op === 'L' || op === 'l') {
+      const nextPt = { x: Number(cmd[1]), y: Number(cmd[2]) };
+      const seg = { p1: { ...curPt }, p2: nextPt, isArrowhead: isArrow };
+      if (isArrow) arrowheadSegments.push(seg);
+      else shaftSegments.push(seg);
+      curPt = nextPt;
+    } else if (op === 'C' || op === 'c') {
+      const p1 = { x: Number(cmd[1]), y: Number(cmd[2]) };
+      const p2 = { x: Number(cmd[3]), y: Number(cmd[4]) };
+      const p3 = { x: Number(cmd[5]), y: Number(cmd[6]) };
+      const segs = sampleCubicBezierCurve(curPt, p1, p2, p3);
+      segs.forEach((s) => {
+        s.isArrowhead = isArrow;
+        if (isArrow) arrowheadSegments.push(s);
+        else shaftSegments.push(s);
+      });
+      curPt = p3;
+    } else if (op === 'Q' || op === 'q') {
+      const p1 = { x: Number(cmd[1]), y: Number(cmd[2]) };
+      const p2 = { x: Number(cmd[3]), y: Number(cmd[4]) };
+      const segs = sampleQuadraticBezierCurve(curPt, p1, p2);
+      segs.forEach((s) => {
+        s.isArrowhead = isArrow;
+        if (isArrow) arrowheadSegments.push(s);
+        else shaftSegments.push(s);
+      });
+      curPt = p2;
+    } else if (op === 'Z' || op === 'z') {
+      if (Math.hypot(curPt.x - subpathStart.x, curPt.y - subpathStart.y) > 0.01) {
+        const seg = { p1: { ...curPt }, p2: { ...subpathStart }, isArrowhead: isArrow };
+        if (isArrow) arrowheadSegments.push(seg);
+        else shaftSegments.push(seg);
+        curPt = { ...subpathStart };
+      }
+    }
+  }
+
+  if (shaftSegments.length === 0 && Array.isArray(connector.shaftPath)) {
+    let cp = { x: 0, y: 0 };
+    for (const cmd of connector.shaftPath) {
+      if (cmd[0] === 'M') cp = { x: cmd[1], y: cmd[2] };
+      else if (cmd[0] === 'L') {
+        const np = { x: cmd[1], y: cmd[2] };
+        shaftSegments.push({ p1: { ...cp }, p2: np, isArrowhead: false });
+        cp = np;
+      }
+    }
+  }
+  if (arrowheadSegments.length === 0 && Array.isArray(connector.arrowheadPath)) {
+    let cp = { x: 0, y: 0 };
+    for (const cmd of connector.arrowheadPath) {
+      if (cmd[0] === 'M') cp = { x: cmd[1], y: cmd[2] };
+      else if (cmd[0] === 'L') {
+        const np = { x: cmd[1], y: cmd[2] };
+        arrowheadSegments.push({ p1: { ...cp }, p2: np, isArrowhead: true });
+        cp = np;
+      }
+    }
+  }
+
+  return { shaftSegments, arrowheadSegments, allSegments: [...shaftSegments, ...arrowheadSegments] };
+};
+
+export const detectConnectorCollisionsWithObstacle = (connector, obstacle, options = {}) => {
+  const connId = connector.objectId || connector.id;
+  const obsId = obstacle.objectId || obstacle.id;
+  if (!connId || !obsId || connId === obsId) return null;
+
+  const meta = connector.relationshipMetadata || connector.connectorMetadata || connector.connector || {};
+  const topoOverride = options.connTopologyMap?.get(connId);
+  const srcId = connector.sourceShapeId || meta.sourceShapeId || meta.sourceObjectId || topoOverride?.srcId;
+  const tgtId = connector.targetShapeId || meta.targetShapeId || meta.targetObjectId || topoOverride?.tgtId;
+
+  if (obsId === srcId || obsId === tgtId) {
+    return null;
+  }
+
+  if (options.ownership) {
+    const srcTexts = options.ownership.ownedByOwner?.get(srcId) || [];
+    const tgtTexts = options.ownership.ownedByOwner?.get(tgtId) || [];
+    if (srcTexts.includes(obsId) || tgtTexts.includes(obsId)) return null;
+  }
+  if (obstacle.parentShapeId && (obstacle.parentShapeId === srcId || obstacle.parentShapeId === tgtId)) {
+    return null;
+  }
+  if (obstacle.relationshipMetadata?.parentShapeId === srcId || obstacle.relationshipMetadata?.parentShapeId === tgtId) {
+    return null;
+  }
+
+  const obsTypeLower = String(obstacle.type || '').toLowerCase();
+  const obsIsConn = obstacle.isConnector === true || obsTypeLower === 'connector' || Boolean(obstacle.connectorType);
+  if (obsIsConn) return null;
+
+  const obsIsStroke = obstacle.isVectorStroke === true || obsTypeLower === 'stroke' || Boolean(obstacle.strokeId);
+  const obsIsLine = obstacle.isSkribeLine === true || obstacle.isStraightLine === true || obsTypeLower === 'line';
+
+  const { shaftSegments, arrowheadSegments } = extractConnectorSegments(connector);
+
+  if (obsIsStroke || obsIsLine) {
+    const obsSegs = extractConnectorSegments(obstacle).allSegments;
+    for (const cSeg of [...shaftSegments, ...arrowheadSegments]) {
+      for (const oSeg of obsSegs) {
+        if (segmentsIntersectPoints(cSeg.p1, cSeg.p2, oSeg.p1, oSeg.p2)) {
+          return {
+            connectorId: connId,
+            obstacleId: obsId,
+            obstacleType: obsIsStroke ? 'stroke' : 'line',
+            isProtected: true,
+            isArrowhead: cSeg.isArrowhead,
+            isShaft: !cSeg.isArrowhead
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  for (const seg of shaftSegments) {
+    if (segmentIntersectsShape(seg.p1, seg.p2, obstacle)) {
+      return {
+        connectorId: connId,
+        obstacleId: obsId,
+        obstacleType: obstacle.type || 'shape',
+        isShaft: true,
+        isArrowhead: false
+      };
+    }
+  }
+
+  for (const seg of arrowheadSegments) {
+    if (segmentIntersectsShape(seg.p1, seg.p2, obstacle)) {
+      return {
+        connectorId: connId,
+        obstacleId: obsId,
+        obstacleType: obstacle.type || 'shape',
+        isShaft: false,
+        isArrowhead: true
+      };
+    }
+  }
+
+  return null;
+};
+
+export const detectAllConnectorCollisions = (objects = [], options = {}) => {
+  const connectors = [];
+  const obstacles = [];
+
+  objects.forEach((obj) => {
+    const typeLower = String(obj.type || '').toLowerCase();
+    const isConn = obj.isConnector === true || typeLower === 'connector' || Boolean(obj.connectorType);
+    if (isConn) {
+      connectors.push(obj);
+    } else {
+      obstacles.push(obj);
+    }
+  });
+
+  const collisions = [];
+  for (const conn of connectors) {
+    for (const obs of obstacles) {
+      const col = detectConnectorCollisionsWithObstacle(conn, obs, options);
+      if (col) {
+        collisions.push(col);
+      }
+    }
+  }
+  return collisions;
+};
+
+export const findNewForbiddenConnectorCollisions = (beforeObjects = [], afterObjects = [], options = {}) => {
+  const beforeCollisions = detectAllConnectorCollisions(beforeObjects, options);
+  const afterCollisions = detectAllConnectorCollisions(afterObjects, options);
+
+  return afterCollisions.filter(
+    (after) => !beforeCollisions.some(
+      (before) => before.connectorId === after.connectorId && before.obstacleId === after.obstacleId
+    )
+  );
+};
+
 export default transformConnectorGeometry;

@@ -10,6 +10,7 @@ import EraserOverlay from '../components/ui/EraserOverlay';
 import LaserOverlay from '../components/ui/LaserOverlay';
 import CollaborativeCursorsOverlay from '../components/ui/CollaborativeCursorsOverlay';
 import CollaborativeSelectionsOverlay from '../components/ui/CollaborativeSelectionsOverlay';
+import UndoRedoFloating from '../components/ui/UndoRedoFloating';
 import apiClient from '../api/apiClient';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
@@ -1029,10 +1030,6 @@ export const MainCanvasPage = () => {
 
       <PropertiesSidebar
         activeTool={activeTool}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={() => fabricCanvasRef.current?.undo()}
-        onRedo={() => fabricCanvasRef.current?.redo()}
         selectedProps={selectedProps}
         penConfig={penConfig}
         onPenConfigChange={(cfg) => setPenConfig(cfg)}
@@ -1303,6 +1300,14 @@ export const MainCanvasPage = () => {
           </span>
         </button>
       </div>
+
+      <UndoRedoFloating
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={() => fabricCanvasRef.current?.undo()}
+        onRedo={() => fabricCanvasRef.current?.redo()}
+        isSidebarExpanded={isSidebarExpanded}
+      />
 
       <ToolWheel
         isOpen={activeWheel === 'tools'}

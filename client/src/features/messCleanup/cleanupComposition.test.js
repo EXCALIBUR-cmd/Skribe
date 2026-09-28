@@ -89,7 +89,7 @@ test('3. Flow composition candidate generated', () => {
   assert.ok(flowCand.utilityScore > 0, 'Positive utility score');
 });
 
-test('4. Sequence candidate generated', () => {
+test('4. Concept Group candidate generated', () => {
   const c1 = normalizeObject({ id: 'card1', type: 'rect', left: 100, top: 100, width: 140, height: 80 });
   const c2 = normalizeObject({ id: 'card2', type: 'rect', left: 100, top: 220, width: 140, height: 80 });
   const c3 = normalizeObject({ id: 'card3', type: 'rect', left: 100, top: 400, width: 140, height: 80 });
@@ -100,12 +100,12 @@ test('4. Sequence candidate generated', () => {
 
   const model = { board: { objects: [c1, c2, c3] } };
   const structures = discoverVisualStructures(model, scene);
-  const seq = structures.find((s) => s.type === STRUCTURE_TYPES.SEQUENCE);
-  assert.ok(seq, 'Sequence discovered');
-  assert.equal(seq.objectIds.length, 3);
+  const conceptGrp = structures.find((s) => s.type === STRUCTURE_TYPES.CONCEPT_GROUP);
+  assert.ok(conceptGrp, 'Concept group discovered');
+  assert.equal(conceptGrp.objectIds.length, 3);
 
   const candidates = generateCompositionCandidates(structures);
-  assert.ok(candidates.some((c) => c.type === 'sequence'));
+  assert.ok(candidates.some((c) => c.type === 'conceptGroup'));
 });
 
 test('5. Note cluster candidate generated', () => {

@@ -150,27 +150,7 @@ export const PropertiesSidebar = ({
 
       {isExpanded && (
         <div className="flex-1 overflow-y-auto flex flex-col custom-scrollbar">
-          <div className="p-3 bg-surface-container-low/60 border-b border-outline-variant/40 flex items-center justify-between gap-2 shrink-0">
-            <button
-              onClick={onUndo}
-              disabled={!canUndo}
-              className="flex-1 py-1.5 px-3 rounded-xl bg-surface-container-lowest border border-outline-variant/60 hover:bg-primary hover:text-on-primary disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-1.5 font-label text-xs font-bold text-on-surface shadow-2xs"
-              title="Undo (Ctrl Z)"
-            >
-              <span className="material-symbols-outlined text-base">undo</span>
-              <span>Undo</span>
-            </button>
 
-            <button
-              onClick={onRedo}
-              disabled={!canRedo}
-              className="flex-1 py-1.5 px-3 rounded-xl bg-surface-container-lowest border border-outline-variant/60 hover:bg-primary hover:text-on-primary disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center gap-1.5 font-label text-xs font-bold text-on-surface shadow-2xs"
-              title="Redo (Ctrl Shift Z or Ctrl Y)"
-            >
-              <span className="material-symbols-outlined text-base">redo</span>
-              <span>Redo</span>
-            </button>
-          </div>
 
           <div className="p-4 space-y-4 flex-1">
             {isPenMode && (

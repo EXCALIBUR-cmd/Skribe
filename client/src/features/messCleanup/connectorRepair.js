@@ -2,7 +2,7 @@
 
 import { getSemanticType } from './cleanupTypes.js';
 import { recoverConnectorTopology, getShapeBoundaryGeometry } from './connectorTopology.js';
-import { parseConnectorPath, transformPathCommandsToWorld, computePathBounds } from './connectorGeometry.js';
+import { parseConnectorPath, transformPathCommandsToWorld, computePathBounds, detectConnectorCollisionsWithObstacle } from './connectorGeometry.js';
 import { getObjectBounds } from './cleanupOpportunities.js';
 
 
@@ -596,23 +596,23 @@ export const validateConnectorRepairSafety = (repairPayload, protectedObjects, m
     return { safe: true, collidedObjectIds: [] };
   }
 
-  const allPathCmds = [...repairPayload.shaftPath, ...repairPayload.arrowheadPath];
+  const allPathCmds = [...(repairPayload.shaftPath || []), ...(repairPayload.arrowheadPath || [])];
   const pathBounds = computePathBounds(allPathCmds);
   if (!pathBounds) {
     return { safe: true, collidedObjectIds: [] };
   }
 
-
-  const padding = 5;
-  const repairedBounds = {
-    x: pathBounds.x - padding,
-    y: pathBounds.y - padding,
-    width: pathBounds.width + padding * 2,
-    height: pathBounds.height + padding * 2
-  };
-
   const collidedObjectIds = [];
   const memberSet = memberObjectIds instanceof Set ? memberObjectIds : new Set(memberObjectIds || []);
+
+  const tempConnector = {
+    id: repairPayload.connectorId,
+    sourceShapeId: repairPayload.sourceShapeId,
+    targetShapeId: repairPayload.targetShapeId,
+    shaftPath: repairPayload.shaftPath,
+    arrowheadPath: repairPayload.arrowheadPath,
+    pathCommands: allPathCmds
+  };
 
   for (const obj of protectedObjects) {
     if (memberSet.has(obj.id)) continue;
@@ -620,18 +620,8 @@ export const validateConnectorRepairSafety = (repairPayload, protectedObjects, m
     if (obj.id === repairPayload.sourceShapeId) continue;
     if (obj.id === repairPayload.targetShapeId) continue;
 
-    const sem = getSemanticType(obj);
-
-    if (sem === 'connector') continue;
-
-    const objBounds = getObjectBounds(obj);
-
-
-    const xOverlap = Math.max(0, Math.min(repairedBounds.x + repairedBounds.width, objBounds.x + objBounds.width) - Math.max(repairedBounds.x, objBounds.x));
-    const yOverlap = Math.max(0, Math.min(repairedBounds.y + repairedBounds.height, objBounds.y + objBounds.height) - Math.max(repairedBounds.y, objBounds.y));
-    const overlapArea = xOverlap * yOverlap;
-
-    if (overlapArea > 4) {
+    const col = detectConnectorCollisionsWithObstacle(tempConnector, obj);
+    if (col) {
       collidedObjectIds.push(obj.id);
     }
   }

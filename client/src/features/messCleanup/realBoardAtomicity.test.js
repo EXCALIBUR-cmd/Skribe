@@ -805,30 +805,30 @@ test('18. Dependent Geometry Connector Architecture: connectors excluded from ro
 
 test('19. Connector Topology & Structural Fidelity: curved, elbow, and straight paths retain their exact segment structure without collapsing', () => {
   const rawCurvedPath = [
-    ['M', 630, 162],
-    ['C', 679, 112, 721, 112, 770, 162],
-    ['M', 755, 157],
-    ['L', 770, 162],
-    ['L', 755, 167]
+    ['M', 630, -1162],
+    ['C', 679, -1112, 721, -1112, 770, -1162],
+    ['M', 755, -1157],
+    ['L', 770, -1162],
+    ['L', 755, -1167]
   ];
 
   const rawElbowPath = [
-    ['M', 663, 476],
-    ['L', 736, 476],
-    ['L', 736, 436],
-    ['L', 809, 436],
-    ['L', 809, 476],
-    ['M', 794, 471],
-    ['L', 809, 476],
-    ['L', 794, 481]
+    ['M', 663, -1476],
+    ['L', 736, -1476],
+    ['L', 736, -1436],
+    ['L', 809, -1436],
+    ['L', 809, -1476],
+    ['M', 794, -1471],
+    ['L', 809, -1476],
+    ['L', 794, -1481]
   ];
 
   const rawStraightPath = [
-    ['M', 645, 370],
-    ['L', 785, 370],
-    ['M', 770, 365],
-    ['L', 785, 370],
-    ['L', 770, 375]
+    ['M', 645, -1370],
+    ['L', 785, -1370],
+    ['M', 770, -1365],
+    ['L', 785, -1370],
+    ['L', 770, -1375]
   ];
 
   const circle = makeLinkedShape('c1', 'circle', 'Circle', 630, 244, 120, 120);
@@ -844,7 +844,7 @@ test('19. Connector Topology & Structural Fidelity: curved, elbow, and straight 
     stroke: '#000000',
     strokeWidth: 3,
     path: rawCurvedPath,
-    left: 630, top: 162, width: 140, height: 38,
+    left: 630, top: -1162, width: 140, height: 38,
     endArrow: true
   };
 
@@ -856,7 +856,7 @@ test('19. Connector Topology & Structural Fidelity: curved, elbow, and straight 
     stroke: '#000000',
     strokeWidth: 3,
     path: rawElbowPath,
-    left: 663, top: 436, width: 146, height: 40,
+    left: 663, top: -1476, width: 146, height: 40,
     endArrow: true
   };
 
@@ -868,7 +868,7 @@ test('19. Connector Topology & Structural Fidelity: curved, elbow, and straight 
     stroke: '#000000',
     strokeWidth: 3,
     path: rawStraightPath,
-    left: 645, top: 370, width: 140, height: 11,
+    left: 645, top: -1370, width: 140, height: 11,
     endArrow: true
   };
 
@@ -923,7 +923,7 @@ test('19. Connector Topology & Structural Fidelity: curved, elbow, and straight 
 test('20. Multi-Lane Connector Routing & Collision Separation: co-routed straight + elbow connectors receive distinct non-overlapping lanes', () => {
   const circle = makeLinkedShape('c1', 'circle', 'Circle', 630, 244, 120, 120);
   const triangle = makeLinkedShape('t1', 'triangle', 'Triangle', 822, 194, 140, 120);
-  const sticky2 = makeStickyNote('s2', 'Sticky 2', 880, 412, 183);
+  const sticky2 = makeStickyNote('s2', 'Sticky 2', 880, 2000, 183);
 
   const connStraight = {
     id: 'conn_straight_shared',
@@ -968,9 +968,9 @@ test('20. Multi-Lane Connector Routing & Collision Separation: co-routed straigh
     connectorType: 'curved',
     sourceShapeId: circle.shapeObj.id,
     targetShapeId: sticky2.shapeObj.id,
-    left: 630, top: 162, width: 140, height: 38,
+    left: 630, top: 2162, width: 140, height: 38,
     endArrow: true,
-    path: [['M', 630, 162], ['C', 679, 112, 721, 112, 770, 162], ['M', 755, 157], ['L', 770, 162], ['L', 755, 167]]
+    path: [['M', 630, 2162], ['C', 679, 2112, 721, 2112, 770, 2162], ['M', 755, 2157], ['L', 770, 2162], ['L', 755, 2167]]
   };
 
   const vertLine = {

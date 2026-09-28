@@ -2,7 +2,7 @@ import { getSemanticType, isConnectorPath, createCanvasStructure } from './clean
 import { recoverConnectorTopology, getDistanceToShapeBoundary } from './connectorTopology.js';
 import { getObjectBounds, segmentsIntersect } from './cleanupOpportunities.js';
 import { buildVisualObjectModel, resolveContainerOwnership } from './visualUnits.js';
-import { parseConnectorPath } from './connectorGeometry.js';
+import { parseConnectorPath, detectConnectorCollisionsWithObstacle } from './connectorGeometry.js';
 import { findDetachedFlowAssociation } from './detachedFlowAssociation.js';
 import { computeConnectorRepair } from './connectorRepair.js';
 export const STRUCTURE_TYPES = Object.freeze({
@@ -211,51 +211,48 @@ export const evaluateCompleteGeometryCollisions = ({
     }
     let collides = false;
     let obsCollisionArea = 0;
+    const isConnObs = obsSem === 'connector' || obs.isConnector === true;
     for (const node of candidateNodeBounds) {
-      const inter = getBoxesIntersection(node, obsBounds);
-      if (obs.id === 'ann_text') {
-        console.log('[DEBUG] node:', node.id, 'obsBounds:', obsBounds, 'inter:', inter);
-      }
-      const isMeaningful = isTextObs ? inter.area > 25 || inter.xOverlap > 5 && inter.yOverlap > 5 : inter.area > 50 || inter.xOverlap > 5 && inter.yOverlap > 5;
-      if (isMeaningful) {
-        collides = true;
-        obsCollisionArea += inter.area;
-      }
-    }
-    for (const label of candidateLabelBounds) {
-      const inter = getBoxesIntersection(label, obsBounds);
-      const isMeaningful = isTextObs ? inter.area > 25 || inter.xOverlap > 5 && inter.yOverlap > 5 : inter.area > 50 || inter.xOverlap > 5 && inter.yOverlap > 5;
-      if (isMeaningful) {
-        collides = true;
-        obsCollisionArea += inter.area;
-      }
-    }
-    for (const conn of candidateConnectorGeometry) {
-      if (!conn.startPoint || !conn.endPoint) continue;
-      if (isLineObs) {
-        const dX1 = obsBounds.x;
-        const dY1 = obsBounds.y;
-        const dX2 = obsBounds.x + obsBounds.width;
-        const dY2 = obsBounds.y + obsBounds.height;
-        if (segmentsIntersect(conn.startPoint, conn.endPoint, {
-          x: dX1,
-          y: dY1
-        }, {
-          x: dX2,
-          y: dY2
-        })) {
+      if (isConnObs) {
+        if (detectConnectorCollisionsWithObstacle(obs, node)) {
           collides = true;
           obsCollisionArea += 100;
         }
       } else {
-        if (segmentIntersectsBox(conn.startPoint, conn.endPoint, obsBounds)) {
+        const inter = getBoxesIntersection(node, obsBounds);
+        const isMeaningful = isTextObs ? inter.area > 25 || inter.xOverlap > 5 && inter.yOverlap > 5 : inter.area > 50 || inter.xOverlap > 5 && inter.yOverlap > 5;
+        if (isMeaningful) {
           collides = true;
-          obsCollisionArea += 100;
+          obsCollisionArea += inter.area;
         }
       }
-      if (pointInsideBox(conn.endPoint, obsBounds, 2)) {
+    }
+    for (const label of candidateLabelBounds) {
+      if (isConnObs) {
+        if (detectConnectorCollisionsWithObstacle(obs, label)) {
+          collides = true;
+          obsCollisionArea += 50;
+        }
+      } else {
+        const inter = getBoxesIntersection(label, obsBounds);
+        const isMeaningful = isTextObs ? inter.area > 25 || inter.xOverlap > 5 && inter.yOverlap > 5 : inter.area > 50 || inter.xOverlap > 5 && inter.yOverlap > 5;
+        if (isMeaningful) {
+          collides = true;
+          obsCollisionArea += inter.area;
+        }
+      }
+    }
+    for (const conn of candidateConnectorGeometry) {
+      if (!conn.startPoint || !conn.endPoint) continue;
+      const connMock = {
+        id: conn.connId || 'cand_conn',
+        sourceShapeId: conn.srcId,
+        targetShapeId: conn.tgtId,
+        pathCommands: conn.pathCommands || [['M', conn.startPoint.x, conn.startPoint.y], ['L', conn.endPoint.x, conn.endPoint.y]]
+      };
+      if (detectConnectorCollisionsWithObstacle(connMock, obs)) {
         collides = true;
-        obsCollisionArea += 50;
+        obsCollisionArea += 100;
       }
     }
     if (collides) {
@@ -2049,7 +2046,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       unclaimedInGroup.forEach(id => claimedObjectIds.add(id));
       const _structPayload7 = {
         id: structId,
-        type: STRUCTURE_TYPES.SEQUENCE,
+        type: STRUCTURE_TYPES.CONCEPT_GROUP,
         objectIds: sortStrings(unclaimedInGroup),
         connectorIds: [],
         confidence: 0.94,
@@ -2163,7 +2160,7 @@ export const generateCompositionCandidates = (visualStructures, options = {}) =>
   const maxRisk = options.maxRisk ?? 2.0;
   visualStructures.forEach(struct => {
     const cached = _planningStateCache.get(struct.id) || {};
-    if (![STRUCTURE_TYPES.FLOW, STRUCTURE_TYPES.SEQUENCE, STRUCTURE_TYPES.CLUSTER, STRUCTURE_TYPES.ANNOTATION].includes(struct.type)) {
+    if (![STRUCTURE_TYPES.FLOW, STRUCTURE_TYPES.SEQUENCE, STRUCTURE_TYPES.CLUSTER, STRUCTURE_TYPES.ANNOTATION, STRUCTURE_TYPES.CONCEPT_GROUP].includes(struct.type)) {
       return;
     }
     if (struct.confidence < minStructureConfidence) {

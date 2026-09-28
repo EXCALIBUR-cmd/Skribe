@@ -738,7 +738,49 @@ test('26. cleanFlowchart: merging graph (A -> C, B -> C) merges multiple roots i
   assert.ok(pT.bounds.x > pR1.bounds.x + pR1.bounds.width, 'Target node placed in Level 1 column');
 });
 
-test('27. cleanFlowchart: topological level calculation accurately places longest path dependencies', () => {
+test('27. cleanFlowchart: topological level calculation accurately places longest path dependencies (collision-free)', () => {
+  const model = {
+    board: {
+      objects: [
+        normalizeObject({ id: 'A', type: 'rect', left: 50, top: 50, width: 80, height: 60 }),
+        normalizeObject({ id: 'B', type: 'rect', left: 180, top: 50, width: 80, height: 60 }),
+        normalizeObject({ id: 'C', type: 'rect', left: 180, top: 150, width: 80, height: 60 }),
+        normalizeObject({ id: 'D', type: 'rect', left: 320, top: 50, width: 80, height: 60 }),
+        normalizeObject({ id: 'E', type: 'rect', left: 320, top: 150, width: 80, height: 60 }),
+        normalizeObject({ id: 'F', type: 'rect', left: 450, top: 100, width: 80, height: 60 }),
+        normalizeObject({ id: 'cAB', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'A', targetShapeId: 'B' } }),
+        normalizeObject({ id: 'cAC', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'A', targetShapeId: 'C' } }),
+        normalizeObject({ id: 'cBD', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'B', targetShapeId: 'D' } }),
+        normalizeObject({ id: 'cCE', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'C', targetShapeId: 'E' } }),
+        normalizeObject({ id: 'cDF', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'D', targetShapeId: 'F' } }),
+        normalizeObject({ id: 'cEF', type: 'path', isConnector: true, relationshipMetadata: { sourceShapeId: 'E', targetShapeId: 'F' } })
+      ]
+    }
+  };
+
+  const plan = {
+    version: 1,
+    actions: [
+      { id: 'act_topol', type: 'cleanFlowchart', objectIds: ['A', 'B', 'C', 'D', 'E', 'F'], connectorIds: ['cAB', 'cAC', 'cBD', 'cCE', 'cDF', 'cEF'], confidence: 0.95, reason: 'DAG levels' }
+    ],
+    untouchedObjectIds: [],
+    diagnostics: { actionCount: 1, highConfidenceActionCount: 1, untouchedObjectCount: 0, unsupportedActionCount: 0 }
+  };
+
+  const proposal = executeCleanupPlan(plan, model);
+  assert.equal(proposal.valid, true);
+
+  const pA = proposal.placements.find((p) => p.objectId === 'A');
+  const pB = proposal.placements.find((p) => p.objectId === 'B');
+  const pD = proposal.placements.find((p) => p.objectId === 'D');
+  const pF = proposal.placements.find((p) => p.objectId === 'F');
+
+  assert.ok(pA.bounds.x < pB.bounds.x);
+  assert.ok(pB.bounds.x < pD.bounds.x);
+  assert.ok(pD.bounds.x < pF.bounds.x, 'F is placed at Level 3 due to dependencies');
+});
+
+test('42. cleanFlowchart: deliberate same-action collision is safely rejected', () => {
   const model = {
     board: {
       objects: [
@@ -764,16 +806,8 @@ test('27. cleanFlowchart: topological level calculation accurately places longes
   };
 
   const proposal = executeCleanupPlan(plan, model);
-  assert.equal(proposal.valid, true);
-
-  const pA = proposal.placements.find((p) => p.objectId === 'A');
-  const pB = proposal.placements.find((p) => p.objectId === 'B');
-  const pC = proposal.placements.find((p) => p.objectId === 'C');
-  const pD = proposal.placements.find((p) => p.objectId === 'D');
-
-  assert.ok(pA.bounds.x < pB.bounds.x);
-  assert.ok(pB.bounds.x < pC.bounds.x);
-  assert.ok(pC.bounds.x < pD.bounds.x, 'D is placed at Level 3 due to longest path A -> B -> C -> D');
+  assert.equal(proposal.valid, false, 'Candidate that introduces an unrouted collision must be rejected, even if in the same action');
+  assert.ok(proposal.reason.includes('collision'), 'Rejection reason must mention collision');
 });
 
 test('28. cleanFlowchart: deterministic node ordering ensures predictable sibling positioning', () => {

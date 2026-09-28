@@ -20,6 +20,8 @@ import {
   TEMPLATE_TYPES
 } from './discoverVisualStructures.js';
 import { generateConnectorRepairs } from './connectorRepair.js';
+import { findNewForbiddenConnectorCollisions } from './connectorGeometry.js';
+import { executeCleanupPlan } from './executeCleanupPlan.js';
 
 const sortStrings = (arr) => [...(arr || [])].sort((a, b) => String(a).localeCompare(String(b)));
 
@@ -408,10 +410,97 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     allObjectIds.filter((id) => !allModifiedObjectIds.has(id))
   );
 
-  const finalExecutableActions = [...executableActions, ...connectorRepairActions];
+  const connTopologyMap = new Map();
+  connectorObjects.forEach((c) => {
+    let srcId = c.sourceShapeId || c.relationshipMetadata?.sourceShapeId || null;
+    let tgtId = c.targetShapeId || c.relationshipMetadata?.targetShapeId || null;
+    if (!srcId || !tgtId) {
+      const containers = rawObjects.filter((o) => ['shape', 'note'].includes(getSemanticType(o)));
+      const topo = recoverConnectorTopology(c, containers);
+      if (topo.sourceShapeId) srcId = topo.sourceShapeId;
+      if (topo.targetShapeId) tgtId = topo.targetShapeId;
+    }
+    connTopologyMap.set(c.id, { srcId, tgtId });
+  });
 
   const allSuppressedActions = [...suppressedActions];
   const allSuppressionReasons = [...suppressionReasons];
+
+  let validatedExecutableActions = [...executableActions, ...connectorRepairActions];
+  let validatedUntouchedIds = [...finalUntouchedObjectIds];
+
+  const MAX_COLLISION_SAFETY_PASSES = 5;
+  for (let pass = 0; pass < MAX_COLLISION_SAFETY_PASSES; pass++) {
+    if (validatedExecutableActions.length === 0) break;
+
+    const simPlan = {
+      version: 1,
+      actions: validatedExecutableActions,
+      untouchedObjectIds: validatedUntouchedIds,
+      diagnostics: {}
+    };
+
+    const simProposal = executeCleanupPlan(simPlan, wsModel, options);
+    if (!simProposal || !simProposal.placements) break;
+
+    const newCollisions = findNewForbiddenConnectorCollisions(
+      rawObjects,
+      simProposal.placements,
+      { ownership, connTopologyMap }
+    );
+
+    if (newCollisions.length === 0) {
+      break;
+    }
+
+    const collidingActionIds = new Set();
+    newCollisions.forEach((col) => {
+      const obstacleAction = validatedExecutableActions.find((a) =>
+        (a.ownedObjectIds || a.objectIds || []).includes(col.obstacleId)
+      );
+      if (obstacleAction && obstacleAction.type !== 'preserve') {
+        collidingActionIds.add(obstacleAction.id);
+      }
+      const connAction = validatedExecutableActions.find((a) =>
+        (a.ownedObjectIds || a.objectIds || []).includes(col.connectorId) ||
+        (Array.isArray(a.connectorIds) && a.connectorIds.includes(col.connectorId))
+      );
+      if (connAction && connAction.type !== 'preserve') {
+        collidingActionIds.add(connAction.id);
+      }
+    });
+
+    if (collidingActionIds.size === 0) {
+      break;
+    }
+
+    collidingActionIds.forEach((actId) => {
+      const act = validatedExecutableActions.find((a) => a.id === actId);
+      if (act) {
+        allSuppressedActions.push(act.id);
+        allSuppressionReasons.push({
+          actionId: act.id,
+          reason: `Action '${act.id}' suppressed: introduces forbidden connector collision`
+        });
+        conflictsDetected.push(`Conflict: action '${act.id}' suppressed due to forbidden connector collision`);
+      }
+    });
+
+    validatedExecutableActions = validatedExecutableActions.filter((a) => !collidingActionIds.has(a.id));
+
+    const remainingModified = new Set();
+    validatedExecutableActions.forEach((a) => {
+      if (a.type !== 'preserve') {
+        (a.ownedObjectIds || a.objectIds || []).forEach((id) => remainingModified.add(id));
+        if (Array.isArray(a.connectorIds)) {
+          a.connectorIds.forEach((id) => remainingModified.add(id));
+        }
+      }
+    });
+    validatedUntouchedIds = sortStrings(
+      allObjectIds.filter((id) => !remainingModified.has(id))
+    );
+  }
 
   (budgetRejected || []).forEach((rej) => {
     if (rej.supersededBy || rej.reason?.includes('subsumed') || rej.reason?.includes('claimed') || rej.reason?.includes('Conflict')) {
@@ -437,16 +526,16 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     rejectedOpportunities: [...(budgetRejected || []), ...(resolutionRejected || [])],
     budgetReport,
     usefulActionMetrics: {
-      structuralActionCount: finalExecutableActions.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length,
-      spatialActionCount: finalExecutableActions.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length,
-      cosmeticActionCount: finalExecutableActions.filter((a) => ['normalizeText', 'attachText'].includes(a.type)).length,
-      connectorRepairCount: connectorRepairActions.length
+      structuralActionCount: validatedExecutableActions.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length,
+      spatialActionCount: validatedExecutableActions.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length,
+      cosmeticActionCount: validatedExecutableActions.filter((a) => ['normalizeText', 'attachText'].includes(a.type)).length,
+      connectorRepairCount: validatedExecutableActions.filter((a) => a.type === 'repairConnector').length
     },
-    actionCount: finalExecutableActions.length,
-    highConfidenceActionCount: finalExecutableActions.filter((a) => a.confidence >= HIGH_CONFIDENCE).length,
-    untouchedObjectCount: finalUntouchedObjectIds.length,
-    unsupportedActionCount: allOpportunities.length - finalExecutableActions.length,
-    actionOrder: finalExecutableActions.map((a) => a.id),
+    actionCount: validatedExecutableActions.length,
+    highConfidenceActionCount: validatedExecutableActions.filter((a) => a.confidence >= HIGH_CONFIDENCE).length,
+    untouchedObjectCount: validatedUntouchedIds.length,
+    unsupportedActionCount: allOpportunities.length - validatedExecutableActions.length,
+    actionOrder: validatedExecutableActions.map((a) => a.id),
     ownershipByObject: Object.fromEntries(ownershipByObject.entries()),
     conflictsDetected,
     suppressedActions: allSuppressedActions,
@@ -457,8 +546,8 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
 
   const plan = {
     version: 1,
-    actions: finalExecutableActions,
-    untouchedObjectIds: finalUntouchedObjectIds,
+    actions: validatedExecutableActions,
+    untouchedObjectIds: validatedUntouchedIds,
     diagnostics
   };
 

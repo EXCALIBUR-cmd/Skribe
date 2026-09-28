@@ -2,7 +2,7 @@
 import { validateCleanupPlan } from './cleanupPlanTypes.js';
 import { getSemanticType, getShapeType } from './cleanupTypes.js';
 import { buildVisualObjectModel, resolveContainerOwnership } from './visualUnits.js';
-import { translatePathCommands, transformConnectorGeometry, parseConnectorPath, computePathBounds } from './connectorGeometry.js';
+import { translatePathCommands, transformConnectorGeometry, parseConnectorPath, computePathBounds, findNewForbiddenConnectorCollisions } from './connectorGeometry.js';
 
 const cloneDeep = (obj) => {
   if (obj === undefined) return undefined;
@@ -945,6 +945,30 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
     };
   });
 
+  const connTopologyMap = new Map();
+  rawObjects.filter((o) => getSemanticType(o) === 'connector').forEach((c) => {
+    let srcId = c.sourceShapeId || c.relationshipMetadata?.sourceShapeId || null;
+    let tgtId = c.targetShapeId || c.relationshipMetadata?.targetShapeId || null;
+    connTopologyMap.set(c.id, { srcId, tgtId });
+  });
+
+  const finalNewCollisions = findNewForbiddenConnectorCollisions(
+    rawObjects,
+    allPlacements,
+    { ownership: options?.ownership, connTopologyMap }
+  );
+
+  if (finalNewCollisions.length > 0) {
+    return {
+      version: 1,
+      valid: false,
+      failedActionId: 'post_layout_collision',
+      errorType: 'connectorCollisionViolation',
+      reason: `Layout introduces ${finalNewCollisions.length} new forbidden connector collisions.`,
+      error: 'New forbidden connector collision introduced'
+    };
+  }
+
   const boundsList = allPlacements.map((p) => p.bounds);
   const canvasBounds = unionBounds(boundsList, 40, rawObjects);
 
@@ -962,6 +986,8 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
       diagnostics: {
         orphanConnectors: [],
         detachedLinkedObjects: [],
+        newForbiddenConnectorCollisions: finalNewCollisions.length,
+        connectorCollisions: finalNewCollisions,
         ...(cleanupPlan.diagnostics || {})
       }
     }
