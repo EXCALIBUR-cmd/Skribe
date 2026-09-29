@@ -292,6 +292,295 @@ export const evaluateCompleteGeometryCollisions = ({
     rejectionReason: safe ? null : 'protectedObjectCollision'
   };
 };
+export const computeAdaptiveNormalization = ({
+  compObjects,
+  compLevelMap,
+  orientation = 'horizontal',
+  compEdges = []
+}) => {
+  const isVertical = orientation === 'vertical';
+  let candidateNodes = compObjects.map(o => ({ id: o.id, ...getObjectBounds(o) }));
+  
+  // 1. Local Alignment Snapping (Centers and Edges)
+  const SNAP_THRESHOLD = 15;
+  const snapToClusters = (axis) => {
+    let visited = new Set();
+    const clusters = [];
+    for (let i = 0; i < candidateNodes.length; i++) {
+      if (visited.has(i)) continue;
+      const cluster = [i];
+      visited.add(i);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < candidateNodes.length; j++) {
+          if (visited.has(j)) continue;
+          const isClose = cluster.some(idx => Math.abs(candidateNodes[idx][axis] - candidateNodes[j][axis]) <= SNAP_THRESHOLD);
+          if (isClose) {
+            cluster.push(j);
+            visited.add(j);
+            changed = true;
+          }
+        }
+      }
+      clusters.push(cluster);
+    }
+    clusters.forEach(cluster => {
+      if (cluster.length > 1) {
+        const mean = cluster.reduce((sum, idx) => sum + candidateNodes[idx][axis], 0) / cluster.length;
+        cluster.forEach(idx => {
+          const node = candidateNodes[idx];
+          const diff = mean - node[axis];
+          if (axis === 'cx') { node.x += diff; node.cx = mean; }
+          else if (axis === 'cy') { node.y += diff; node.cy = mean; }
+          else if (axis === 'x') { node.x = mean; node.cx = mean + node.width / 2; }
+          else if (axis === 'y') { node.y = mean; node.cy = mean + node.height / 2; }
+        });
+      }
+    });
+  };
+  snapToClusters('cx');
+  snapToClusters('cy');
+  snapToClusters('x');
+  snapToClusters('y');
+
+  // 2. Identify Levels
+  const maxLevel = Math.max(...Array.from(compLevelMap.values()), 0);
+  const levels = [];
+  for (let l = 0; l <= maxLevel; l++) levels.push([]);
+  candidateNodes.forEach(n => {
+    const lvl = compLevelMap.get(n.id) ?? 0;
+    levels[lvl].push(n);
+  });
+
+  // 3. Level Spacing Normalization (Primary Axis)
+  const primaryAxis = isVertical ? 'y' : 'x';
+  const primarySize = isVertical ? 'height' : 'width';
+  
+  const levelBounds = levels.map(lvlNodes => {
+    if (lvlNodes.length === 0) return null;
+    const minP = Math.min(...lvlNodes.map(n => n[primaryAxis]));
+    const maxP = Math.max(...lvlNodes.map(n => n[primaryAxis] + n[primarySize]));
+    return { minP, maxP };
+  });
+
+  const levelGaps = [];
+  for (let i = 0; i < levelBounds.length - 1; i++) {
+    if (levelBounds[i] && levelBounds[i+1]) {
+      levelGaps.push(levelBounds[i+1].minP - levelBounds[i].maxP);
+    }
+  }
+
+  let targetLevelGap = 80;
+  if (levelGaps.length > 0) {
+    const positiveGaps = levelGaps.filter(g => g > 10);
+    if (positiveGaps.length > 0) {
+      const sortedGaps = [...positiveGaps].sort((a, b) => a - b);
+      const mid = Math.floor(sortedGaps.length / 2);
+      targetLevelGap = sortedGaps.length % 2 === 0 ? (sortedGaps[mid - 1] + sortedGaps[mid]) / 2 : sortedGaps[mid];
+    }
+  }
+  // Bounded target level gap
+  targetLevelGap = Math.max(40, Math.min(120, targetLevelGap));
+
+  // Apply level gap correction
+  let cumulativePrimaryShift = 0;
+  for (let i = 1; i < levels.length; i++) {
+    if (!levelBounds[i-1] || !levelBounds[i]) continue;
+    const currentGap = levelBounds[i].minP - levelBounds[i-1].maxP;
+    
+    // Only adjust if it's anomalous (e.g. <= 20, or > targetGap * 1.5)
+    let shiftForThisLevel = 0;
+    if (currentGap < 20 || currentGap > targetLevelGap * 1.5) {
+      shiftForThisLevel = targetLevelGap - currentGap;
+    }
+    
+    cumulativePrimaryShift += shiftForThisLevel;
+    
+    if (cumulativePrimaryShift !== 0) {
+      levels[i].forEach(n => {
+        n[primaryAxis] += cumulativePrimaryShift;
+        if (primaryAxis === 'x') n.cx = n.x + n.width / 2;
+        if (primaryAxis === 'y') n.cy = n.y + n.height / 2;
+      });
+      levelBounds[i].minP += cumulativePrimaryShift;
+      levelBounds[i].maxP += cumulativePrimaryShift;
+    }
+  }
+
+  // 4. Sibling Spacing Normalization (Alignment Axis)
+  const alignAxis = isVertical ? 'x' : 'y';
+  const alignSize = isVertical ? 'width' : 'height';
+
+  levels.forEach(lvlNodes => {
+    if (lvlNodes.length < 2) return;
+    
+    lvlNodes.sort((a, b) => a[alignAxis] - b[alignAxis]);
+    
+    const siblingGaps = [];
+    for (let i = 0; i < lvlNodes.length - 1; i++) {
+      siblingGaps.push(lvlNodes[i+1][alignAxis] - (lvlNodes[i][alignAxis] + lvlNodes[i][alignSize]));
+    }
+    
+    let targetSiblingGap = 40;
+    const positiveSibGaps = siblingGaps.filter(g => g > 10);
+    if (positiveSibGaps.length > 0) {
+      const sortedGaps = [...positiveSibGaps].sort((a, b) => a - b);
+      const mid = Math.floor(sortedGaps.length / 2);
+      targetSiblingGap = sortedGaps.length % 2 === 0 ? (sortedGaps[mid - 1] + sortedGaps[mid]) / 2 : sortedGaps[mid];
+    }
+    targetSiblingGap = Math.max(20, Math.min(80, targetSiblingGap));
+
+    let cumulativeAlignShift = 0;
+    for (let i = 1; i < lvlNodes.length; i++) {
+      const currentGap = lvlNodes[i][alignAxis] - (lvlNodes[i-1][alignAxis] + lvlNodes[i-1][alignSize]);
+      
+      let shiftForThisSibling = 0;
+      if (currentGap < 10 || currentGap > targetSiblingGap * 1.5) {
+        shiftForThisSibling = targetSiblingGap - currentGap;
+      }
+      
+      cumulativeAlignShift += shiftForThisSibling;
+      
+      if (cumulativeAlignShift !== 0) {
+        for(let j = i; j < lvlNodes.length; j++) {
+            lvlNodes[j][alignAxis] += shiftForThisSibling;
+            if (alignAxis === 'x') lvlNodes[j].cx = lvlNodes[j].x + lvlNodes[j].width / 2;
+            if (alignAxis === 'y') lvlNodes[j].cy = lvlNodes[j].y + lvlNodes[j].height / 2;
+        }
+      }
+    }
+  });
+
+  const candidateConnectors = [];
+  compEdges.forEach(edge => {
+    const src = candidateNodes.find(n => n.id === edge.srcId);
+    const tgt = candidateNodes.find(n => n.id === edge.tgtId);
+    if (!src || !tgt) return;
+    let startPoint, endPoint;
+    if (!isVertical) {
+      startPoint = { x: src.x + src.width, y: src.cy };
+      endPoint = { x: tgt.x, y: tgt.cy };
+    } else {
+      startPoint = { x: src.cx, y: src.y + src.height };
+      endPoint = { x: tgt.cx, y: tgt.y };
+    }
+    candidateConnectors.push({
+      connId: edge.connId,
+      srcId: edge.srcId,
+      tgtId: edge.tgtId,
+      startPoint,
+      endPoint,
+      path: `M ${startPoint.x} ${startPoint.y} L ${endPoint.x} ${endPoint.y}`
+    });
+  });
+
+  return { nodes: candidateNodes, connectors: candidateConnectors };
+};
+export const computeGroupCandidateGeometry = ({
+  compObjects,
+  orientation = 'horizontal',
+  structureType = 'cluster'
+}) => {
+  let candidateNodes = compObjects.map(o => ({ id: o.id, ...getObjectBounds(o) }));
+
+  // 1. Local Alignment Snapping (Centers)
+  const SNAP_THRESHOLD = 15;
+  const snapToClusters = (axis) => {
+    // Collect all values
+    let visited = new Set();
+    const clusters = [];
+    for (let i = 0; i < candidateNodes.length; i++) {
+      if (visited.has(i)) continue;
+      const cluster = [i];
+      visited.add(i);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < candidateNodes.length; j++) {
+          if (visited.has(j)) continue;
+          // check if j is close to any in cluster
+          const isClose = cluster.some(idx => Math.abs(candidateNodes[idx][axis] - candidateNodes[j][axis]) <= SNAP_THRESHOLD);
+          if (isClose) {
+            cluster.push(j);
+            visited.add(j);
+            changed = true;
+          }
+        }
+      }
+      clusters.push(cluster);
+    }
+    // Snap each cluster to its mean
+    clusters.forEach(cluster => {
+      if (cluster.length > 1) {
+        const mean = cluster.reduce((sum, idx) => sum + candidateNodes[idx][axis], 0) / cluster.length;
+        cluster.forEach(idx => {
+          const node = candidateNodes[idx];
+          const diff = mean - node[axis];
+          if (axis === 'cx') { node.x += diff; node.cx = mean; }
+          else if (axis === 'cy') { node.y += diff; node.cy = mean; }
+          else if (axis === 'x') { node.x = mean; node.cx = mean + node.width / 2; }
+          else if (axis === 'y') { node.y = mean; node.cy = mean + node.height / 2; }
+        });
+      }
+    });
+  };
+
+  snapToClusters('cx');
+  snapToClusters('cy');
+  snapToClusters('x');
+  snapToClusters('y');
+
+  // 2. Whitespace Compaction (Seam Carving)
+  const compactAxis = (nodes, axis, size) => {
+    const intervals = nodes.map(n => ({ start: n[axis], end: n[axis] + n[size] }));
+    intervals.sort((a, b) => a.start - b.start);
+    
+    if (intervals.length === 0) return nodes;
+
+    const merged = [];
+    let current = { ...intervals[0] };
+    for (let i = 1; i < intervals.length; i++) {
+      if (intervals[i].start <= current.end) {
+        current.end = Math.max(current.end, intervals[i].end);
+      } else {
+        merged.push(current);
+        current = { ...intervals[i] };
+      }
+    }
+    merged.push(current);
+
+    const emptyBands = [];
+    for (let i = 0; i < merged.length - 1; i++) {
+      emptyBands.push({ start: merged[i].end, end: merged[i+1].start });
+    }
+
+    const MAX_GAP = 50; 
+    const shrinkAmounts = emptyBands.map(band => {
+      const gapSize = band.end - band.start;
+      return gapSize > MAX_GAP ? gapSize - MAX_GAP : 0;
+    });
+
+    nodes.forEach(n => {
+      let shrinkForThisNode = 0;
+      emptyBands.forEach((band, i) => {
+        // If node is strictly after the empty band, shift it left/up
+        if (n[axis] >= band.end - 0.1) {
+          shrinkForThisNode += shrinkAmounts[i];
+        }
+      });
+      n[axis] -= shrinkForThisNode;
+      if (axis === 'x') n.cx = n.x + n.width / 2;
+      if (axis === 'y') n.cy = n.y + n.height / 2;
+    });
+    return nodes;
+  };
+
+  candidateNodes = compactAxis(candidateNodes, 'x', 'width');
+  candidateNodes = compactAxis(candidateNodes, 'y', 'height');
+
+  return { nodes: candidateNodes, connectors: [] };
+};
 export const computeFlowCandidateGeometry = ({
   compObjects,
   compLevelMap,
@@ -888,12 +1177,19 @@ export const calculateMovementCost = ({
   objectCount,
   currentQuality,
   candidateQuality,
-  isBranchingOrMerge = false
+  isBranchingOrMerge = false,
+  totalDisplacement = 0
 }) => {
   let cost = objectCount * 0.35;
   if (isBranchingOrMerge) cost += 0.5;
   if (currentQuality >= 8.5) {
     cost += 2.0;
+  }
+  if (totalDisplacement > 0) {
+    const avgDisplacement = totalDisplacement / Math.max(1, objectCount);
+    if (avgDisplacement > 200) cost += 1.5;
+    else if (avgDisplacement > 100) cost += 0.8;
+    else if (avgDisplacement > 50) cost += 0.3;
   }
   return Number(Math.min(5.0, Math.max(0.5, cost)).toFixed(2));
 };
@@ -1367,7 +1663,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         objectCount: nodeCount,
         currentQuality: currentQualityMetrics.quality,
         candidateQuality,
-        isBranchingOrMerge: hasBranch || hasMerge
+        isBranchingOrMerge: hasBranch || hasMerge,
+        totalDisplacement: geoComparison.totalNodeDisplacement
       });
       const risk = calculateCompositionRisk({
         hasUnknownConnectorEndpoints: false,
@@ -1419,6 +1716,104 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         rejectionReason: cand1Safe ? null : 'protectedObjectCollision',
         safeRegion
       }];
+      const adaptiveGeom = computeAdaptiveNormalization({
+        compObjects,
+        compLevelMap,
+        orientation,
+        compEdges
+      });
+      const adaptiveCompleteGeom = buildCompleteCandidateGeometry({
+        candidateGeometry: adaptiveGeom,
+        compObjects,
+        compEdges,
+        ownership,
+        objectMap
+      });
+      const adaptiveCollision = evaluateCompleteGeometryCollisions({
+        completeGeometry: adaptiveCompleteGeom,
+        nonMemberObjects,
+        currentCompleteGeometry
+      });
+      const adaptiveGeoComparison = compareCompositionsGeometry({
+        currentNodes,
+        candidateNodes: adaptiveGeom.nodes,
+        currentConnectors,
+        candidateConnectors: adaptiveGeom.connectors
+      });
+      const adaptiveObjects = compObjects.map(orig => {
+        const candNode = adaptiveGeom.nodes.find(n => n.id === orig.id);
+        if (!candNode) return orig;
+        return {
+          ...orig,
+          position: { x: candNode.x, y: candNode.y },
+          left: candNode.x,
+          top: candNode.y,
+          bounds: { x: candNode.x, y: candNode.y, width: candNode.width, height: candNode.height }
+        };
+      });
+      const adaptiveConnAttData = adaptiveGeom.connectors.map(cc => ({
+        connId: cc.connId,
+        sourceShapeId: cc.srcId,
+        targetShapeId: cc.tgtId,
+        sourceAnchor: cc.startPoint,
+        targetAnchor: cc.endPoint,
+        topologyConfidence: 0.98
+      }));
+      const adaptiveQualityMetrics = evaluateCompositionQuality({
+        objects: adaptiveObjects,
+        objectMap: new Map(adaptiveObjects.map(o => [o.id, o])),
+        explicitEdges: compEdges,
+        structureType: STRUCTURE_TYPES.FLOW,
+        orientation,
+        levelAssignment,
+        connectorAttachmentData: adaptiveConnAttData
+      });
+      const adaptiveQuality = adaptiveQualityMetrics.quality;
+      let adaptiveBenefit = Math.max(0, Number((adaptiveQuality - currentQualityMetrics.quality).toFixed(2)));
+      if (!adaptiveGeoComparison.hasMeaningfulVisualChange) {
+        adaptiveBenefit = 0;
+      }
+      const adaptiveMovementCost = calculateMovementCost({
+        objectCount: nodeCount,
+        currentQuality: currentQualityMetrics.quality,
+        candidateQuality: adaptiveQuality,
+        isBranchingOrMerge: hasBranch || hasMerge,
+        totalDisplacement: adaptiveGeoComparison.totalNodeDisplacement
+      });
+      const adaptiveSafe = adaptiveCollision.safe;
+      candidateCompositions.push({
+        template: 'adaptive_normalization',
+        orientation,
+        levelAssignment,
+        orderedNodeIds,
+        verifiedEdges,
+        quality: adaptiveQuality,
+        currentQuality: currentQualityMetrics.quality,
+        currentGeometry: { nodes: currentNodes, connectors: currentConnectors },
+        candidateGeometry: adaptiveGeom,
+        geoComparison: adaptiveGeoComparison,
+        compositionBenefit: Number(adaptiveBenefit.toFixed(2)),
+        movementCost: adaptiveMovementCost,
+        risk,
+        reason: `Adaptive normalization preserving ${orientation} axis with geometry-derived spacing.`,
+        candidateCompleteBounds: adaptiveCompleteGeom.candidateCompleteBounds,
+        candidateNodeBounds: adaptiveCompleteGeom.candidateNodeBounds,
+        candidateLabelBounds: adaptiveCompleteGeom.candidateLabelBounds,
+        candidateConnectorGeometry: adaptiveCompleteGeom.candidateConnectorGeometry,
+        protectedCollisionCount: adaptiveCollision.protectedCollisionCount,
+        protectedCollisionArea: adaptiveCollision.protectedCollisionArea,
+        minimumProtectedGap: adaptiveCollision.minimumProtectedGap,
+        candidateIntersectsProtectedObject: adaptiveCollision.candidateIntersectsProtectedObject,
+        currentProtectedCollisions: adaptiveCollision.currentProtectedCollisions,
+        candidateProtectedCollisions: adaptiveCollision.candidateProtectedCollisions,
+        newProtectedCollisions: adaptiveCollision.newProtectedCollisions,
+        resolvedProtectedCollisions: adaptiveCollision.resolvedProtectedCollisions,
+        collidedObjectIds: adaptiveCollision.collidedObjectIds,
+        collisionObjectIds: adaptiveCollision.collidedObjectIds,
+        safe: adaptiveSafe,
+        rejectionReason: adaptiveSafe ? null : 'protectedObjectCollision',
+        safeRegion
+      });
       if (nodeCount <= 5 && !hasBranch && !hasMerge) {
         const altTemplate = orientation === 'horizontal' ? TEMPLATE_TYPES.FLOW_VERTICAL : TEMPLATE_TYPES.FLOW_HORIZONTAL;
         const altOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
@@ -1442,11 +1837,43 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           currentConnectors,
           candidateConnectors: altCandGeom.connectors
         });
+        const altCandObjects = compObjects.map(orig => {
+          const candNode = altCandGeom.nodes.find(n => n.id === orig.id);
+          if (!candNode) return orig;
+          return {
+            ...orig,
+            position: { x: candNode.x, y: candNode.y },
+            left: candNode.x,
+            top: candNode.y,
+            bounds: { x: candNode.x, y: candNode.y, width: candNode.width, height: candNode.height }
+          };
+        });
+        const altCandConnAttData = altCandGeom.connectors.map(cc => ({
+          connId: cc.connId,
+          sourceShapeId: cc.srcId,
+          targetShapeId: cc.tgtId,
+          sourceAnchor: cc.startPoint,
+          targetAnchor: cc.endPoint,
+          topologyConfidence: 0.98
+        }));
+        const altCandQualityMetrics = evaluateCompositionQuality({
+          objects: altCandObjects,
+          objectMap: new Map(altCandObjects.map(o => [o.id, o])),
+          explicitEdges: compEdges,
+          structureType: STRUCTURE_TYPES.FLOW,
+          orientation: altOrientation,
+          levelAssignment,
+          connectorAttachmentData: altCandConnAttData
+        });
+        const altCandQuality = altCandQualityMetrics.quality;
+        let altBenefit = Math.max(0, altCandQuality - currentQualityMetrics.quality);
+        if (!altGeoComparison.hasMeaningfulVisualChange) altBenefit = 0;
         const altMovementCost = calculateMovementCost({
           objectCount: nodeCount,
           currentQuality: currentQualityMetrics.quality,
-          candidateQuality: 9.0,
-          isBranchingOrMerge: false
+          candidateQuality: altCandQuality,
+          isBranchingOrMerge: false,
+          totalDisplacement: altGeoComparison.totalNodeDisplacement
         });
         const altRisk = calculateCompositionRisk({
           hasUnknownConnectorEndpoints: false,
@@ -1459,7 +1886,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           levelAssignment,
           orderedNodeIds,
           verifiedEdges,
-          quality: 9.0,
+          quality: altCandQuality,
           currentQuality: currentQualityMetrics.quality,
           currentGeometry: {
             nodes: currentNodes,
@@ -1467,7 +1894,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           },
           candidateGeometry: altCandGeom,
           geoComparison: altGeoComparison,
-          compositionBenefit: Math.max(0, 9.0 - currentQualityMetrics.quality),
+          compositionBenefit: Number(altBenefit.toFixed(2)),
           movementCost: altMovementCost,
           risk: altRisk,
           reason: `Alternative ${altTemplate === TEMPLATE_TYPES.FLOW_HORIZONTAL ? 'horizontal' : 'vertical'} flow candidate.`,
@@ -1976,12 +2403,42 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         objectMap,
         structureType: STRUCTURE_TYPES.CLUSTER
       });
-      const candidateQuality = 9.2;
-      const benefit = Math.max(0, candidateQuality - currentQuality.quality);
+      const clusterGeom = computeGroupCandidateGeometry({
+        compObjects: clusterObjects,
+        orientation: 'horizontal',
+        structureType: 'cluster'
+      });
+      const clusterCandObjects = clusterObjects.map(orig => {
+        const candNode = clusterGeom.nodes.find(n => n.id === orig.id);
+        if (!candNode) return orig;
+        return {
+          ...orig,
+          position: { x: candNode.x, y: candNode.y },
+          left: candNode.x,
+          top: candNode.y,
+          bounds: { x: candNode.x, y: candNode.y, width: candNode.width, height: candNode.height }
+        };
+      });
+      const clusterCandQuality = evaluateCompositionQuality({
+        objects: clusterCandObjects,
+        objectMap: new Map(clusterCandObjects.map(o => [o.id, o])),
+        structureType: STRUCTURE_TYPES.CLUSTER
+      });
+      const candidateQuality = clusterCandQuality.quality;
+      const currentNodes = clusterObjects.map(obj => ({ id: obj.id, ...getObjectBounds(obj) }));
+      const clusterGeoComparison = compareCompositionsGeometry({
+        currentNodes,
+        candidateNodes: clusterGeom.nodes,
+        currentConnectors: [],
+        candidateConnectors: []
+      });
+      let benefit = Math.max(0, candidateQuality - currentQuality.quality);
+      if (!clusterGeoComparison.hasMeaningfulVisualChange) benefit = 0;
       const movementCost = calculateMovementCost({
         objectCount: clusterIds.length,
         currentQuality: currentQuality.quality,
-        candidateQuality
+        candidateQuality,
+        totalDisplacement: clusterGeoComparison.totalNodeDisplacement
       });
       const risk = 0.8;
       const structId = `struct_cluster_${sortStrings(clusterIds)[0]}`;
@@ -1997,6 +2454,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         candidateCompositions: [{
           template: TEMPLATE_TYPES.CLUSTER_GRID,
           quality: candidateQuality,
+          candidateGeometry: clusterGeom,
+          geoComparison: clusterGeoComparison,
           compositionBenefit: Number(benefit.toFixed(2)),
           movementCost,
           risk,
@@ -2034,12 +2493,43 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         structureType: STRUCTURE_TYPES.SEQUENCE,
         orientation
       });
-      const candidateQuality = 9.3;
-      const benefit = Math.max(0, candidateQuality - currentQuality.quality);
+      const groupGeom = computeGroupCandidateGeometry({
+        compObjects: items,
+        orientation,
+        structureType: 'sequence'
+      });
+      const groupCandObjects = items.map(orig => {
+        const candNode = groupGeom.nodes.find(n => n.id === orig.id);
+        if (!candNode) return orig;
+        return {
+          ...orig,
+          position: { x: candNode.x, y: candNode.y },
+          left: candNode.x,
+          top: candNode.y,
+          bounds: { x: candNode.x, y: candNode.y, width: candNode.width, height: candNode.height }
+        };
+      });
+      const groupCandQuality = evaluateCompositionQuality({
+        objects: groupCandObjects,
+        objectMap: new Map(groupCandObjects.map(o => [o.id, o])),
+        structureType: STRUCTURE_TYPES.SEQUENCE,
+        orientation
+      });
+      const candidateQuality = groupCandQuality.quality;
+      const currentNodes = items.map(obj => ({ id: obj.id, ...getObjectBounds(obj) }));
+      const groupGeoComparison = compareCompositionsGeometry({
+        currentNodes,
+        candidateNodes: groupGeom.nodes,
+        currentConnectors: [],
+        candidateConnectors: []
+      });
+      let benefit = Math.max(0, candidateQuality - currentQuality.quality);
+      if (!groupGeoComparison.hasMeaningfulVisualChange) benefit = 0;
       const movementCost = calculateMovementCost({
         objectCount: unclaimedInGroup.length,
         currentQuality: currentQuality.quality,
-        candidateQuality
+        candidateQuality,
+        totalDisplacement: groupGeoComparison.totalNodeDisplacement
       });
       const risk = 0.7;
       const structId = `struct_seq_${g.id}`;
@@ -2055,6 +2545,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         candidateCompositions: [{
           template,
           quality: candidateQuality,
+          candidateGeometry: groupGeom,
+          geoComparison: groupGeoComparison,
           compositionBenefit: Number(benefit.toFixed(2)),
           movementCost,
           risk,
@@ -2235,6 +2727,8 @@ export default {
   compareCompositionsGeometry,
   calculateMovementCost,
   calculateCompositionRisk,
+  computeAdaptiveNormalization,
+  computeGroupCandidateGeometry,
   discoverVisualStructures,
   generateCompositionCandidates
 };

@@ -843,6 +843,8 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         connP.shaftPath = repair.shaftPath;
         connP.arrowheadPath = repair.arrowheadPath;
         connP.routeType = repair.routeType;
+        connP.rotation = 0;
+        connP.scale = { x: 1, y: 1 };
 
 
         const hist = transformationHistory.get(repair.connectorId) || [];

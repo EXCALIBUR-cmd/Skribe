@@ -106,18 +106,18 @@ const getPreviewShapeStyle = (object, scale = 1) => {
 const getContentStyle = (object, bounds, renderBounds, scale, padding) => {
   const left = object.bounds?.x !== undefined
     ? object.bounds.x
-    : (object.anchor === 'center' ? object.position.x - object.size.width / 2 : object.position.x);
+    : (object.anchor === 'center' ? object.position.x - (object.bounds?.width ?? object.size?.width ?? 0) / 2 : object.position.x);
   const top = object.bounds?.y !== undefined
     ? object.bounds.y
-    : (object.anchor === 'center' ? object.position.y - object.size.height / 2 : object.position.y);
+    : (object.anchor === 'center' ? object.position.y - (object.bounds?.height ?? object.size?.height ?? 0) / 2 : object.position.y);
 
   const p = worldToPreview({ x: left, y: top }, renderBounds, scale, padding);
 
   return {
     left: `${p.x}px`,
     top: `${p.y}px`,
-    width: `${(object.bounds?.width || object.size?.width || 0) * scale}px`,
-    height: `${(object.bounds?.height || object.size?.height || 0) * scale}px`,
+    width: `${((object.bounds?.width ?? object.size?.width ?? 0)) * scale}px`,
+    height: `${((object.bounds?.height ?? object.size?.height ?? 0)) * scale}px`,
     transform: `rotate(${object.rotation || 0}deg)`,
     transformOrigin: 'center center'
   };
@@ -134,6 +134,7 @@ export const MessCleanupPreviewModal = ({
   onCancel
 }) => {
   const [selectedActionId, setSelectedActionId] = useState(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const cleanupResult = useMemo(() => {
     if (!layoutProposal || !workspaceModel) return null;
@@ -162,7 +163,7 @@ export const MessCleanupPreviewModal = ({
   if (!isOpen) return null;
 
   const renderBounds = renderModel.bounds;
-  const previewWidth = 900;
+  const previewWidth = isSidebarOpen ? 700 : 960;
   const previewHeight = 500;
   const padding = 24;
   const scale = Math.min(
@@ -309,8 +310,8 @@ export const MessCleanupPreviewModal = ({
     );
 
     if (isVectorSvgShape) {
-      const wScreen = (object.size?.width || 100) * scale;
-      const hScreen = (object.size?.height || 100) * scale;
+      const wScreen = (object.bounds?.width ?? object.size?.width ?? 100) * scale;
+      const hScreen = (object.bounds?.height ?? object.size?.height ?? 100) * scale;
       const resolvedFill = hasFill ? originalFill : (originalFill === 'transparent' ? 'transparent' : 'rgba(186, 230, 253, 0.8)');
       const resolvedStroke = hasStroke || rawStrokeWidth > 0 ? (originalStroke || '#000000') : 'none';
 
@@ -422,9 +423,23 @@ export const MessCleanupPreviewModal = ({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-outline-variant/60 px-5 py-4">
-          <div>
-            <h2 id="mess-cleanup-preview-title" className="font-headline text-lg font-bold text-on-surface">Mess Cleanup Preview</h2>
-            <p className="mt-1 text-xs text-on-surface-variant">This is a proposed organization. Your board has not been changed.</p>
+          <div className="flex items-center gap-4">
+            {cleanupResult && (
+              <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="flex items-center justify-center rounded-full p-2 text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors cursor-pointer"
+                aria-label={isSidebarOpen ? "Collapse sidebar" : "Open sidebar"}
+                title={isSidebarOpen ? "Collapse sidebar" : "Open sidebar"}
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  {isSidebarOpen ? "keyboard_double_arrow_left" : "keyboard_double_arrow_right"}
+                </span>
+              </button>
+            )}
+            <div>
+              <h2 id="mess-cleanup-preview-title" className="font-headline text-lg font-bold text-on-surface">Mess Cleanup Preview</h2>
+              <p className="mt-1 text-xs text-on-surface-variant">This is a proposed organization. Your board has not been changed.</p>
+            </div>
           </div>
           <button onClick={onCancel} disabled={isApplying} className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-primary disabled:opacity-50 cursor-pointer" aria-label="Close preview" title="Close preview">
             <span className="material-symbols-outlined">close</span>
@@ -433,7 +448,7 @@ export const MessCleanupPreviewModal = ({
 
         <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
-          {cleanupResult && (
+          {cleanupResult && isSidebarOpen && (
             <aside className="w-[320px] shrink-0 border-r border-outline-variant/60 bg-surface flex flex-col overflow-y-auto">
               <div className="px-5 py-4 border-b border-outline-variant/40 bg-primary-container/10">
                 <div className="flex items-center gap-2 mb-2 text-on-surface font-medium">
