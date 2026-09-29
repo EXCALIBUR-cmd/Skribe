@@ -911,11 +911,7 @@ export const MainCanvasPage = () => {
       />
 
       <div
-        className={`fixed top-20 z-40 transition-all duration-220 ease-out flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none overflow-hidden ${
-          isSidebarExpanded
-            ? 'left-[336px] max-w-[calc(100vw-350px)]'
-            : 'left-16 md:left-20 max-w-[calc(100vw-90px)]'
-        }`}
+        className="fixed top-20 right-6 md:right-8 z-40 transition-all duration-220 ease-out flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none overflow-hidden"
       >
         <button
           onClick={handleBackToBoards}
@@ -1099,11 +1095,7 @@ export const MainCanvasPage = () => {
           isToolbarCollapsed
             ? 'rounded-full p-1'
             : 'rounded-full px-2.5 sm:px-3.5 py-1.5 flex items-center gap-1 sm:gap-1.5 max-w-[calc(100vw-90px)] overflow-x-auto overflow-y-hidden custom-scrollbar'
-        } ${
-          isSidebarExpanded
-            ? 'left-[calc(50vw+160px)] max-w-[calc(100vw-350px)]'
-            : 'left-1/2'
-        }`}
+        } left-1/2`}
       >
         {isToolbarCollapsed ? (
           <button

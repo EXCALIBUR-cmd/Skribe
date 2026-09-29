@@ -8,6 +8,8 @@ export const SKRIBE_SERIALIZABLE_PROPERTIES = Object.freeze([
   'strokeId',
   'parentShapeId',
   'attachedTextId',
+  'attachedTimestampId',
+  'createdAt',
   'metadata',
   'aiMetadata',
   'isStickyNote',
@@ -134,6 +136,8 @@ export const hydrateSkribeFabricObject = (fabricObj, persistedData) => {
 
   if (persistedData.parentShapeId !== undefined) fabricObj.parentShapeId = persistedData.parentShapeId;
   if (persistedData.attachedTextId !== undefined) fabricObj.attachedTextId = persistedData.attachedTextId;
+  if (persistedData.attachedTimestampId !== undefined) fabricObj.attachedTimestampId = persistedData.attachedTimestampId;
+  if (persistedData.createdAt !== undefined) fabricObj.createdAt = persistedData.createdAt;
 
   if (persistedData.isVectorStroke !== undefined) fabricObj.isVectorStroke = persistedData.isVectorStroke;
   if (persistedData.vectorStrokeData !== undefined) fabricObj.vectorStrokeData = persistedData.vectorStrokeData;

@@ -541,76 +541,56 @@ export const FabricCanvas = forwardRef(({
     const processSingleTarget = (t) => {
       if (!t) return;
 
-      const attachedTextId = t.attachedTextId;
       const elementId = t.elementId;
-      let textObj = null;
+      if (!elementId) return;
 
-      if (attachedTextId) {
-        textObj = allObjects.find((o) => o.id === attachedTextId);
-      }
-      if (!textObj && elementId) {
-        textObj = allObjects.find((o) => o.elementId === elementId && o !== t && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text'));
-      }
-
-      if (textObj) {
-        const isNoteCard = !!(t.isStickyNote || t.isChecklistNote || t.isCalloutNote);
-        const scaleX = t.scaleX || 1;
-        const scaleY = t.scaleY || 1;
-        const width = (t.width || 100) * scaleX;
-        const height = (t.height || 100) * scaleY;
-
-        let centerX = t.left;
-        let centerY = t.top;
-        if (t.originX === 'left') centerX += width / 2;
-        else if (t.originX === 'right') centerX -= width / 2;
-
-        if (t.originY === 'top') centerY += height / 2;
-        else if (t.originY === 'bottom') centerY -= height / 2;
-
-        if (isNoteCard) {
-          const padding = 18;
-          const angleRad = ((t.angle || 0) * Math.PI) / 180;
-          const offsetX = - (width / 2) + padding;
-          const offsetY = - (height / 2) + padding;
-          const rotatedX = offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad);
-          const rotatedY = offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad);
-
-          textObj.set({
-            originX: 'left',
-            originY: 'top',
-            left: centerX + rotatedX,
-            top: centerY + rotatedY,
-            angle: t.angle,
-            dirty: true
-          });
-        } else {
-          let targetLeft = centerX;
-          let targetTop = centerY;
-
-          if (textObj.originX === 'left') targetLeft -= width / 2;
-          else if (textObj.originX === 'right') targetLeft += width / 2;
-
-          if (textObj.originY === 'top') targetTop -= height / 2;
-          else if (textObj.originY === 'bottom') targetTop += height / 2;
-
-          textObj.set({
-            left: targetLeft,
-            top: targetTop,
-            angle: t.angle,
-            dirty: true
-          });
-        }
-        textObj.setCoords();
-      }
-
-      const parentShapeId = t.parentShapeId;
       let shapeObj = null;
-
-      if (parentShapeId) {
-        shapeObj = allObjects.find((o) => o.id === parentShapeId);
+      if (t.parentShapeId) shapeObj = allObjects.find(o => o.id === t.parentShapeId);
+      if (!shapeObj && t.type !== 'textbox' && t.type !== 'i-text' && t.type !== 'text') {
+        shapeObj = t;
+      } else if (!shapeObj) {
+        shapeObj = allObjects.find(o => o.elementId === elementId && o !== t && o.type !== 'textbox' && o.type !== 'i-text' && o.type !== 'text');
       }
-      if (!shapeObj && elementId && (t.type === 'textbox' || t.type === 'i-text' || t.type === 'text')) {
-        shapeObj = allObjects.find((o) => o.elementId === elementId && o !== t && o.type !== 'textbox' && o.type !== 'i-text' && o.type !== 'text');
+
+      let textObj = null;
+      if (t.attachedTextId) textObj = allObjects.find(o => o.id === t.attachedTextId);
+      if (!textObj && (t.type === 'textbox' || t.type === 'i-text' || t.type === 'text') && t.metadata?.role !== 'timestamp') {
+        textObj = t;
+      } else if (!textObj) {
+        textObj = allObjects.find(o => o.elementId === elementId && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') && o.metadata?.role !== 'timestamp');
+      }
+
+      let timestampObj = null;
+      const attachedTimestampId = t.attachedTimestampId || (shapeObj ? shapeObj.attachedTimestampId : null);
+      if (attachedTimestampId) timestampObj = allObjects.find(o => o.id === attachedTimestampId);
+      if (!timestampObj && t.metadata?.role === 'timestamp') {
+        timestampObj = t;
+      } else if (!timestampObj) {
+        timestampObj = allObjects.find(o => o.elementId === elementId && o !== t && o.metadata?.role === 'timestamp');
+      }
+
+      // If user dragged textObj, store its new offset relative to shapeObj
+      if (t === textObj && shapeObj) {
+        const scaleX = shapeObj.scaleX || 1;
+        const scaleY = shapeObj.scaleY || 1;
+        const width = (shapeObj.width || 100) * scaleX;
+        const height = (shapeObj.height || 100) * scaleY;
+
+        let centerX = shapeObj.left;
+        let centerY = shapeObj.top;
+        if (shapeObj.originX === 'left') centerX += width / 2;
+        else if (shapeObj.originX === 'right') centerX -= width / 2;
+        if (shapeObj.originY === 'top') centerY += height / 2;
+        else if (shapeObj.originY === 'bottom') centerY -= height / 2;
+
+        const dx = textObj.left - centerX;
+        const dy = textObj.top - centerY;
+        const angleRad = ((shapeObj.angle || 0) * Math.PI) / 180;
+        const unrotatedX = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad);
+        const unrotatedY = dx * Math.sin(-angleRad) + dy * Math.cos(-angleRad);
+
+        shapeObj.__localPaddingX = unrotatedX + (width / 2);
+        shapeObj.__localPaddingY = unrotatedY + (height / 2);
       }
 
       if (shapeObj) {
@@ -620,43 +600,85 @@ export const FabricCanvas = forwardRef(({
         const width = (shapeObj.width || 100) * scaleX;
         const height = (shapeObj.height || 100) * scaleY;
 
-        let shapeCenterX = t.left;
-        let shapeCenterY = t.top;
+        let centerX = shapeObj.left;
+        let centerY = shapeObj.top;
+        if (shapeObj.originX === 'left') centerX += width / 2;
+        else if (shapeObj.originX === 'right') centerX -= width / 2;
+        if (shapeObj.originY === 'top') centerY += height / 2;
+        else if (shapeObj.originY === 'bottom') centerY -= height / 2;
 
-        if (isNoteCard) {
-          const padding = 18;
-          const angleRad = ((t.angle || 0) * Math.PI) / 180;
-          const offsetX = - (width / 2) + padding;
-          const offsetY = - (height / 2) + padding;
+        // Only update text position if the target is NOT the text
+        if (textObj && t !== textObj) {
+          if (isNoteCard) {
+            let padX = 18;
+            let padY = 18;
+            if (shapeObj.__localPaddingX !== undefined) {
+              padX = shapeObj.__localPaddingX;
+              padY = shapeObj.__localPaddingY;
+            } else {
+              const dx = textObj.left - centerX;
+              const dy = textObj.top - centerY;
+              const angleRad = ((shapeObj.angle || 0) * Math.PI) / 180;
+              const unrotatedX = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad);
+              const unrotatedY = dx * Math.sin(-angleRad) + dy * Math.cos(-angleRad);
+              padX = unrotatedX + (width / 2);
+              padY = unrotatedY + (height / 2);
+              shapeObj.__localPaddingX = padX;
+              shapeObj.__localPaddingY = padY;
+            }
+
+            const angleRad = ((shapeObj.angle || 0) * Math.PI) / 180;
+            const offsetX = - (width / 2) + padX;
+            const offsetY = - (height / 2) + padY;
+            const rotatedX = offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad);
+            const rotatedY = offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad);
+
+            textObj.set({
+              originX: 'left',
+              originY: 'top',
+              left: centerX + rotatedX,
+              top: centerY + rotatedY,
+              angle: shapeObj.angle,
+              dirty: true
+            });
+            textObj.setCoords();
+          } else {
+            let targetLeft = centerX;
+            let targetTop = centerY;
+            if (textObj.originX === 'left') targetLeft -= width / 2;
+            else if (textObj.originX === 'right') targetLeft += width / 2;
+            if (textObj.originY === 'top') targetTop -= height / 2;
+            else if (textObj.originY === 'bottom') targetTop += height / 2;
+
+            textObj.set({
+              left: targetLeft,
+              top: targetTop,
+              angle: shapeObj.angle,
+              dirty: true
+            });
+            textObj.setCoords();
+          }
+        }
+
+        if (timestampObj && t !== timestampObj) {
+          const paddingX = 14;
+          const paddingY = 12;
+          const angleRad = ((shapeObj.angle || 0) * Math.PI) / 180;
+          const offsetX = (width / 2) - paddingX;
+          const offsetY = (height / 2) - paddingY;
           const rotatedX = offsetX * Math.cos(angleRad) - offsetY * Math.sin(angleRad);
           const rotatedY = offsetX * Math.sin(angleRad) + offsetY * Math.cos(angleRad);
 
-          shapeCenterX = t.left - rotatedX;
-          shapeCenterY = t.top - rotatedY;
-        } else {
-          if (t.originX === 'left') shapeCenterX += width / 2;
-          else if (t.originX === 'right') shapeCenterX -= width / 2;
-
-          if (t.originY === 'top') shapeCenterY += height / 2;
-          else if (t.originY === 'bottom') shapeCenterY -= height / 2;
+          timestampObj.set({
+            originX: 'right',
+            originY: 'bottom',
+            left: centerX + rotatedX,
+            top: centerY + rotatedY,
+            angle: shapeObj.angle,
+            dirty: true
+          });
+          timestampObj.setCoords();
         }
-
-        let shapeLeft = shapeCenterX;
-        let shapeTop = shapeCenterY;
-
-        if (shapeObj.originX === 'left') shapeLeft -= width / 2;
-        else if (shapeObj.originX === 'right') shapeLeft += width / 2;
-
-        if (shapeObj.originY === 'top') shapeTop -= height / 2;
-        else if (shapeObj.originY === 'bottom') shapeTop += height / 2;
-
-        shapeObj.set({
-          left: shapeLeft,
-          top: shapeTop,
-          angle: t.angle,
-          dirty: true
-        });
-        shapeObj.setCoords();
       }
 
       if (t.attachedTextId || t.elementId) {
@@ -960,6 +982,22 @@ export const FabricCanvas = forwardRef(({
         }
       }
     }
+
+    const attachedTimestampId = targetShape.attachedTimestampId;
+    let timestampObj = null;
+    if (attachedTimestampId) {
+      timestampObj = canvas.getObjects().find((o) => o.id === attachedTimestampId);
+    }
+    if (!timestampObj && elementId) {
+      timestampObj = canvas.getObjects().find((o) => o.elementId === elementId && o !== targetShape && o.metadata?.role === 'timestamp');
+    }
+    if (timestampObj) {
+      if (typeof canvas.bringObjectToFront === 'function') {
+        canvas.bringObjectToFront(timestampObj);
+      } else if (typeof canvas.bringToFront === 'function') {
+        canvas.bringToFront(timestampObj);
+      }
+    }
   };
 
   const isEligibleContainerShape = (obj) => {
@@ -1173,11 +1211,12 @@ export const FabricCanvas = forwardRef(({
     };
   };
 
-  const createLinkedElement = (shape, textObj, left, top, angle = 0) => {
+  const createLinkedElement = (shape, textObj, left, top, angle = 0, timestampObj = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return null;
 
     const elementId = 'elem_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const creationTime = shape.createdAt || Date.now();
 
     shape.set({
       left,
@@ -1188,6 +1227,8 @@ export const FabricCanvas = forwardRef(({
       elementId,
       id: 'shape_' + elementId,
       attachedTextId: 'text_' + elementId,
+      attachedTimestampId: timestampObj ? 'timestamp_' + elementId : undefined,
+      createdAt: creationTime,
       contrastResolved: false,
       metadata: { elementId, role: 'shape' }
     });
@@ -1205,14 +1246,34 @@ export const FabricCanvas = forwardRef(({
       metadata: { elementId, role: 'text' }
     });
 
-    canvas.add(shape, textObj);
-    notifyLocalObjectAdded(shape);
-    notifyLocalObjectAdded(textObj);
+    if (timestampObj) {
+      timestampObj.set({
+        left: left + (shape.width / 2) - 14,
+        top: top + (shape.height / 2) - 12,
+        angle,
+        originX: 'right',
+        originY: 'bottom',
+        elementId,
+        id: 'timestamp_' + elementId,
+        parentShapeId: 'shape_' + elementId,
+        contrastResolved: false,
+        metadata: { elementId, role: 'timestamp' }
+      });
+      canvas.add(shape, textObj, timestampObj);
+      notifyLocalObjectAdded(shape);
+      notifyLocalObjectAdded(textObj);
+      notifyLocalObjectAdded(timestampObj);
+    } else {
+      canvas.add(shape, textObj);
+      notifyLocalObjectAdded(shape);
+      notifyLocalObjectAdded(textObj);
+    }
+
     ensureLinkedTextStacking(shape);
 
     canvas.setActiveObject(shape);
     saveState();
-    return { shape, textObj, elementId };
+    return { shape, textObj, timestampObj, elementId };
   };
 
   const attachNewTextToShape = (shape) => {
@@ -1259,13 +1320,14 @@ export const FabricCanvas = forwardRef(({
     return text;
   };
 
-  const addSticky = (pos = null, initialText = 'New Sticky Note', customColor = null) => {
+  const addSticky = (pos = null, initialText = '', customColor = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
     const { x, y } = pos || getNextViewportPosition(canvas);
     const randomAngle = (Math.random() * 4 - 2).toFixed(1);
     const paperColor = customColor || activeColor || '#fff3a0';
+    const creationTime = Date.now();
 
     const stickyShape = new fabric.Rect({
       width: 180,
@@ -1283,10 +1345,11 @@ export const FabricCanvas = forwardRef(({
         offsetY: 6
       }),
       isStickyNote: true,
+      createdAt: creationTime,
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox(initialText, {
+    const text = new fabric.Textbox(initialText === 'New Sticky Note' ? '' : initialText, {
       width: 144,
       fontSize: 16,
       fontFamily: 'Nunito Sans',
@@ -1296,12 +1359,23 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const result = createLinkedElement(stickyShape, text, x, y, Number(randomAngle));
+    const date = new Date(creationTime);
+    const dateString = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const timestampObj = new fabric.Text(dateString, {
+      fontSize: 11,
+      fontFamily: 'Nunito Sans',
+      fill: 'rgba(0,0,0,0.4)',
+      selectable: false,
+      evented: false
+    });
+
+    const result = createLinkedElement(stickyShape, text, x, y, Number(randomAngle), timestampObj);
 
     if (result && result.shape && !isReducedMotion()) {
       const animState = { scale: 0.9, opacity: 0 };
       result.shape.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
       result.textObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
+      if (result.timestampObj) result.timestampObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
       canvas.requestRenderAll();
 
       anime({
@@ -1313,6 +1387,7 @@ export const FabricCanvas = forwardRef(({
         update: () => {
           result.shape.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
           result.textObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
+          if (result.timestampObj) result.timestampObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
           canvas.requestRenderAll();
         }
       });
@@ -1954,9 +2029,16 @@ export const FabricCanvas = forwardRef(({
     if (elementId) {
       const shapeObj = canvas.getObjects().find((o) => o.elementId === elementId && o.attachedTextId);
       const textObj = canvas.getObjects().find((o) => o.elementId === elementId && o.parentShapeId);
+      const timestampObj = canvas.getObjects().find((o) => o.elementId === elementId && o.metadata?.role === 'timestamp');
 
       if (shapeObj && textObj) {
-        Promise.all([shapeObj.clone(), textObj.clone()]).then(([clonedShape, clonedText]) => {
+        const promises = [shapeObj.clone(), textObj.clone()];
+        if (timestampObj) promises.push(timestampObj.clone());
+
+        Promise.all(promises).then((clones) => {
+          const clonedShape = clones[0];
+          const clonedText = clones[1];
+          const clonedTimestamp = timestampObj ? clones[2] : null;
           canvas.discardActiveObject();
 
           const newElementId = 'elem_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -1969,6 +2051,8 @@ export const FabricCanvas = forwardRef(({
             elementId: newElementId,
             id: 'shape_' + newElementId,
             attachedTextId: 'text_' + newElementId,
+            attachedTimestampId: clonedTimestamp ? 'timestamp_' + newElementId : undefined,
+            createdAt: shapeObj.createdAt,
             contrastResolved: shapeObj.contrastResolved || false,
             evented: true,
             selectable: true
@@ -1989,11 +2073,32 @@ export const FabricCanvas = forwardRef(({
             selectable: true
           });
 
-          canvas.add(clonedShape, clonedText);
-          notifyLocalObjectAdded(clonedShape);
-          notifyLocalObjectAdded(clonedText);
+          const objsToAdd = [clonedShape, clonedText];
+          if (clonedTimestamp) {
+            clonedTimestamp.set({
+              left: timestampObj.left + offsetX,
+              top: timestampObj.top + offsetY,
+              elementId: newElementId,
+              id: 'timestamp_' + newElementId,
+              parentShapeId: 'shape_' + newElementId,
+              contrastResolved: timestampObj.contrastResolved || false,
+              evented: false,
+              selectable: false
+            });
+            objsToAdd.push(clonedTimestamp);
+          }
+
+          canvas.add(...objsToAdd);
+          objsToAdd.forEach(o => notifyLocalObjectAdded(o));
+
+          if (clonedTimestamp) {
+            if (typeof canvas.bringObjectToFront === 'function') canvas.bringObjectToFront(clonedTimestamp);
+            else if (typeof canvas.bringToFront === 'function') canvas.bringToFront(clonedTimestamp);
+          }
           if (typeof canvas.bringObjectToFront === 'function') {
             canvas.bringObjectToFront(clonedText);
+          } else if (typeof canvas.bringToFront === 'function') {
+            canvas.bringToFront(clonedText);
           }
 
           canvas.setActiveObject(clonedShape);
@@ -2816,6 +2921,17 @@ export const FabricCanvas = forwardRef(({
     const handleObjectScaling = (opt) => {
       const target = opt.target;
       if (!target) return;
+
+      if (target.isStickyNote) {
+        const minW = 120;
+        const minH = 120;
+        if (target.width * target.scaleX < minW) {
+          target.set('scaleX', minW / target.width);
+        }
+        if (target.height * target.scaleY < minH) {
+          target.set('scaleY', minH / target.height);
+        }
+      }
 
       if (target.skribeLine || target.isSkribeLine || target.isStraightLine || target.type === 'line' || target.isCurved) {
         target.set({
