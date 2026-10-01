@@ -819,10 +819,19 @@ export const compareCompositionsGeometry = ({
   const hasNodeGeometryChange = maxNodeDisplacement > 1.5;
   const hasConnectorGeometryChange = maxConnectorDisplacement > 1.5 || hasPathChange;
   const hasMeaningfulVisualChange = hasNodeGeometryChange || hasConnectorGeometryChange;
+  
+  const displacements = Object.values(nodeDisplacements).sort((a, b) => a - b);
+  const meanNodeDisplacement = displacements.length ? totalNodeDisplacement / displacements.length : 0;
+  const medianNodeDisplacement = displacements.length ? (displacements.length % 2 === 0 ? (displacements[displacements.length / 2 - 1] + displacements[displacements.length / 2]) / 2 : displacements[Math.floor(displacements.length / 2)]) : 0;
+  const materiallyMovedCount = displacements.filter(d => d > 5.0).length;
+
   return {
     nodeDisplacements,
     totalNodeDisplacement: Number(totalNodeDisplacement.toFixed(1)),
     maxNodeDisplacement: Number(maxNodeDisplacement.toFixed(1)),
+    meanNodeDisplacement: Number(meanNodeDisplacement.toFixed(1)),
+    medianNodeDisplacement: Number(medianNodeDisplacement.toFixed(1)),
+    materiallyMovedCount,
     connectorDisplacements,
     maxConnectorDisplacement: Number(maxConnectorDisplacement.toFixed(1)),
     hasNodeGeometryChange,
@@ -1178,20 +1187,41 @@ export const calculateMovementCost = ({
   currentQuality,
   candidateQuality,
   isBranchingOrMerge = false,
-  totalDisplacement = 0
+  totalDisplacement = 0,
+  geoComparison = null
 }) => {
-  let cost = objectCount * 0.35;
+  let cost = 0;
+  
+  if (geoComparison) {
+    const materiallyMoved = geoComparison.materiallyMovedCount ?? 0;
+    const avgDisplacement = geoComparison.meanNodeDisplacement ?? (totalDisplacement / Math.max(1, objectCount));
+    
+    cost += materiallyMoved * 0.2;
+    cost += avgDisplacement * 0.01;
+    
+    if (geoComparison.hasConnectorGeometryChange) {
+      cost += 0.5;
+    }
+    
+    if (geoComparison.maxNodeDisplacement > 300) {
+      cost += 1.0;
+    }
+  } else {
+    cost = objectCount * 0.35;
+    if (totalDisplacement > 0) {
+      const avgDisplacement = totalDisplacement / Math.max(1, objectCount);
+      if (avgDisplacement > 200) cost += 1.5;
+      else if (avgDisplacement > 100) cost += 0.8;
+      else if (avgDisplacement > 50) cost += 0.3;
+    }
+  }
+
   if (isBranchingOrMerge) cost += 0.5;
   if (currentQuality >= 8.5) {
-    cost += 2.0;
+    cost += 1.0; 
   }
-  if (totalDisplacement > 0) {
-    const avgDisplacement = totalDisplacement / Math.max(1, objectCount);
-    if (avgDisplacement > 200) cost += 1.5;
-    else if (avgDisplacement > 100) cost += 0.8;
-    else if (avgDisplacement > 50) cost += 0.3;
-  }
-  return Number(Math.min(5.0, Math.max(0.5, cost)).toFixed(2));
+  
+  return Number(Math.min(5.0, Math.max(0.0, cost)).toFixed(2));
 };
 export const calculateCompositionRisk = ({
   hasUnknownConnectorEndpoints = false,
@@ -1664,7 +1694,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         currentQuality: currentQualityMetrics.quality,
         candidateQuality,
         isBranchingOrMerge: hasBranch || hasMerge,
-        totalDisplacement: geoComparison.totalNodeDisplacement
+        totalDisplacement: geoComparison.totalNodeDisplacement,
+        geoComparison
       });
       const risk = calculateCompositionRisk({
         hasUnknownConnectorEndpoints: false,
@@ -1778,7 +1809,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         currentQuality: currentQualityMetrics.quality,
         candidateQuality: adaptiveQuality,
         isBranchingOrMerge: hasBranch || hasMerge,
-        totalDisplacement: adaptiveGeoComparison.totalNodeDisplacement
+        totalDisplacement: adaptiveGeoComparison.totalNodeDisplacement,
+        geoComparison: adaptiveGeoComparison
       });
       const adaptiveSafe = adaptiveCollision.safe;
       candidateCompositions.push({
@@ -2438,7 +2470,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         objectCount: clusterIds.length,
         currentQuality: currentQuality.quality,
         candidateQuality,
-        totalDisplacement: clusterGeoComparison.totalNodeDisplacement
+        totalDisplacement: clusterGeoComparison.totalNodeDisplacement,
+        geoComparison: clusterGeoComparison
       });
       const risk = 0.8;
       const structId = `struct_cluster_${sortStrings(clusterIds)[0]}`;
@@ -2529,7 +2562,8 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
         objectCount: unclaimedInGroup.length,
         currentQuality: currentQuality.quality,
         candidateQuality,
-        totalDisplacement: groupGeoComparison.totalNodeDisplacement
+        totalDisplacement: groupGeoComparison.totalNodeDisplacement,
+        geoComparison: groupGeoComparison
       });
       const risk = 0.7;
       const structId = `struct_seq_${g.id}`;
