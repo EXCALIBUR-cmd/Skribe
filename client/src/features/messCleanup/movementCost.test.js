@@ -62,9 +62,9 @@ test("3. Zero-change candidate benefit is strictly 0 and gets rejected", () => {
 test("4. Adaptive candidate vs Template candidate: adaptive wins on locality", () => {
   const currentQuality = 6;
   const adaptiveQuality = 8.5;
-  const templateQuality = 8.8; // Template gives slightly better structural quality
+  const templateQuality = 8.8;
 
-  // Adaptive candidate just bumps a few nodes
+
   const adaptiveCost = calculateMovementCost({
     objectCount: 6,
     currentQuality,
@@ -73,7 +73,7 @@ test("4. Adaptive candidate vs Template candidate: adaptive wins on locality", (
     geoComparison: { materiallyMovedCount: 2, meanNodeDisplacement: 5, hasConnectorGeometryChange: false, maxNodeDisplacement: 15 }
   });
 
-  // Template candidate shifts all 6 nodes by 150px
+
   const templateCost = calculateMovementCost({
     objectCount: 6,
     currentQuality,
@@ -95,7 +95,6 @@ test("4. Adaptive candidate vs Template candidate: adaptive wins on locality", (
 });
 
 test("5. Multi-structure scale normalization: same relative movement", () => {
-  // A tiny structure moves 50px
   const tinyCost = calculateMovementCost({
     objectCount: 2,
     currentQuality: 5,
@@ -104,7 +103,7 @@ test("5. Multi-structure scale normalization: same relative movement", () => {
     geoComparison: { materiallyMovedCount: 2, meanNodeDisplacement: 50, hasConnectorGeometryChange: false, maxNodeDisplacement: 50 }
   });
 
-  // A huge structure moves 50px
+
   const hugeCost = calculateMovementCost({
     objectCount: 20,
     currentQuality: 5,
@@ -118,7 +117,7 @@ test("5. Multi-structure scale normalization: same relative movement", () => {
 
 test("6. Large benefit overcomes movement cost", () => {
   const currentQuality = 3;
-  const candidateQuality = 9; // Enormous benefit (+6)
+  const candidateQuality = 9;
   
   const cost = calculateMovementCost({
     objectCount: 10,

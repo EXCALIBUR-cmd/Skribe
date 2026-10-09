@@ -1,3 +1,5 @@
+import { extractStructureBlocks, extractBoardEvidence } from './structureBlock.js';
+import { generateMacroCandidates, selectMacroCandidates } from './macroComposition.js';
 
 import {
   HIGH_CONFIDENCE,
@@ -33,7 +35,8 @@ export const ACTION_PRIORITY = Object.freeze({
   align: 5,
   equalizeSpacing: 6,
   normalizeText: 7,
-  preserve: 8
+  macroTranslate: 8,
+  preserve: 9
 });
 
 export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {}) => {
@@ -123,6 +126,21 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     totalObjectCount: allObjectIds.length,
     ...options
   });
+
+  const selectedCompositions = selectedOpportunities.filter(o => o.category === 'composition');
+  const blocks = extractStructureBlocks(visualStructures, {
+    selectedCandidates: selectedCompositions,
+    objectMap,
+    ownership
+  });
+  const boardEvidence = extractBoardEvidence(blocks, { rawObjects: options.rawObjects || [], objectMap });
+  const macroCandidates = generateMacroCandidates(boardEvidence, {
+    objectMap,
+    ownership,
+    selectedCandidates: selectedCompositions,
+    rawObjects: options.rawObjects || []
+  });
+  const bestMacroCandidate = macroCandidates.length > 0 ? macroCandidates[0] : null;
 
   const {
     actions: rawActions,
@@ -429,6 +447,8 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
   let validatedExecutableActions = [...executableActions, ...connectorRepairActions];
   let validatedUntouchedIds = [...finalUntouchedObjectIds];
 
+  let finalLocalPlacements = null;
+
   const MAX_COLLISION_SAFETY_PASSES = 5;
   for (let pass = 0; pass < MAX_COLLISION_SAFETY_PASSES; pass++) {
     if (validatedExecutableActions.length === 0) break;
@@ -450,6 +470,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     );
 
     if (newCollisions.length === 0) {
+      finalLocalPlacements = simProposal.placements;
       break;
     }
 
@@ -471,6 +492,7 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     });
 
     if (collidingActionIds.size === 0) {
+      finalLocalPlacements = simProposal.placements;
       break;
     }
 
@@ -500,6 +522,9 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     validatedUntouchedIds = sortStrings(
       allObjectIds.filter((id) => !remainingModified.has(id))
     );
+    if (pass === MAX_COLLISION_SAFETY_PASSES - 1) {
+      finalLocalPlacements = simProposal.placements;
+    }
   }
 
   (budgetRejected || []).forEach((rej) => {
@@ -518,6 +543,36 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     }
   });
 
+  const { selectedMacroCandidates, macroConflicts } = selectMacroCandidates(macroCandidates, {
+    simulatedPlacements: finalLocalPlacements,
+    rawObjects,
+    blocks,
+    cleanupContext: options.cleanupContext
+  });
+
+  const macroActions = selectedMacroCandidates.map(cand => ({
+    id: `act_${cand.candidateId}`,
+    type: 'macroTranslate',
+    structureBlockIds: cand.blockIds,
+    objectIds: cand.affectedObjectIds,
+    connectorIds: cand.affectedConnectorIds,
+    translations: cand.blockTranslations,
+    geometry: {
+      objectGeometry: cand.objectGeometry?.candidateNodeBounds || [],
+      labelGeometry: cand.objectGeometry?.candidateLabelBounds || [],
+      connectorGeometry: cand.objectGeometry?.candidateConnectorGeometry || [],
+      completeBounds: cand.objectGeometry?.candidateCompleteBounds || null,
+      candidateNodeBounds: cand.objectGeometry?.candidateNodeBounds || [],
+      candidateLabelBounds: cand.objectGeometry?.candidateLabelBounds || [],
+      candidateConnectorGeometry: cand.objectGeometry?.candidateConnectorGeometry || [],
+      candidateCompleteBounds: cand.objectGeometry?.candidateCompleteBounds || null
+    },
+    reason: `Macro translation applied for ${cand.type}`,
+    evidence: cand.evidence,
+    confidence: cand.confidence,
+    sourceCandidateId: cand.candidateId
+  }));
+
   const diagnostics = {
     structures: visualStructures,
     compositionCandidates,
@@ -529,7 +584,8 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
       structuralActionCount: validatedExecutableActions.filter((a) => ['cleanFlowchart', 'arrangeGrid'].includes(a.type)).length,
       spatialActionCount: validatedExecutableActions.filter((a) => ['align', 'equalizeSpacing'].includes(a.type)).length,
       cosmeticActionCount: validatedExecutableActions.filter((a) => ['normalizeText', 'attachText'].includes(a.type)).length,
-      connectorRepairCount: validatedExecutableActions.filter((a) => a.type === 'repairConnector').length
+      connectorRepairCount: validatedExecutableActions.filter((a) => a.type === 'repairConnector').length,
+      macroActionCount: macroActions.length
     },
     actionCount: validatedExecutableActions.length,
     highConfidenceActionCount: validatedExecutableActions.filter((a) => a.confidence >= HIGH_CONFIDENCE).length,
@@ -541,13 +597,20 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     suppressedActions: allSuppressedActions,
     suppressionReasons: allSuppressionReasons,
     connectorRepairDiagnostics: repairResult.diagnostics,
-    rejectedConnectorRepairs: repairResult.rejectedRepairs
+    rejectedConnectorRepairs: repairResult.rejectedRepairs,
+    boardEvidence,
+    macroCandidates,
+    bestMacroCandidate,
+    selectedMacroCandidates,
+    macroConflicts,
+    macroActions
   };
 
   const plan = {
     version: 1,
     actions: validatedExecutableActions,
     untouchedObjectIds: validatedUntouchedIds,
+    macroActions,
     diagnostics
   };
 

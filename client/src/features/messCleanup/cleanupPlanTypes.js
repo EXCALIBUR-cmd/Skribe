@@ -11,6 +11,7 @@ export const SUPPORTED_ACTION_TYPES = new Set([
   'cleanFlowchart',
   'normalizeText',
   'repairConnector',
+  'macroTranslate',
   'preserve'
 ]);
 
@@ -225,7 +226,24 @@ export const validateCleanupPlan = (plan, workspaceModel = null) => {
       }
     }
 
-    
+    if (action.type === 'macroTranslate') {
+      if (!Array.isArray(action.structureBlockIds) || action.structureBlockIds.length === 0) {
+        errors.push(`${prefix} (macroTranslate) structureBlockIds must be a non-empty array of strings`);
+      }
+      if (!action.translations || typeof action.translations !== 'object') {
+        errors.push(`${prefix} (macroTranslate) translations must be an object`);
+      } else {
+        Object.entries(action.translations).forEach(([bId, trans]) => {
+          if (!trans || typeof trans.dx !== 'number' || typeof trans.dy !== 'number') {
+            errors.push(`${prefix} (macroTranslate) translation for block '${bId}' must specify numeric dx and dy`);
+          }
+        });
+      }
+      if (!action.geometry || typeof action.geometry !== 'object') {
+        errors.push(`${prefix} (macroTranslate) geometry must be an object`);
+      }
+    }
+
     if (action.type !== 'repairConnector') {
       Object.keys(action).forEach((key) => {
         if (FORBIDDEN_COORDINATE_FIELDS.has(key)) {

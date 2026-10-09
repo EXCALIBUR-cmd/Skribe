@@ -301,7 +301,7 @@ export const computeAdaptiveNormalization = ({
   const isVertical = orientation === 'vertical';
   let candidateNodes = compObjects.map(o => ({ id: o.id, ...getObjectBounds(o) }));
   
-  // 1. Local Alignment Snapping (Centers and Edges)
+
   const SNAP_THRESHOLD = 15;
   const snapToClusters = (axis) => {
     let visited = new Set();
@@ -344,7 +344,7 @@ export const computeAdaptiveNormalization = ({
   snapToClusters('x');
   snapToClusters('y');
 
-  // 2. Identify Levels
+
   const maxLevel = Math.max(...Array.from(compLevelMap.values()), 0);
   const levels = [];
   for (let l = 0; l <= maxLevel; l++) levels.push([]);
@@ -353,7 +353,7 @@ export const computeAdaptiveNormalization = ({
     levels[lvl].push(n);
   });
 
-  // 3. Level Spacing Normalization (Primary Axis)
+
   const primaryAxis = isVertical ? 'y' : 'x';
   const primarySize = isVertical ? 'height' : 'width';
   
@@ -380,16 +380,13 @@ export const computeAdaptiveNormalization = ({
       targetLevelGap = sortedGaps.length % 2 === 0 ? (sortedGaps[mid - 1] + sortedGaps[mid]) / 2 : sortedGaps[mid];
     }
   }
-  // Bounded target level gap
   targetLevelGap = Math.max(40, Math.min(120, targetLevelGap));
 
-  // Apply level gap correction
   let cumulativePrimaryShift = 0;
   for (let i = 1; i < levels.length; i++) {
     if (!levelBounds[i-1] || !levelBounds[i]) continue;
     const currentGap = levelBounds[i].minP - levelBounds[i-1].maxP;
     
-    // Only adjust if it's anomalous (e.g. <= 20, or > targetGap * 1.5)
     let shiftForThisLevel = 0;
     if (currentGap < 20 || currentGap > targetLevelGap * 1.5) {
       shiftForThisLevel = targetLevelGap - currentGap;
@@ -408,7 +405,7 @@ export const computeAdaptiveNormalization = ({
     }
   }
 
-  // 4. Sibling Spacing Normalization (Alignment Axis)
+
   const alignAxis = isVertical ? 'x' : 'y';
   const alignSize = isVertical ? 'width' : 'height';
 
@@ -484,10 +481,9 @@ export const computeGroupCandidateGeometry = ({
 }) => {
   let candidateNodes = compObjects.map(o => ({ id: o.id, ...getObjectBounds(o) }));
 
-  // 1. Local Alignment Snapping (Centers)
+
   const SNAP_THRESHOLD = 15;
   const snapToClusters = (axis) => {
-    // Collect all values
     let visited = new Set();
     const clusters = [];
     for (let i = 0; i < candidateNodes.length; i++) {
@@ -499,7 +495,6 @@ export const computeGroupCandidateGeometry = ({
         changed = false;
         for (let j = 0; j < candidateNodes.length; j++) {
           if (visited.has(j)) continue;
-          // check if j is close to any in cluster
           const isClose = cluster.some(idx => Math.abs(candidateNodes[idx][axis] - candidateNodes[j][axis]) <= SNAP_THRESHOLD);
           if (isClose) {
             cluster.push(j);
@@ -510,7 +505,6 @@ export const computeGroupCandidateGeometry = ({
       }
       clusters.push(cluster);
     }
-    // Snap each cluster to its mean
     clusters.forEach(cluster => {
       if (cluster.length > 1) {
         const mean = cluster.reduce((sum, idx) => sum + candidateNodes[idx][axis], 0) / cluster.length;
@@ -531,7 +525,7 @@ export const computeGroupCandidateGeometry = ({
   snapToClusters('x');
   snapToClusters('y');
 
-  // 2. Whitespace Compaction (Seam Carving)
+
   const compactAxis = (nodes, axis, size) => {
     const intervals = nodes.map(n => ({ start: n[axis], end: n[axis] + n[size] }));
     intervals.sort((a, b) => a.start - b.start);
@@ -564,7 +558,6 @@ export const computeGroupCandidateGeometry = ({
     nodes.forEach(n => {
       let shrinkForThisNode = 0;
       emptyBands.forEach((band, i) => {
-        // If node is strictly after the empty band, shift it left/up
         if (n[axis] >= band.end - 0.1) {
           shrinkForThisNode += shrinkAmounts[i];
         }
