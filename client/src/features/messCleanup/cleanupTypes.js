@@ -144,7 +144,7 @@ export const getShapeType = (object) => {
     const pointCount = Array.isArray(object.points) ? object.points.length : 0;
     if (pointCount === 6) return 'hexagon';
     if (pointCount === 4) return 'diamond';
-    return 'diamond';
+    return 'polygon';
   }
   if (typeLower === 'path') return 'path';
   return object?.type || null;

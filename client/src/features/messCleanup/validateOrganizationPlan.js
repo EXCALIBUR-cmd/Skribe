@@ -211,11 +211,20 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
     ];
   }
 
+  const resolvedModel = rawPlan?.source?.model || rawPlan?.model || 'gemini-3.8-flash';
+  const resolvedEngine = rawPlan?.source?.engine || 'gemini';
+
   return {
     version: 2,
     source: {
-      engine: 'nemotron-omni',
-      model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning'
+      engine: resolvedEngine,
+      model: resolvedModel
+    },
+    provenance: {
+      engine: 'ai-assisted',
+      isFallback: false,
+      aiUnavailable: false,
+      model: resolvedModel
     },
     workspaceType,
     ...(Array.isArray(rawPlan?.groups) ? { groups: rawPlan.groups } : {}),

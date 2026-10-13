@@ -2,16 +2,29 @@
 import { parseConnectorPath, transformPathCommandsToWorld } from './connectorGeometry.js';
 
 export const MAX_ATTACH_DISTANCE = 35;
+export const MAX_DIRECTIONAL_CORRIDOR_DISTANCE = 80;
 export const MIN_AMBIGUITY_MARGIN = 15;
 
 export const getShapeBoundaryGeometry = (shape) => {
-  const left = shape.bounds?.x ?? shape.position?.x ?? shape.left ?? 0;
-  const top = shape.bounds?.y ?? shape.position?.y ?? shape.top ?? 0;
-  const width = shape.bounds?.width ?? shape.size?.width ?? shape.width ?? 0;
-  const height = shape.bounds?.height ?? shape.size?.height ?? shape.height ?? 0;
+  let left, top, width, height;
+  if (shape.bounds) {
+    left = shape.bounds.x;
+    top = shape.bounds.y;
+    width = shape.bounds.width;
+    height = shape.bounds.height;
+  } else {
+    const sx = Math.abs(shape.scale?.x ?? shape.scaleX ?? 1);
+    const sy = Math.abs(shape.scale?.y ?? shape.scaleY ?? 1);
+    width = (shape.size?.width ?? shape.width ?? 0) * sx;
+    height = (shape.size?.height ?? shape.height ?? 0) * sy;
+    const rawX = shape.position?.x ?? shape.left ?? 0;
+    const rawY = shape.position?.y ?? shape.top ?? 0;
+    left = shape.originX === 'center' ? rawX - width / 2 : rawX;
+    top = shape.originY === 'center' ? rawY - height / 2 : rawY;
+  }
   const cx = left + width / 2;
   const cy = top + height / 2;
-  const shapeType = shape.shapeType || shape.type || 'rect';
+  const shapeType = String(shape.shapeType || shape.type || 'rect').toLowerCase();
 
   return {
     left,
@@ -69,6 +82,29 @@ export const getDistanceToShapeBoundary = (point, shape) => {
       { x: g.right, y: g.bottom },
       { x: g.left, y: g.bottom }
     ];
+    let minDist = Infinity;
+    for (let i = 0; i < vertices.length; i++) {
+      const v1 = vertices[i];
+      const v2 = vertices[(i + 1) % vertices.length];
+      minDist = Math.min(minDist, distToSegment(point, v1, v2));
+    }
+    return minDist;
+  }
+
+  if (Array.isArray(shape?.points) && shape.points.length >= 3) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    shape.points.forEach((p) => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    const vertices = shape.points.map((p) => ({
+      x: g.left + ((p.x - minX) / spanX) * g.width,
+      y: g.top + ((p.y - minY) / spanY) * g.height
+    }));
     let minDist = Infinity;
     for (let i = 0; i < vertices.length; i++) {
       const v1 = vertices[i];
@@ -236,6 +272,36 @@ export const getDistanceToShape = (point, shape) => {
 
 export const MAX_EXPLICIT_ATTACH_DISTANCE = 50;
 
+const rayHitsBox = (ox, oy, dx, dy, box, maxDist) => {
+  let tmin = -Infinity;
+  let tmax = Infinity;
+  const lateralPad = 45;
+  const xMin = box.left - lateralPad;
+  const xMax = box.right + lateralPad;
+  const yMin = box.top - lateralPad;
+  const yMax = box.bottom + lateralPad;
+  if (Math.abs(dx) > 1e-6) {
+    const tx1 = (xMin - ox) / dx;
+    const tx2 = (xMax - ox) / dx;
+    tmin = Math.max(tmin, Math.min(tx1, tx2));
+    tmax = Math.min(tmax, Math.max(tx1, tx2));
+  } else if (ox < xMin || ox > xMax) {
+    return null;
+  }
+  if (Math.abs(dy) > 1e-6) {
+    const ty1 = (yMin - oy) / dy;
+    const ty2 = (yMax - oy) / dy;
+    tmin = Math.max(tmin, Math.min(ty1, ty2));
+    tmax = Math.min(tmax, Math.max(ty1, ty2));
+  } else if (oy < yMin || oy > yMax) {
+    return null;
+  }
+  if (tmax >= Math.max(0, tmin) && tmin <= maxDist + 20) {
+    return Math.max(0, tmin);
+  }
+  return null;
+};
+
 export const evaluateEndpointCandidate = (point, tangent, candidateShapes, role, connectorId) => {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
     return { shapeId: null, confidence: 0.0, evidence: 'invalid endpoint point' };
@@ -254,10 +320,57 @@ export const evaluateEndpointCandidate = (point, tangent, candidateShapes, role,
     return { shapeId: null, confidence: 0.0, evidence: 'no candidate shapes' };
   }
 
-  const best = scored[0];
-  const second = scored[1];
+  const bestDirect = scored.find((s) => s.directionOk) || scored[0];
+  const second = scored.find((s) => s.shape.id !== bestDirect.shape.id && s.directionOk) || scored.find((s) => s.shape.id !== bestDirect.shape.id);
+  const best = bestDirect;
 
   if (best.dist > MAX_ATTACH_DISTANCE) {
+    const tanLen = Math.hypot(tangent?.x || 0, tangent?.y || 0);
+    const isAxisAligned = Math.abs(tangent?.x || 0) < 1e-3 || Math.abs(tangent?.y || 0) < 1e-3;
+    if (tanLen > 0 && best.dist <= MAX_DIRECTIONAL_CORRIDOR_DISTANCE && isAxisAligned) {
+      const dir = { x: tangent.x / tanLen, y: tangent.y / tanLen };
+      const gBest = getShapeBoundaryGeometry(best.shape);
+      const hitDist = rayHitsBox(point.x, point.y, dir.x, dir.y, gBest, MAX_DIRECTIONAL_CORRIDOR_DISTANCE);
+
+      if (hitDist !== null && best.directionOk) {
+        const toCenter = { x: gBest.cx - point.x, y: gBest.cy - point.y };
+        const centerDist = Math.hypot(toCenter.x, toCenter.y);
+        const dot = centerDist > 0 ? (dir.x * toCenter.x + dir.y * toCenter.y) / centerDist : 0;
+
+        if (dot >= 0.70) {
+          let isBlocked = false;
+          for (const s of candidateShapes) {
+            if (s.id === connectorId || s.id === best.shape.id) continue;
+            const gOther = getShapeBoundaryGeometry(s);
+            const otherHit = rayHitsBox(point.x, point.y, dir.x, dir.y, gOther, MAX_DIRECTIONAL_CORRIDOR_DISTANCE);
+            if (otherHit !== null && otherHit < hitDist) {
+              isBlocked = true;
+              break;
+            }
+          }
+
+          if (!isBlocked) {
+            let isAmbiguous = false;
+            if (second) {
+              const gSecond = getShapeBoundaryGeometry(second.shape);
+              const secondHit = rayHitsBox(point.x, point.y, dir.x, dir.y, gSecond, MAX_DIRECTIONAL_CORRIDOR_DISTANCE);
+              if (secondHit !== null && Math.abs(secondHit - hitDist) < MIN_AMBIGUITY_MARGIN) {
+                isAmbiguous = true;
+              }
+            }
+
+            if (!isAmbiguous) {
+              return {
+                shapeId: best.shape.id,
+                confidence: 0.95,
+                evidence: `directional-corridor recovery (unambiguous trajectory hit at ${best.dist.toFixed(1)}px)`
+              };
+            }
+          }
+        }
+      }
+    }
+
     return {
       shapeId: null,
       confidence: Math.max(0.2, 0.85 - (best.dist - MAX_ATTACH_DISTANCE) / 100),

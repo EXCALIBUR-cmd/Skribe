@@ -903,6 +903,7 @@ export const MainCanvasPage = () => {
         isOpen={messCleanupPreview.isOpen}
         workspaceModel={messCleanupPreview.workspaceModel}
         layoutProposal={messCleanupPreview.layoutProposal}
+        organizationPlan={messCleanupPreview.organizationPlan}
         loading={messCleanupPreview.loading}
         isApplying={messCleanupPreview.isApplying}
         error={messCleanupPreview.error}
@@ -1229,19 +1230,30 @@ export const MainCanvasPage = () => {
           Skribe
         </div>
 
-        {skribeFeatureItems.map((feature) => (
-          <button
-            key={feature.id}
-            onClick={() => handleSkribeFeatureClick(feature)}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-primary bg-primary/10 hover:bg-primary hover:text-on-primary hover:scale-105 transition-all cursor-pointer relative group"
-            data-toolbar-tooltip={feature.label}
-            data-toolbar-tooltip-detail={feature.tooltip}
-            title={feature.tooltip}
-            aria-label={feature.label}
-          >
-            <span className="material-symbols-outlined text-[20px]">{feature.icon}</span>
-          </button>
-        ))}
+        {skribeFeatureItems.map((feature) => {
+          const isLoading = feature.id === 'mess-cleanup' && messCleanupPreview.loading;
+          return (
+            <button
+              key={feature.id}
+              onClick={() => handleSkribeFeatureClick(feature)}
+              disabled={isLoading}
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all relative group ${
+                isLoading
+                  ? 'opacity-50 cursor-not-allowed text-primary/50 bg-primary/5'
+                  : 'text-primary bg-primary/10 hover:bg-primary hover:text-on-primary hover:scale-105 cursor-pointer'
+              }`}
+              data-toolbar-tooltip={isLoading ? 'Analyzing...' : feature.label}
+              data-toolbar-tooltip-detail={isLoading ? 'Workspace analysis in progress' : feature.tooltip}
+              title={isLoading ? 'Analyzing workspace...' : feature.tooltip}
+              aria-label={feature.label}
+              aria-disabled={isLoading}
+            >
+              <span className={`material-symbols-outlined text-[20px] ${isLoading ? 'animate-spin' : ''}`}>
+                {isLoading ? 'progress_activity' : feature.icon}
+              </span>
+            </button>
+          );
+        })}
 
             <button
               onClick={() => setIsToolbarCollapsed(true)}

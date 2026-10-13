@@ -1,5 +1,6 @@
 import { getObjectBounds } from './cleanupOpportunities.js';
 import { STRUCTURE_TYPES, evaluateCompleteGeometryCollisions } from './discoverVisualStructures.js';
+import { getConnectorEndpointsAndTangents, getDistanceToShape, checkDirectionCompatibility } from './connectorTopology.js';
 
 export const MACRO_CANDIDATE_TYPES = {
   PACK_ADJACENT_ALIGNED: 'PACK_ADJACENT_ALIGNED',
@@ -47,15 +48,18 @@ const buildTranslatedGeometry = (blockId, block, dx, dy, options) => {
     });
   } else {
     block.objectIds.forEach(id => {
-      const obj = objectMap.get(id);
+      const obj = objectMap?.get(id);
       if (obj) candNodeBounds.push({ id, ...translateBounds(getObjectBounds(obj), dx, dy) });
       
       const labels = ownership?.ownedByOwner?.get(id) || [];
       labels.forEach(lid => {
         const lObj = objectMap.get(lid);
         if (lObj && !affectedObjectIds.includes(lid)) {
-          affectedObjectIds.push(lid);
-          candLabelBounds.push({ id: lid, ...translateBounds(getObjectBounds(lObj), dx, dy) });
+          const semType = lObj.semanticType || lObj.type;
+          if (semType === 'text' || lObj.type === 'text') {
+            affectedObjectIds.push(lid);
+            candLabelBounds.push({ id: lid, ...translateBounds(getObjectBounds(lObj), dx, dy) });
+          }
         }
       });
     });
@@ -107,14 +111,24 @@ const calculateMacroQuality = (evidence, blockTranslations) => {
       }
     }
 
-    if (rel.connected) {
+    const isEligibleGap = rel.connected || (
+      !rel.overlapping &&
+      rel.alignmentEvidence?.length > 0 &&
+      !blockA.protected && !blockB.protected &&
+      blockA.type !== STRUCTURE_TYPES.CREATIVE && blockB.type !== STRUCTURE_TYPES.CREATIVE &&
+      blockA.type !== STRUCTURE_TYPES.STRUCTURAL && blockB.type !== STRUCTURE_TYPES.STRUCTURAL &&
+      !(blockA.type === STRUCTURE_TYPES.STANDALONE && blockB.type === STRUCTURE_TYPES.STANDALONE)
+    );
+
+    if (isEligibleGap) {
       const gapX = Math.max(0, Math.max(boundsA.x, boundsB.x) - Math.min(boundsA.x + boundsA.width, boundsB.x + boundsB.width));
       const gapY = Math.max(0, Math.max(boundsA.y, boundsB.y) - Math.min(boundsA.y + boundsA.height, boundsB.y + boundsB.height));
       
       const gap = Math.min(gapX, gapY) === 0 ? Math.max(gapX, gapY) : Math.hypot(gapX, gapY);
       
       if (gap > MACRO_CONSTANTS.MIN_EXCESSIVE_GAP) {
-        score += (gap - MACRO_CONSTANTS.PACKING_TARGET_GAP) * 0.1;
+        const factor = rel.connected ? 0.1 : 0.08;
+        score += (gap - MACRO_CONSTANTS.PACKING_TARGET_GAP) * factor;
       }
     }
   });
@@ -151,19 +165,33 @@ export const generateMacroCandidates = (evidence, options = {}) => {
     
     if (!blockA || !blockB) return;
 
-    if (rel.connected && !rel.overlapping && rel.alignmentEvidence.length > 0) {
+    const isConnectedPacking = rel.connected && !rel.overlapping && rel.alignmentEvidence.length > 0;
+    const isUnconnectedPacking = !rel.connected && !rel.overlapping && rel.alignmentEvidence.length > 0 &&
+      !blockA.protected && !blockB.protected &&
+      blockA.type !== STRUCTURE_TYPES.CREATIVE && blockB.type !== STRUCTURE_TYPES.CREATIVE &&
+      blockA.type !== STRUCTURE_TYPES.STRUCTURAL && blockB.type !== STRUCTURE_TYPES.STRUCTURAL &&
+      !(blockA.type === STRUCTURE_TYPES.STANDALONE && blockB.type === STRUCTURE_TYPES.STANDALONE) &&
+      rel.alignmentEvidence.some(ev => ev.deviation <= 25);
+
+    if (isConnectedPacking || isUnconnectedPacking) {
       const gapX = rel.horizontalGap;
       const gapY = rel.verticalGap;
-      const gap = Math.min(gapX, gapY) === 0 ? Math.max(gapX, gapY) : Math.hypot(gapX, gapY);
+      const isHorizontal = gapX > gapY;
+      const gap = isHorizontal ? gapX : gapY;
       
       if (gap > MACRO_CONSTANTS.MIN_EXCESSIVE_GAP && gap <= MACRO_CONSTANTS.MAX_PACKING_GAP) {
-        const isHorizontal = gapX > gapY;
-        const reduction = gap - MACRO_CONSTANTS.PACKING_TARGET_GAP;
+        const targetGap = isConnectedPacking ? MACRO_CONSTANTS.PACKING_TARGET_GAP : 60;
+        const reduction = gap - targetGap;
         
         if (reduction > 10) {
           const dxA = isHorizontal ? (blockA.bounds.cx < blockB.bounds.cx ? reduction : -reduction) : 0;
           const dyA = !isHorizontal ? (blockA.bounds.cy < blockB.bounds.cy ? reduction : -reduction) : 0;
           
+          const candOpts = {
+            ...options,
+            candidateConfidence: isConnectedPacking ? 0.90 : 0.75
+          };
+
           if (!blockA.protected) {
             candidates.push(buildMacroCandidate(
               MACRO_CANDIDATE_TYPES.PACK_ADJACENT_ALIGNED,
@@ -172,7 +200,7 @@ export const generateMacroCandidates = (evidence, options = {}) => {
               { [blockA.id]: { dx: dxA, dy: dyA } },
               evidence,
               currentBoardQuality,
-              options
+              candOpts
             ));
           }
           
@@ -187,7 +215,7 @@ export const generateMacroCandidates = (evidence, options = {}) => {
               { [blockB.id]: { dx: dxB, dy: dyB } },
               evidence,
               currentBoardQuality,
-              options
+              candOpts
             ));
           }
         }
@@ -195,11 +223,68 @@ export const generateMacroCandidates = (evidence, options = {}) => {
     }
 
     if (rel.overlapping) {
+      const isOwnedRelationship =
+        blockA.objectIds.some(id => (options.ownership?.ownedByOwner?.get(id) || []).some(cId => blockB.objectIds.includes(cId))) ||
+        blockB.objectIds.some(id => (options.ownership?.ownedByOwner?.get(id) || []).some(cId => blockA.objectIds.includes(cId))) ||
+        blockA.objectIds.some(id => options.ownership?.ownerByText?.get(id) && blockB.objectIds.includes(options.ownership.ownerByText.get(id))) ||
+        blockB.objectIds.some(id => options.ownership?.ownerByText?.get(id) && blockA.objectIds.includes(options.ownership.ownerByText.get(id)));
+
+      if (isOwnedRelationship) {
+        return;
+      }
+
       const isSemanticContainment = 
         (blockA.type === STRUCTURE_TYPES.STANDALONE && blockB.type === STRUCTURE_TYPES.FLOW) ||
         (blockB.type === STRUCTURE_TYPES.STANDALONE && blockA.type === STRUCTURE_TYPES.FLOW);
         
       if (isSemanticContainment && rel.overlapRatio > 0.8) {
+        return;
+      }
+
+      const isConnectorAttachmentContact = (() => {
+        if (!options.objectMap) return false;
+        const aHasConn = blockA.connectorIds?.length > 0 || blockA.objectIds.some(id => {
+          const o = options.objectMap.get(id);
+          return o && (o.type === 'connector' || o.semanticType === 'connector' || o.isConnector);
+        });
+        const bHasConn = blockB.connectorIds?.length > 0 || blockB.objectIds.some(id => {
+          const o = options.objectMap.get(id);
+          return o && (o.type === 'connector' || o.semanticType === 'connector' || o.isConnector);
+        });
+        if ((aHasConn && bHasConn) || (!aHasConn && !bHasConn)) return false;
+        const connBlock = aHasConn ? blockA : blockB;
+        const shapeBlock = aHasConn ? blockB : blockA;
+        const connIds = [...(connBlock.connectorIds || []), ...connBlock.objectIds].filter(id => {
+          const o = options.objectMap.get(id);
+          return o && (o.type === 'connector' || o.semanticType === 'connector' || o.isConnector);
+        });
+        const shapeObjs = shapeBlock.objectIds.map(id => options.objectMap.get(id)).filter(Boolean);
+        for (const cId of connIds) {
+          const conn = options.objectMap.get(cId);
+          if (!conn) continue;
+          const edge = (options.selectedCandidates || []).flatMap(c => c.verifiedEdges || []).find(e => e.connId === cId);
+          const sId = conn.sourceShapeId || conn.relationshipMetadata?.sourceShapeId || edge?.srcId;
+          const tId = conn.targetShapeId || conn.relationshipMetadata?.targetShapeId || edge?.tgtId;
+          if (shapeBlock.objectIds.includes(sId) || shapeBlock.objectIds.includes(tId)) {
+            return true;
+          }
+          if (sId && tId && connBlock.objectIds.includes(sId) && connBlock.objectIds.includes(tId)) {
+            continue;
+          }
+          const { startPt, endPt, startTangent, endTangent } = getConnectorEndpointsAndTangents(conn, shapeObjs);
+          for (const s of shapeObjs) {
+            const dStart = getDistanceToShape(startPt, s);
+            const dEnd = getDistanceToShape(endPt, s);
+            if ((dStart <= 20 && checkDirectionCompatibility(startPt, startTangent, s, 'source')) ||
+                (dEnd <= 20 && checkDirectionCompatibility(endPt, endTangent, s, 'target'))) {
+              return true;
+            }
+          }
+        }
+        return false;
+      })();
+
+      if (isConnectorAttachmentContact) {
         return;
       }
 
@@ -260,7 +345,7 @@ const buildMacroCandidate = (type, movingBlock, anchorBlock, blockTranslations, 
   let risk = 1.0;
   
   if (type === MACRO_CANDIDATE_TYPES.PACK_ADJACENT_ALIGNED) {
-    confidence = 0.90;
+    confidence = options.candidateConfidence ?? 0.90;
     risk = 0.5 + (Math.hypot(trans.dx, trans.dy) * 0.001);
   } else if (type === MACRO_CANDIDATE_TYPES.RESOLVE_MACRO_OVERLAP) {
     confidence = 0.85;
@@ -278,23 +363,28 @@ const buildMacroCandidate = (type, movingBlock, anchorBlock, blockTranslations, 
 
   let hasUnroutedCrossConnector = false;
   if (options.objectMap && movingBlock && anchorBlock) {
-    const rawConns = (options.rawObjects || []).filter(o => o.type === 'connector' || o.semanticType === 'connector');
+    const rawConns = (options.rawObjects || []).filter(o => o.type === 'connector' || o.semanticType === 'connector' || o.isConnector);
     for (const c of rawConns) {
       const sId = c.sourceShapeId || c.relationshipMetadata?.sourceShapeId;
       const tId = c.targetShapeId || c.relationshipMetadata?.targetShapeId;
-      if (!sId || !tId) continue;
-      const sInMoving = movingBlock.objectIds.includes(sId);
-      const tInMoving = movingBlock.objectIds.includes(tId);
-      if (sInMoving !== tInMoving) {
-        const transMoving = blockTranslations[movingBlock.id] || { dx: 0, dy: 0 };
-        const otherBlockId = sInMoving ? anchorBlock.id : movingBlock.id;
-        const transOther = blockTranslations[otherBlockId] || { dx: 0, dy: 0 };
-        if (transMoving.dx !== transOther.dx || transMoving.dy !== transOther.dy) {
-          const hasReroute = translatedGeometry.candidateConnectorGeometry.some(cg => cg.connId === c.id && cg.recomputed);
-          if (!hasReroute) {
-            hasUnroutedCrossConnector = true;
-            break;
-          }
+      if (!sId && !tId) continue;
+      const sInMoving = sId ? (movingBlock.objectIds.includes(sId) || translatedGeometry.affectedObjectIds.includes(sId)) : false;
+      const tInMoving = tId ? (movingBlock.objectIds.includes(tId) || translatedGeometry.affectedObjectIds.includes(tId)) : false;
+      const cInMoving = movingBlock.objectIds.includes(c.id) || translatedGeometry.affectedConnectorIds.includes(c.id);
+
+      if (sId && sInMoving !== cInMoving) {
+        const hasReroute = translatedGeometry.candidateConnectorGeometry.some(cg => cg.connId === c.id && cg.recomputed);
+        if (!hasReroute) {
+          hasUnroutedCrossConnector = true;
+          break;
+        }
+      }
+
+      if (tId && tInMoving !== cInMoving) {
+        const hasReroute = translatedGeometry.candidateConnectorGeometry.some(cg => cg.connId === c.id && cg.recomputed);
+        if (!hasReroute) {
+          hasUnroutedCrossConnector = true;
+          break;
         }
       }
     }
@@ -343,6 +433,7 @@ const buildMacroCandidate = (type, movingBlock, anchorBlock, blockTranslations, 
   return {
     candidateId: `macro_${type}_${movingBlock.id}_${anchorBlock.id}`,
     type,
+    overlapPairKey: type === MACRO_CANDIDATE_TYPES.RESOLVE_MACRO_OVERLAP ? [movingBlock.id, anchorBlock.id].sort().join('::') : null,
     
     blockIds: [movingBlock.id],
     affectedObjectIds: translatedGeometry.affectedObjectIds,
@@ -396,6 +487,7 @@ export const selectMacroCandidates = (macroCandidates, options = {}) => {
   const selected = [];
   const rejected = [];
   const ownedBlocks = new Set();
+  const resolvedOverlapEdges = new Set();
   
   const finalBoundsMap = new Map();
   if (simulatedPlacements) {
@@ -421,6 +513,11 @@ export const selectMacroCandidates = (macroCandidates, options = {}) => {
     });
     if (isOutOfScope) {
       rejected.push({ candidateId: cand.candidateId, reason: 'outside_scope' });
+      continue;
+    }
+
+    if (cand.overlapPairKey && resolvedOverlapEdges.has(cand.overlapPairKey)) {
+      rejected.push({ candidateId: cand.candidateId, reason: 'overlap_edge_conflict' });
       continue;
     }
     
@@ -452,12 +549,15 @@ export const selectMacroCandidates = (macroCandidates, options = {}) => {
     
     selected.push(cand);
     cand.blockIds.forEach(bId => ownedBlocks.add(bId));
+    if (cand.overlapPairKey) {
+      resolvedOverlapEdges.add(cand.overlapPairKey);
+    }
     
     cand.affectedObjectIds.forEach(id => {
       const movingBlockId = cand.blockIds[0];
       const trans = cand.blockTranslations[movingBlockId];
       if (trans) {
-        const existing = finalBoundsMap.get(id) || rawObjects.find(o => o.id === id)?.bounds;
+        const existing = finalBoundsMap.get(id) || rawObjects?.find(o => o.id === id)?.bounds;
         if (existing) {
           finalBoundsMap.set(id, {
             ...existing,

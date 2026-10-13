@@ -1563,7 +1563,6 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
       });
       const memberConnIds = new Set(compConns);
       const nonMemberObjects = rawObjects.filter(o => !memberNodeIds.has(o.id) && !memberOwnedTextIds.has(o.id) && !memberConnIds.has(o.id));
-      console.log('[DEBUG] nonMemberObjects:', nonMemberObjects.map(o => o.id));
       const currentLabels = [];
       component.forEach(nId => {
         const textIds = ownership?.ownedByOwner?.get(nId) || [];
@@ -1904,7 +1903,7 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
           hasUnknownConnectorEndpoints: false,
           nearCreativeContent: false,
           structureConfidence: 0.96
-        });
+        }) + 0.5;
         candidateCompositions.push({
           template: altTemplate,
           orientation: altOrientation,
@@ -2639,15 +2638,29 @@ export const discoverVisualStructures = (workspaceModel, semanticScene = null, o
   });
   rawObjects.forEach(obj => {
     if (claimedObjectIds.has(obj.id)) return;
-    const sem = getSemanticType(obj);
     const parent = ownership.ownerByText.get(obj.id);
-    if (parent && claimedObjectIds.has(parent)) {
+    if (parent && (claimedObjectIds.has(parent) || objectMap.has(parent))) {
       return;
     }
+    const ownedChildren = [];
+    const collectOwnedDescendants = (ownerId) => {
+      const direct = ownership?.ownedByOwner?.get(ownerId) || [];
+      for (const childId of direct) {
+        if (!claimedObjectIds.has(childId) && objectMap.has(childId) && childId !== ownerId) {
+          ownedChildren.push(childId);
+          claimedObjectIds.add(childId);
+          collectOwnedDescendants(childId);
+        }
+      }
+    };
+    collectOwnedDescendants(obj.id);
+    claimedObjectIds.add(obj.id);
+    const blockObjectIds = sortStrings([obj.id, ...ownedChildren]);
+    const sem = getSemanticType(obj);
     const _structPayload9 = {
       id: `struct_standalone_${obj.id}`,
       type: STRUCTURE_TYPES.STANDALONE,
-      objectIds: [obj.id],
+      objectIds: blockObjectIds,
       connectorIds: [],
       confidence: 0.95,
       evidence: ['isolated-canvas-element'],

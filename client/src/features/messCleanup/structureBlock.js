@@ -129,12 +129,12 @@ const computeAlignmentEvidence = (b1, b2) => {
   const topDev = Math.abs(b1.y - b2.y);
   const bottomDev = Math.abs((b1.y + b1.height) - (b2.y + b2.height));
 
-  if (cyDev < 20) evidence.push({ axis: 'y', type: 'centerline', deviation: cyDev });
-  if (cxDev < 20) evidence.push({ axis: 'x', type: 'centerline', deviation: cxDev });
-  if (topDev < 15) evidence.push({ axis: 'y', type: 'top-edge', deviation: topDev });
-  if (bottomDev < 15) evidence.push({ axis: 'y', type: 'bottom-edge', deviation: bottomDev });
-  if (leftDev < 15) evidence.push({ axis: 'x', type: 'left-edge', deviation: leftDev });
-  if (rightDev < 15) evidence.push({ axis: 'x', type: 'right-edge', deviation: rightDev });
+  if (cyDev < 25) evidence.push({ axis: 'y', type: 'centerline', deviation: cyDev });
+  if (cxDev < 25) evidence.push({ axis: 'x', type: 'centerline', deviation: cxDev });
+  if (topDev < 25) evidence.push({ axis: 'y', type: 'top-edge', deviation: topDev });
+  if (bottomDev < 25) evidence.push({ axis: 'y', type: 'bottom-edge', deviation: bottomDev });
+  if (leftDev < 25) evidence.push({ axis: 'x', type: 'left-edge', deviation: leftDev });
+  if (rightDev < 25) evidence.push({ axis: 'x', type: 'right-edge', deviation: rightDev });
 
   return evidence;
 };

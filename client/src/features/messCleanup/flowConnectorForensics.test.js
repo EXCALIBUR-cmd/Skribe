@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { getSemanticType } from './cleanupTypes.js';
 import { recoverConnectorTopology } from './connectorTopology.js';
 import { findDetachedFlowAssociation } from './detachedFlowAssociation.js';
-import { discoverVisualStructures, STRUCTURE_TYPES } from './discoverVisualStructures.js';
+import { discoverVisualStructures, STRUCTURE_TYPES, _planningStateCache } from './discoverVisualStructures.js';
 import { buildCleanupPlan } from './buildCleanupPlan.js';
 import { executeCleanupPlan } from './executeCleanupPlan.js';
 import { buildCleanupResult } from './buildCleanupResult.js';
@@ -86,7 +86,8 @@ test('Test 2 — Freehand classification: creative stroke classified as stroke a
   const creativeStruct = structures.find((s) => s.type === STRUCTURE_TYPES.CREATIVE);
   assert.ok(creativeStruct, 'Creative structure discovered');
   assert.ok(creativeStruct.objectIds.includes('stroke-1'), 'stroke-1 is in creative structure');
-  assert.equal(creativeStruct.candidateCompositions[0].template, 'preserve');
+  const creativePayload = _planningStateCache.get(creativeStruct.id) || creativeStruct;
+  assert.equal(creativePayload.candidateCompositions[0].template, 'preserve');
 });
 
 test('Test 3 — Strict topology remains strict: gap > 35px is unverified by ordinary topology recovery', () => {
@@ -220,7 +221,9 @@ test('Test 8 — Complete candidate geometry: candidate contains node and connec
   const flowStruct = structures.find((s) => s.type === STRUCTURE_TYPES.FLOW);
 
   assert.ok(flowStruct, 'Flow structure discovered');
-  const cand = flowStruct.candidateCompositions[0];
+  const flowPayload = _planningStateCache.get(flowStruct.id) || flowStruct;
+  const cand = flowPayload?.candidateCompositions?.[0];
+  assert.ok(cand, 'Candidate exists');
   assert.ok(cand.candidateNodeBounds.length >= 2, 'Candidate includes node bounds');
   assert.ok(cand.candidateConnectorGeometry.length >= 1, 'Candidate includes connector geometry');
   assert.ok(cand.candidateCompleteBounds, 'Candidate includes complete bounds');
@@ -267,7 +270,8 @@ test('Test 9 — Protected-object collision: obstacle in proposed flow placement
   const structures = discoverVisualStructures(fixture);
   const flowStruct = structures.find((s) => s.type === STRUCTURE_TYPES.FLOW);
   if (flowStruct) {
-    const cand = flowStruct.candidateCompositions.find((c) => c.actionType === 'cleanFlowchart');
+    const flowPayload = _planningStateCache.get(flowStruct.id) || flowStruct;
+    const cand = flowPayload?.candidateCompositions?.find((c) => c.actionType === 'cleanFlowchart');
     if (cand) {
       assert.equal(cand.safe, false, 'Candidate B collides with protected obstacle');
     }

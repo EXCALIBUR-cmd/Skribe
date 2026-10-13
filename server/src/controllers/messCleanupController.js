@@ -1,34 +1,51 @@
+import config from '../config/env.js';
 import { error, success } from '../utils/apiResponse.js';
-import { analyzeWithNemotron } from '../services/nemotronService.js';
+import { analyzeWithGemini } from '../services/geminiService.js';
 
 export const analyze = async (req, res, next) => {
   const ctrlStart = Date.now();
-  console.log('[Nemotron Diagnostic] Controller started');
+  console.log('[Gemini Diagnostic] Controller started');
+
+  const clientAbortController = new AbortController();
+  const handleClientClose = () => {
+    if (!res.writableEnded) {
+      clientAbortController.abort();
+    }
+  };
+  if (typeof res.on === 'function') {
+    res.on('close', handleClientClose);
+  }
 
   try {
     const { workspaceModel, image } = req.body || {};
 
     if (!workspaceModel || typeof workspaceModel !== 'object') {
-      console.log('[Nemotron Diagnostic] Controller validation failed: missing or invalid workspaceModel');
+      console.log('[Gemini Diagnostic] Controller validation failed: missing or invalid workspaceModel');
       return error(res, 'Missing or invalid workspaceModel payload', 400);
     }
 
     const objects = workspaceModel.board?.objects || workspaceModel.objects;
     if (!Array.isArray(objects) || objects.length === 0) {
-      console.log('[Nemotron Diagnostic] Controller validation failed: workspaceModel contains no objects');
+      console.log('[Gemini Diagnostic] Controller validation failed: workspaceModel contains no objects');
       return error(res, 'workspaceModel contains no objects to analyze', 400);
     }
 
     if (!image || typeof image !== 'string' || !image.trim()) {
-      console.log('[Nemotron Diagnostic] Controller validation failed: missing or invalid image/screenshot');
+      console.log('[Gemini Diagnostic] Controller validation failed: missing or invalid image/screenshot');
       return error(res, 'Missing or invalid image/screenshot payload', 400);
     }
 
     let organizationPlan;
     try {
-      organizationPlan = await analyzeWithNemotron(workspaceModel, image);
+      organizationPlan = await analyzeWithGemini(workspaceModel, image, {
+        signal: clientAbortController.signal
+      });
     } catch (serviceErr) {
-      console.error('[MessCleanupController] NVIDIA Nemotron Omni analysis failed:', {
+      if (res.writableEnded || clientAbortController.signal.aborted) {
+        return;
+      }
+
+      console.error('[MessCleanupController] Gemini 3.8 Flash analysis failed:', {
         message: serviceErr.message,
         code: serviceErr.code,
         statusCode: serviceErr.statusCode
@@ -40,39 +57,53 @@ export const analyze = async (req, res, next) => {
       });
     }
 
-    console.log('[Nemotron Diagnostic] OrganizationPlan v2 validation checking...');
+    if (res.writableEnded || clientAbortController.signal.aborted) {
+      return;
+    }
+
+    console.log('[Gemini Diagnostic] OrganizationPlan v2 validation checking...');
 
     if (!organizationPlan || typeof organizationPlan !== 'object') {
-      console.log('[Nemotron Diagnostic] OrganizationPlan validation failed: plan is null or not an object');
+      console.log('[Gemini Diagnostic] OrganizationPlan validation failed: plan is null or not an object');
       return error(res, 'AI model returned an invalid organization plan structure', 502, {
         code: 'INVALID_PLAN_SCHEMA'
       });
     }
 
     const planKeys = Object.keys(organizationPlan);
-    console.log(`[Nemotron Diagnostic] OrganizationPlan top-level keys: ${planKeys.join(', ')}`);
+    console.log(`[Gemini Diagnostic] OrganizationPlan top-level keys: ${planKeys.join(', ')}`);
 
     const groupsOrSections = organizationPlan.groups || organizationPlan.document?.sections || organizationPlan.sections;
     if (!Array.isArray(groupsOrSections)) {
-      console.log('[Nemotron Diagnostic] OrganizationPlan validation failed: no groups or sections array found in document or top-level');
-      console.log(`[Nemotron Diagnostic] Actual plan structure: ${JSON.stringify(organizationPlan, null, 2).slice(0, 5000)}`);
+      console.log('[Gemini Diagnostic] OrganizationPlan validation failed: no groups or sections array found in document or top-level');
+      console.log(`[Gemini Diagnostic] Actual plan structure: ${JSON.stringify(organizationPlan, null, 2).slice(0, 5000)}`);
       return error(res, 'AI model returned an invalid organization plan structure', 502, {
         code: 'INVALID_PLAN_SCHEMA'
       });
     }
 
     if (typeof organizationPlan.workspaceType !== 'string') {
-      console.log('[Nemotron Diagnostic] Warning: workspaceType missing from Nemotron response, will default to mixed');
+      console.log('[Gemini Diagnostic] Warning: workspaceType missing from Gemini response, will default to mixed');
     }
 
     const relationshipCount = Array.isArray(organizationPlan.relationships) ? organizationPlan.relationships.length : 0;
-    console.log(`[Nemotron Diagnostic] Validation passed: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${organizationPlan.workspaceType || 'unset'}`);
-    console.log(`[Nemotron Diagnostic] Controller completed in ${Date.now() - ctrlStart}ms`);
+    console.log(`[Gemini Diagnostic] Validation passed: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${organizationPlan.workspaceType || 'unset'}`);
+    console.log(`[Gemini Diagnostic] Controller completed in ${Date.now() - ctrlStart}ms`);
 
-    return success(res, { organizationPlan }, 'Mess Cleanup analysis completed successfully', 200);
+    return success(res, {
+      organizationPlan,
+      model: organizationPlan?.source?.model || config.geminiModel
+    }, 'Mess Cleanup analysis completed successfully', 200);
   } catch (err) {
+    if (res.writableEnded || clientAbortController.signal.aborted) {
+      return;
+    }
     console.error('[MessCleanupController] Unexpected exception:', err.message);
     return next(err);
+  } finally {
+    if (typeof res.removeListener === 'function') {
+      res.removeListener('close', handleClientClose);
+    }
   }
 };
 

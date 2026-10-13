@@ -122,6 +122,7 @@ export const buildCleanupResult = (cleanupPlan, layoutProposal, workspaceModel, 
     structuralActionCount: structuralCount,
     spatialActionCount: spatialCount,
     cosmeticActionCount: cosmeticCount,
+    macroActionCount: actionResults.filter((a) => a.type === 'macroTranslate').length,
     usefulActionRate: actionResults.length > 0 ? Number(((structuralCount + spatialCount) / actionResults.length).toFixed(2)) : 1.0,
     preservationRate: allObjectIds.length > 0 ? Number((untouchedObjectIds.length / allObjectIds.length).toFixed(2)) : 1.0
   };

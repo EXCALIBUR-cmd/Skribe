@@ -60,7 +60,8 @@ const ACTION_PRIORITY = Object.freeze({
   align: 5,
   equalizeSpacing: 6,
   normalizeText: 7,
-  preserve: 8
+  preserve: 8,
+  macroTranslate: 9
 });
 
 const executeCleanFlowchart = ({
@@ -391,6 +392,11 @@ const executeCleanFlowchart = ({
     }
 
     if (endpoints) {
+      connP.relationshipMetadata = {
+        ...connP.relationshipMetadata,
+        sourceShapeId: endpoints.srcId,
+        targetShapeId: endpoints.tgtId
+      };
       const srcP = placementMap.get(endpoints.srcId);
       const tgtP = placementMap.get(endpoints.tgtId);
       if (srcP && tgtP) {
@@ -466,10 +472,17 @@ const executeCleanFlowchart = ({
 export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) => {
   const validation = validateCleanupPlan(cleanupPlan, workspaceModel);
   if (!validation.valid) {
+    let errorType = 'preValidationFailed';
+    if (validation.errors.some((e) => e.includes('unknown object ID') || e.includes('not found in workspaceModel'))) {
+      errorType = 'missingObject';
+    } else if (validation.errors.some((e) => e.includes('must be') || e.includes('missing required'))) {
+      errorType = 'invalidActionContract';
+    }
     return {
       version: 1,
       valid: false,
       failedActionId: 'pre_validation_failed',
+      errorType,
       error: `CleanupPlan validation failed: ${validation.errors.join('; ')}`,
       diagnostics: { errors: validation.errors, warnings: validation.warnings }
     };
@@ -497,7 +510,10 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
     });
 
     const pos = { x: bounds.x, y: bounds.y };
-    const size = { width: bounds.width, height: bounds.height };
+    const size = {
+      width: raw.size?.width ?? raw.width ?? bounds.width,
+      height: raw.size?.height ?? raw.height ?? bounds.height
+    };
     const rotation = typeof raw.rotation === 'number' ? raw.rotation : (typeof raw.angle === 'number' ? raw.angle : (vo?.rotation || 0));
 
     originalSnapshots.set(raw.id, {
@@ -582,6 +598,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
     }
     if (Array.isArray(p.pathCommands)) {
       p.pathCommands = translatePathCommands(p.pathCommands, dx, dy);
+      p.pathData = p.pathCommands.map((cmd) => `${cmd[0]} ${cmd.slice(1).map((n) => typeof n === 'number' ? Number(n.toFixed(2)) : n).join(' ')}`).join(' ');
     }
     if (Array.isArray(p.worldPath)) {
       p.worldPath = translatePathCommands(p.worldPath, dx, dy);
@@ -609,6 +626,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         }
         if (Array.isArray(childP.pathCommands)) {
           childP.pathCommands = translatePathCommands(childP.pathCommands, dx, dy);
+          childP.pathData = childP.pathCommands.map((cmd) => `${cmd[0]} ${cmd.slice(1).map((n) => typeof n === 'number' ? Number(n.toFixed(2)) : n).join(' ')}`).join(' ');
         }
         if (Array.isArray(childP.worldPath)) {
           childP.worldPath = translatePathCommands(childP.worldPath, dx, dy);
@@ -638,8 +656,49 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
       const pText = placementMap.get(textId);
 
       if (pShape && pText) {
-        const targetX = pShape.bounds.x + (pShape.bounds.width - pText.size.width) / 2;
-        const targetY = pShape.bounds.y + (pShape.bounds.height - pText.size.height) / 2;
+        const rawShape = objectMap.get(shapeId);
+        const rawText = objectMap.get(textId);
+        const isNote = Boolean(
+          pShape.isStickyNote ||
+          rawShape?.isStickyNote ||
+          rawShape?.metadata?.isStickyNote ||
+          rawShape?.type === 'note' ||
+          rawShape?.shapeType === 'note' ||
+          pShape.shapeType === 'note' ||
+          rawShape?.metadata?.role === 'note' ||
+          rawShape?.elementRole === 'note' ||
+          rawText?.metadata?.role === 'note-text' ||
+          rawText?.elementRole === 'note-text' ||
+          (rawShape?.elementId && rawText?.elementId && rawShape.elementId === rawText.elementId && (rawShape.isStickyNote || rawShape.metadata?.isStickyNote))
+        );
+
+        let targetX;
+        let targetY;
+
+        if (isNote) {
+          const initTop = rawText ? (rawText.bounds?.y ?? rawText.position?.y ?? rawText.top ?? pText.bounds.y) : pText.bounds.y;
+          const initShapeTop = rawShape ? (rawShape.bounds?.y ?? rawShape.position?.y ?? rawShape.top ?? pShape.bounds.y) : pShape.bounds.y;
+          const initRelY = initTop - initShapeTop;
+
+          const initLeft = rawText ? (rawText.bounds?.x ?? rawText.position?.x ?? rawText.left ?? pText.bounds.x) : pText.bounds.x;
+          const initShapeLeft = rawShape ? (rawShape.bounds?.x ?? rawShape.position?.x ?? rawShape.left ?? pShape.bounds.x) : pShape.bounds.x;
+          const initRelX = initLeft - initShapeLeft;
+
+          if (initRelY >= 0) {
+            targetY = pShape.bounds.y + initRelY;
+          } else {
+            targetY = pShape.bounds.y + 16;
+          }
+
+          if (initRelX >= 0) {
+            targetX = pShape.bounds.x + initRelX;
+          } else {
+            targetX = pShape.bounds.x + 12;
+          }
+        } else {
+          targetX = pShape.bounds.x + (pShape.bounds.width - pText.size.width) / 2;
+          targetY = pShape.bounds.y + (pShape.bounds.height - pText.size.height) / 2;
+        }
 
         const dx = targetX - pText.bounds.x;
         const dy = targetY - pText.bounds.y;
@@ -857,6 +916,116 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
         executedActions.push(action);
       }
     }
+
+    else if (action.type === 'macroTranslate') {
+      const translations = action.translations;
+      if (!translations || typeof translations !== 'object') {
+        return {
+          version: 1,
+          valid: false,
+          failedActionId: action.id,
+          errorType: 'invalidActionContract',
+          reason: `MacroTranslate action '${action.id}' missing translations object`,
+          error: `MacroTranslate action missing translations object`
+        };
+      }
+
+      const allReferencedIds = [...(action.objectIds || []), ...(action.connectorIds || [])];
+      for (const id of allReferencedIds) {
+        if (!placementMap.has(id)) {
+          return {
+            version: 1,
+            valid: false,
+            failedActionId: action.id,
+            errorType: 'missingObject',
+            reason: `Referenced object '${id}' missing from workspace model`,
+            error: `Referenced object missing from workspace model`
+          };
+        }
+        const obj = objectMap.get(id);
+        const semType = obj ? getSemanticType(obj) : null;
+        if (semType === 'stroke' || obj?.isVectorStroke || obj?.metadata?.isVectorStroke || obj?.isStraightLine || obj?.metadata?.isStraightLine) {
+          return {
+            version: 1,
+            valid: false,
+            failedActionId: action.id,
+            errorType: 'protectedObjectViolation',
+            reason: `Cannot apply macro translation to protected object '${id}'`,
+            error: `Cannot apply macro translation to protected object`
+          };
+        }
+      }
+
+      for (const [bId, trans] of Object.entries(translations)) {
+        if (!trans || typeof trans.dx !== 'number' || typeof trans.dy !== 'number' || !Number.isFinite(trans.dx) || !Number.isFinite(trans.dy)) {
+          return {
+            version: 1,
+            valid: false,
+            failedActionId: action.id,
+            errorType: 'invalidCoordinates',
+            reason: `MacroTranslate block '${bId}' has non-finite translation coordinates`,
+            error: `MacroTranslate block has non-finite translation coordinates`
+          };
+        }
+      }
+
+      const blockIds = action.structureBlockIds || [];
+      const transEntries = Object.entries(translations);
+      const allSameTrans = transEntries.length > 0 && transEntries.every(([, t]) => t.dx === transEntries[0][1].dx && t.dy === transEntries[0][1].dy);
+
+      if (allSameTrans || blockIds.length <= 1) {
+        const trans = transEntries[0] ? transEntries[0][1] : { dx: 0, dy: 0 };
+        if (trans.dx !== 0 || trans.dy !== 0) {
+          const objIds = action.objectIds || [];
+          const connIds = action.connectorIds || [];
+
+          objIds.forEach((id) => {
+            const parentId = ownerByText?.get(id);
+            if (parentId && objIds.includes(parentId)) {
+              return;
+            }
+            translatePlacement(id, trans.dx, trans.dy, action.id, 'macroTranslate');
+          });
+
+          connIds.forEach((id) => {
+            translatePlacement(id, trans.dx, trans.dy, action.id, 'macroTranslate');
+            const connP = placementMap.get(id);
+            if (connP) {
+              if (connP.sourceAnchor) {
+                connP.sourceAnchor = { x: connP.sourceAnchor.x + trans.dx, y: connP.sourceAnchor.y + trans.dy };
+              }
+              if (connP.targetAnchor) {
+                connP.targetAnchor = { x: connP.targetAnchor.x + trans.dx, y: connP.targetAnchor.y + trans.dy };
+              }
+            }
+          });
+        }
+      } else {
+        const blockObjMap = action.blockObjectMap || action.blockMemberMap || {};
+        const blockConnMap = action.blockConnectorMap || {};
+        for (const bId of blockIds) {
+          const trans = translations[bId] || { dx: 0, dy: 0 };
+          if (trans.dx === 0 && trans.dy === 0) continue;
+          const bObjIds = blockObjMap[bId] || [];
+          const bConnIds = blockConnMap[bId] || [];
+          bObjIds.forEach((id) => {
+            const parentId = ownerByText?.get(id);
+            if (parentId && bObjIds.includes(parentId)) return;
+            translatePlacement(id, trans.dx, trans.dy, action.id, 'macroTranslate');
+          });
+          bConnIds.forEach((id) => {
+            translatePlacement(id, trans.dx, trans.dy, action.id, 'macroTranslate');
+            const connP = placementMap.get(id);
+            if (connP) {
+              if (connP.sourceAnchor) connP.sourceAnchor = { x: connP.sourceAnchor.x + trans.dx, y: connP.sourceAnchor.y + trans.dy };
+              if (connP.targetAnchor) connP.targetAnchor = { x: connP.targetAnchor.x + trans.dx, y: connP.targetAnchor.y + trans.dy };
+            }
+          });
+        }
+      }
+
+      executedActions.push(action);
+    }
   }
 
   const allPlacements = Array.from(placementMap.values());
@@ -872,7 +1041,12 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
 
     if (srcDelta && tgtDelta && srcDelta.dx === tgtDelta.dx && srcDelta.dy === tgtDelta.dy) {
       if (srcDelta.dx !== 0 || srcDelta.dy !== 0) {
-        translatePlacement(conn.objectId, srcDelta.dx, srcDelta.dy, 'connector_sync', 'connector_sync');
+        const connDelta = translationDeltas.get(conn.objectId) || { dx: 0, dy: 0 };
+        const remainingDx = srcDelta.dx - connDelta.dx;
+        const remainingDy = srcDelta.dy - connDelta.dy;
+        if (Math.abs(remainingDx) > 0.001 || Math.abs(remainingDy) > 0.001) {
+          translatePlacement(conn.objectId, remainingDx, remainingDy, 'connector_sync', 'connector_sync');
+        }
       }
     }
   });
@@ -932,7 +1106,7 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
     const owningActions = Array.from(new Set(hist.map((h) => h.actionId).filter(Boolean)));
 
     const distinctLayoutTypes = new Set(
-      hist.filter((h) => h.type !== 'attachText' && !h.type.endsWith('_child_transfer')).map((h) => h.type)
+      hist.filter((h) => h.type !== 'attachText' && h.type !== 'macroTranslate' && !h.type.endsWith('_child_transfer')).map((h) => h.type)
     );
     const unexpectedMultiTransform = distinctLayoutTypes.size > 1;
 
@@ -949,8 +1123,9 @@ export const executeCleanupPlan = (cleanupPlan, workspaceModel, options = {}) =>
 
   const connTopologyMap = new Map();
   rawObjects.filter((o) => getSemanticType(o) === 'connector').forEach((c) => {
-    let srcId = c.sourceShapeId || c.relationshipMetadata?.sourceShapeId || null;
-    let tgtId = c.targetShapeId || c.relationshipMetadata?.targetShapeId || null;
+    const connP = placementMap.get(c.id);
+    let srcId = connP?.relationshipMetadata?.sourceShapeId || connP?.sourceShapeId || c.sourceShapeId || c.relationshipMetadata?.sourceShapeId || null;
+    let tgtId = connP?.relationshipMetadata?.targetShapeId || connP?.targetShapeId || c.targetShapeId || c.relationshipMetadata?.targetShapeId || null;
     connTopologyMap.set(c.id, { srcId, tgtId });
   });
 

@@ -98,8 +98,8 @@ const getPreviewShapeStyle = (object, scale = 1) => {
   if (shapeType === 'circle' || shapeType === 'ellipse') return { ...base, borderRadius: '50%' };
   if (shapeType === 'rounded_rect') return { ...base, borderRadius: `${Math.max(4, 24 * scale)}px` };
   if (shapeType === 'triangle') return { ...base, clipPath: 'polygon(50% 0, 100% 100%, 0 100%)' };
-  if (shapeType === 'diamond' || shapeType === 'polygon') return { ...base, clipPath: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)' };
   if (shapeType === 'hexagon') return { ...base, clipPath: 'polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%)' };
+  if (shapeType === 'diamond' || shapeType === 'polygon') return { ...base, clipPath: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)' };
   return { ...base, borderRadius: `${Math.max(2, 8 * scale)}px` };
 };
 
@@ -127,6 +127,7 @@ export const MessCleanupPreviewModal = ({
   isOpen,
   workspaceModel,
   layoutProposal,
+  organizationPlan = null,
   loading = false,
   isApplying = false,
   error = '',
@@ -135,6 +136,10 @@ export const MessCleanupPreviewModal = ({
 }) => {
   const [selectedActionId, setSelectedActionId] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  const provenance = layoutProposal?.metadata?.provenance || layoutProposal?.provenance || organizationPlan?.provenance || null;
+  const isFallback = Boolean(provenance?.isFallback);
+  const isAiAssisted = provenance?.engine === 'ai-assisted' && !isFallback;
 
   const cleanupResult = useMemo(() => {
     if (!layoutProposal || !workspaceModel) return null;
@@ -195,10 +200,16 @@ export const MessCleanupPreviewModal = ({
 
       const customColor = object.style?.color || object.metadata?.color;
       const resolvedColor = customColor || (isInsideDarkShape ? '#ffffff' : '#1e293b');
+      const isTimestamp = object.metadata?.role === 'timestamp' || object.elementRole === 'timestamp' || String(object.originalObjectId || '').startsWith('timestamp_');
       const isSingleWord = object.text && !object.text.includes('\n') && !object.text.trim().includes(' ');
       const isNoteOrCallout = Boolean(parentShape?.isStickyNote || parentShape?.isCalloutNote || parentShape?.shapeType === 'callout');
-      const textAlign = object.style?.textAlign || (isNoteOrCallout ? 'left' : 'center');
-      const fontWeight = object.style?.fontWeight || 'bold';
+      const textAlign = object.style?.textAlign || (isTimestamp ? 'right' : (isNoteOrCallout ? 'left' : 'center'));
+      const fontWeight = object.style?.fontWeight || (isTimestamp ? 'normal' : 'bold');
+
+      const rawText = object.text || '';
+      const displayText = (!rawText.includes('\n') && Array.isArray(object.textLines) && object.textLines.length > 1)
+        ? object.textLines.join('\n')
+        : rawText;
 
       return (
         <div
@@ -211,23 +222,23 @@ export const MessCleanupPreviewModal = ({
             ...getContentStyle(object, renderBounds, renderBounds, scale, padding),
             alignItems: isNoteOrCallout ? 'flex-start' : 'center',
             justifyContent: textAlign === 'left' ? 'flex-start' : (textAlign === 'right' ? 'flex-end' : 'center'),
-            fontSize: `${Math.max(8, (object.style?.fontSize || object.metadata?.fontSize || 16) * scale)}px`,
+            fontSize: `${Math.max(8, (object.style?.fontSize || object.metadata?.fontSize || (isTimestamp ? 10 : 16)) * scale)}px`,
             fontFamily: object.style?.fontFamily || object.metadata?.fontFamily || 'Nunito Sans',
             fontWeight,
             fontStyle: object.style?.fontStyle || 'normal',
             textDecoration: [object.style?.underline && 'underline', object.style?.linethrough && 'line-through', object.style?.overline && 'overline'].filter(Boolean).join(' ') || undefined,
             letterSpacing: object.style?.charSpacing ? `${object.style.charSpacing * scale}px` : undefined,
-            lineHeight: 1.2,
+            lineHeight: object.style?.lineHeight ? `${object.style.lineHeight}` : 1.2,
             color: resolvedColor,
             opacity: object.style?.opacity !== undefined ? object.style.opacity : (object.opacity !== undefined ? object.opacity : 1),
             pointerEvents: 'none',
-            whiteSpace: isSingleWord ? 'nowrap' : (parentShape ? 'normal' : 'nowrap'),
-            wordBreak: isSingleWord ? 'normal' : 'break-word',
-            overflowWrap: 'break-word',
+            whiteSpace: isTimestamp ? 'nowrap' : (isSingleWord ? 'nowrap' : 'pre-wrap'),
+            wordBreak: isTimestamp ? 'normal' : 'break-word',
+            overflowWrap: isTimestamp ? 'normal' : 'break-word',
             textAlign
           }}
         >
-          {object.text}
+          {displayText}
         </div>
       );
     }
@@ -355,8 +366,21 @@ export const MessCleanupPreviewModal = ({
       } else {
         let pointsStr = '';
         if (Array.isArray(object.points) && object.points.length > 0) {
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          object.points.forEach((p) => {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          });
+          const spanX = Math.max(1e-6, maxX - minX);
+          const spanY = Math.max(1e-6, maxY - minY);
           pointsStr = object.points
-            .map((p) => `${Math.round(p.x * scale * 1000) / 1000},${Math.round(p.y * scale * 1000) / 1000}`)
+            .map((p) => {
+              const px = ((p.x - minX) / spanX) * wScreen;
+              const py = ((p.y - minY) / spanY) * hScreen;
+              return `${Math.round(px * 1000) / 1000},${Math.round(py * 1000) / 1000}`;
+            })
             .join(' ');
         } else if (object.shapeType === 'diamond') {
           pointsStr = `${wScreen / 2},0 ${wScreen},${hScreen / 2} ${wScreen / 2},${hScreen} 0,${hScreen / 2}`;
@@ -364,6 +388,8 @@ export const MessCleanupPreviewModal = ({
           pointsStr = `${wScreen / 2},0 ${wScreen},${hScreen} 0,${hScreen}`;
         } else if (object.shapeType === 'hexagon') {
           pointsStr = `${wScreen * 0.25},0 ${wScreen * 0.75},0 ${wScreen},${hScreen * 0.5} ${wScreen * 0.75},${hScreen} ${wScreen * 0.25},${hScreen} 0,${hScreen * 0.5}`;
+        } else {
+          pointsStr = `${wScreen / 2},0 ${wScreen},${hScreen / 2} ${wScreen / 2},${hScreen} 0,${hScreen / 2}`;
         }
 
         svgElement = (
@@ -437,7 +463,21 @@ export const MessCleanupPreviewModal = ({
               </button>
             )}
             <div>
-              <h2 id="mess-cleanup-preview-title" className="font-headline text-lg font-bold text-on-surface">Mess Cleanup Preview</h2>
+              <div className="flex items-center gap-2.5">
+                <h2 id="mess-cleanup-preview-title" className="font-headline text-lg font-bold text-on-surface">Mess Cleanup Preview</h2>
+                {isFallback && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 border border-slate-200">
+                    <span className="material-symbols-outlined text-[13px] text-slate-500">tune</span>
+                    Deterministic fallback
+                  </span>
+                )}
+                {isAiAssisted && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary border border-primary/20">
+                    <span className="material-symbols-outlined text-[13px] text-primary">auto_awesome</span>
+                    AI-assisted
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-xs text-on-surface-variant">This is a proposed organization. Your board has not been changed.</p>
             </div>
           </div>
@@ -452,9 +492,23 @@ export const MessCleanupPreviewModal = ({
             <aside className="w-[320px] shrink-0 border-r border-outline-variant/60 bg-surface flex flex-col overflow-y-auto">
               <div className="px-5 py-4 border-b border-outline-variant/40 bg-primary-container/10">
                 <div className="flex items-center gap-2 mb-2 text-on-surface font-medium">
-                  <span className="material-symbols-outlined text-primary text-[20px]">auto_awesome</span>
+                  <span className="material-symbols-outlined text-primary text-[20px]">
+                    {isFallback ? 'tune' : (isAiAssisted ? 'auto_awesome' : 'tune')}
+                  </span>
                   <span className="text-sm font-bold">Structure Summary</span>
                 </div>
+                {isFallback && (
+                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium mb-3">
+                    <span className="material-symbols-outlined text-[13px] text-slate-500">tune</span>
+                    <span>Deterministic fallback — AI unavailable</span>
+                  </div>
+                )}
+                {isAiAssisted && (
+                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-primary/10 text-primary border border-primary/20 text-[11px] font-medium mb-3">
+                    <span className="material-symbols-outlined text-[13px] text-primary">auto_awesome</span>
+                    <span>AI-assisted semantic analysis</span>
+                  </div>
+                )}
                 <div className="flex flex-col gap-1.5 text-[12px] text-on-surface-variant">
                   <div className="flex items-center justify-between">
                     <span>Objects Moved</span>
@@ -540,7 +594,14 @@ export const MessCleanupPreviewModal = ({
           >
           {loading && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-on-surface-variant">Preparing preview...</div>}
           {!loading && error && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-error">{error}</div>}
-          {!loading && !error && (
+          {!loading && !error && (!layoutProposal || !cleanupResult || renderModel.objects.length === 0) && (
+            <div className="flex min-h-80 flex-col items-center justify-center gap-2 text-center text-sm text-on-surface-variant">
+              <span className="material-symbols-outlined text-3xl text-slate-400">info</span>
+              <span className="font-semibold text-on-surface">No valid cleanup plan available</span>
+              <span className="text-xs text-on-surface-variant">There are no organizable objects or valid layouts to preview on this board.</span>
+            </div>
+          )}
+          {!loading && !error && layoutProposal && cleanupResult && renderModel.objects.length > 0 && (
             <div className="flex min-h-80 items-center justify-center">
               <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-white shadow-inner" style={{ width: `${contentWidth}px`, height: `${contentHeight}px` }}>
                 {}
@@ -680,7 +741,7 @@ export const MessCleanupPreviewModal = ({
           <button onClick={onCancel} disabled={isApplying} className="rounded-full px-4 py-2 text-sm font-bold text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50">Cancel</button>
           <button
             onClick={onApply}
-            disabled={loading || Boolean(error) || isApplying || !layoutProposal}
+            disabled={loading || Boolean(error) || isApplying || !layoutProposal || !cleanupResult || renderModel.objects.length === 0}
             className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary shadow-md hover:bg-primary/90 disabled:bg-primary/40 disabled:text-on-primary/80 disabled:cursor-not-allowed cursor-pointer"
           >
             {isApplying ? (
@@ -690,7 +751,9 @@ export const MessCleanupPreviewModal = ({
               </>
             ) : (
               <>
-                <span className="material-symbols-outlined text-base">auto_awesome</span>
+                <span className="material-symbols-outlined text-base">
+                  {isFallback ? 'tune' : 'auto_awesome'}
+                </span>
                 <span>Apply Cleanup</span>
               </>
             )}

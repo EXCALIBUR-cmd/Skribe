@@ -40,7 +40,7 @@ export const buildVisualObjectModel = (workspaceModel) => {
 
     const semanticType = getSemanticType(obj);
     const size = getObjectDimensions(obj);
-    const pos = obj.position || { x: 0, y: 0 };
+    const pos = obj.position || (obj.bounds ? { x: obj.bounds.x, y: obj.bounds.y } : { x: obj.left ?? 0, y: obj.top ?? 0 });
     const rawRotation = typeof obj.rotation === 'number' ? obj.rotation : 0;
     const isSticky = obj.metadata?.isStickyNote === true || obj.isStickyNote === true || obj.type === 'note' || semanticType === 'note';
 

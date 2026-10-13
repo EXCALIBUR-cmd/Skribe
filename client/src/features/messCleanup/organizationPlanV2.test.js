@@ -50,13 +50,13 @@ const capturedNemotronResponse = {
   ]
 };
 
-test('TEST 1: Actual captured Nemotron response validates cleanly to v2 schema', () => {
+test('TEST 1: Actual captured response validates cleanly to v2 schema', () => {
   const model = workspace([text('t1', 'Title'), shape('s1')]);
   const plan = validateOrganizationPlan(model, capturedNemotronResponse);
 
   assert.equal(plan.version, 2);
-  assert.equal(plan.source.engine, 'nemotron-omni');
-  assert.equal(plan.source.model, 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning');
+  assert.equal(plan.source.engine, 'gemini');
+  assert.equal(plan.source.model, 'gemini-3.8-flash');
   assert.equal(plan.workspaceType, 'mixed');
   assert.equal(plan.document.titleObjectId, 't1');
   assert.equal(plan.document.sections.length, 1);

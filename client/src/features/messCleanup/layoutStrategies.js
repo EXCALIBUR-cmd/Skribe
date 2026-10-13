@@ -5,8 +5,8 @@ const TEXT_TYPES = new Set(['text']);
 const sortIds = (ids) => [...new Set(ids)].sort((a, b) => String(a).localeCompare(String(b)));
 
 export const getObjectDimensions = (object = {}) => ({
-  width: Math.max(1, Math.abs((object.size?.width || LAYOUT_CONSTANTS.DEFAULT_WIDTH) * (object.scale?.x || 1))),
-  height: Math.max(1, Math.abs((object.size?.height || LAYOUT_CONSTANTS.DEFAULT_HEIGHT) * (object.scale?.y || 1)))
+  width: Math.max(1, Math.abs((object.size?.width ?? object.bounds?.width ?? object.width ?? LAYOUT_CONSTANTS.DEFAULT_WIDTH) * (object.scale?.x || object.scaleX || 1))),
+  height: Math.max(1, Math.abs((object.size?.height ?? object.bounds?.height ?? object.height ?? LAYOUT_CONSTANTS.DEFAULT_HEIGHT) * (object.scale?.y || object.scaleY || 1)))
 });
 
 export const getAnchor = (object = {}) => {

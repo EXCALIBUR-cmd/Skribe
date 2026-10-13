@@ -261,6 +261,11 @@ export const normalizeObject = (object, zIndex = 0) => {
     semanticType,
     originalType: object.type,
     text: isTextObject(object) ? String(object.text || '') : null,
+    textLines: isTextObject(object) && Array.isArray(object.textLines)
+      ? object.textLines.map((l) => String(l))
+      : (isTextObject(object) && Array.isArray(object._textLines)
+          ? object._textLines.map((l) => Array.isArray(l) ? l.join('') : String(l))
+          : null),
     position: {
       x: worldLeft,
       y: worldTop
@@ -360,7 +365,8 @@ export const normalizeObject = (object, zIndex = 0) => {
       color: getColorString(object.fill) || (object.color ? String(object.color) : null),
       stroke: getColorString(object.stroke),
       strokeWidth: object.strokeWidth !== undefined && object.strokeWidth !== null ? getNumber(object.strokeWidth) : 0,
-      opacity: object.opacity !== undefined && object.opacity !== null ? getNumber(object.opacity, 1) : 1
+      opacity: object.opacity !== undefined && object.opacity !== null ? getNumber(object.opacity, 1) : 1,
+      styles: object.styles ? cloneJsonValue(object.styles) : null
     };
   }
 

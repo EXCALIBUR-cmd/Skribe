@@ -432,10 +432,19 @@ const applyAnnotationProximity = (allPlacements, organizationPlan, objectMap) =>
 export const createLayoutProposal = (organizationPlan, workspaceModel = null, options = {}) => {
   const cleanupPlan = buildCleanupPlan(organizationPlan, workspaceModel, options);
   const proposal = executeCleanupPlan(cleanupPlan, workspaceModel, options);
-  if (proposal && proposal.metadata) {
-    proposal.metadata.cleanupExecutionEngine = 'conservative';
-    proposal.metadata.cleanupPlan = cleanupPlan;
-    proposal.metadata.cleanupResult = buildCleanupResult(cleanupPlan, proposal, workspaceModel, options);
+  const provenance = organizationPlan?.provenance || {
+    engine: 'deterministic-local',
+    isFallback: false,
+    aiUnavailable: false
+  };
+  if (proposal) {
+    proposal.provenance = provenance;
+    if (proposal.metadata) {
+      proposal.metadata.cleanupExecutionEngine = 'conservative';
+      proposal.metadata.cleanupPlan = cleanupPlan;
+      proposal.metadata.cleanupResult = buildCleanupResult(cleanupPlan, proposal, workspaceModel, options);
+      proposal.metadata.provenance = provenance;
+    }
   }
   return proposal;
 };
@@ -749,6 +758,12 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     units: unitsReport
   };
 
+  const provenance = organizationPlan?.provenance || {
+    engine: 'deterministic-local',
+    isFallback: false,
+    aiUnavailable: false
+  };
+
   return {
     version: 1,
     sourceOrganizationVersion: organizationPlan?.version || null,
@@ -756,10 +771,12 @@ export const createLayoutProposalLegacy = (organizationPlan, workspaceModel = nu
     sections: proposalSections,
     placements: allPlacements.sort((a, b) => a.objectId.localeCompare(b.objectId)),
     unassignedObjectIds,
+    provenance,
     metadata: {
       layoutConstants: { ...LAYOUT_CONSTANTS },
       plannedObjectIds: [...plannedObjectIds].sort(),
       requiresWorkspaceModel: !workspaceModel,
+      provenance,
       diagnostics
     }
   };

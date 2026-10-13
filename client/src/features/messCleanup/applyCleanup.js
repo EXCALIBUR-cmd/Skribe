@@ -241,8 +241,8 @@ export const applyCleanup = (canvas, layoutProposal, workspaceModel) => {
       if (isFiniteNumber(placement.y1)) propsToSet.y1 = placement.y1;
       if (isFiniteNumber(placement.x2)) propsToSet.x2 = placement.x2;
       if (isFiniteNumber(placement.y2)) propsToSet.y2 = placement.y2;
-      if (isFiniteNumber(placement.bounds?.width)) propsToSet.width = placement.bounds.width;
-      if (isFiniteNumber(placement.bounds?.height)) propsToSet.height = placement.bounds.height;
+      if (placement.explicitResize && isFiniteNumber(placement.bounds?.width)) propsToSet.width = placement.bounds.width;
+      if (placement.explicitResize && isFiniteNumber(placement.bounds?.height)) propsToSet.height = placement.bounds.height;
 
       
       if ((targetObj.isConnector || targetObj.type === 'path' || targetObj.type === 'Path') && typeof targetObj.path === 'string') {

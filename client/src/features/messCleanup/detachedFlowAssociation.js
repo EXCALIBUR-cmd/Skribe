@@ -6,9 +6,56 @@ export const MAX_CORRIDOR_PERPENDICULAR_DISTANCE = 140;
 export const MAX_CORRIDOR_LONGITUDINAL_DISTANCE = 300;
 export const MIN_PAIR_SCORE_MARGIN = 0.15;
 
-/**
- * Computes the minimum distance from a ray (origin + t * dir, t >= 0) to a shape's boundary.
- */
+export const getShapePolygonVertices = (shape) => {
+  const g = getShapeBoundaryGeometry(shape);
+  if (Array.isArray(shape?.points) && shape.points.length >= 3) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    shape.points.forEach((p) => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+    const spanX = Math.max(1e-6, maxX - minX);
+    const spanY = Math.max(1e-6, maxY - minY);
+    return shape.points.map((p) => ({
+      x: g.left + ((p.x - minX) / spanX) * g.width,
+      y: g.top + ((p.y - minY) / spanY) * g.height
+    }));
+  }
+  if (g.shapeType === 'diamond') {
+    return [
+      { x: g.cx, y: g.top },
+      { x: g.right, y: g.cy },
+      { x: g.cx, y: g.bottom },
+      { x: g.left, y: g.cy }
+    ];
+  }
+  if (g.shapeType === 'triangle') {
+    return [
+      { x: g.cx, y: g.top },
+      { x: g.right, y: g.bottom },
+      { x: g.left, y: g.bottom }
+    ];
+  }
+  if (g.shapeType === 'hexagon') {
+    return [
+      { x: g.left + 0.25 * g.width, y: g.top },
+      { x: g.left + 0.75 * g.width, y: g.top },
+      { x: g.right, y: g.cy },
+      { x: g.left + 0.75 * g.width, y: g.bottom },
+      { x: g.left + 0.25 * g.width, y: g.bottom },
+      { x: g.left, y: g.cy }
+    ];
+  }
+  return [
+    { x: g.left, y: g.top },
+    { x: g.right, y: g.top },
+    { x: g.right, y: g.bottom },
+    { x: g.left, y: g.bottom }
+  ];
+};
+
 export const getRayDistanceToShape = (rayOrigin, rayDir, shape) => {
   const g = getShapeBoundaryGeometry(shape);
   const dirLen = Math.hypot(rayDir.x, rayDir.y);
@@ -17,24 +64,12 @@ export const getRayDistanceToShape = (rayOrigin, rayDir, shape) => {
   const u = { x: rayDir.x / dirLen, y: rayDir.y / dirLen };
   const n = { x: -u.y, y: u.x };
 
-  // Sample key points on the shape boundary
-  const samplePoints = [
-    { x: g.left, y: g.cy },
-    { x: g.right, y: g.cy },
-    { x: g.cx, y: g.top },
-    { x: g.cx, y: g.bottom },
-    { x: g.cx, y: g.cy },
-    { x: g.left, y: g.top },
-    { x: g.right, y: g.top },
-    { x: g.left, y: g.bottom },
-    { x: g.right, y: g.bottom }
-  ];
-
+  const vertices = getShapePolygonVertices(shape);
   let minPerp = Infinity;
   let minLong = Infinity;
   let maxLong = -Infinity;
 
-  samplePoints.forEach((pt) => {
+  vertices.forEach((pt) => {
     const vx = pt.x - rayOrigin.x;
     const vy = pt.y - rayOrigin.y;
     const longProj = vx * u.x + vy * u.y;
@@ -45,23 +80,22 @@ export const getRayDistanceToShape = (rayOrigin, rayDir, shape) => {
     minPerp = Math.min(minPerp, perpProj);
   });
 
-  // Check if ray line intersects shape bounding box
-  // For a horizontal ray (u.y ≈ 0), if rayOrigin.y is between g.top and g.bottom, perpDist is 0
-  if (Math.abs(u.y) < 0.1) {
-    if (rayOrigin.y >= g.top && rayOrigin.y <= g.bottom) {
-      minPerp = 0;
-    } else if (rayOrigin.y < g.top) {
-      minPerp = g.top - rayOrigin.y;
-    } else {
-      minPerp = rayOrigin.y - g.bottom;
-    }
-  } else if (Math.abs(u.x) < 0.1) {
-    if (rayOrigin.x >= g.left && rayOrigin.x <= g.right) {
-      minPerp = 0;
-    } else if (rayOrigin.x < g.left) {
-      minPerp = g.left - rayOrigin.x;
-    } else {
-      minPerp = rayOrigin.x - g.right;
+  for (let i = 0; i < vertices.length; i++) {
+    const v1 = vertices[i];
+    const v2 = vertices[(i + 1) % vertices.length];
+    const dx = v2.x - v1.x;
+    const dy = v2.y - v1.y;
+    const denom = u.x * dy - u.y * dx;
+    if (Math.abs(denom) > 1e-6) {
+      const wx = v1.x - rayOrigin.x;
+      const wy = v1.y - rayOrigin.y;
+      const t = (wx * dy - wy * dx) / denom;
+      const s = (wx * u.y - wy * u.x) / denom;
+      if (s >= 0 && s <= 1 && t >= 0) {
+        minPerp = 0;
+        minLong = Math.min(minLong, t);
+        break;
+      }
     }
   }
 
@@ -177,34 +211,31 @@ export const findDetachedFlowAssociation = (connector, candidateShapes = [], con
       if (connProj < minProj - 30 || connProj > maxProj + 30) continue;
 
       // Check for protected content interference in corridor
-      const protectedObjects = context.protectedObjects || [];
-      let hitsProtected = false;
-      for (const prot of protectedObjects) {
-        if (prot.id === srcCandidate.id || prot.id === tgtCandidate.id || prot.id === connector.id) continue;
-        const protG = getShapeBoundaryGeometry(prot);
-        // If protected object is between source and target and directly in corridor
-        const pFwd = getRayDistanceToShape(backwardRayOrigin, fwdDir, prot);
-        if (pFwd.isAhead && pFwd.longDist < fwdEval.longDist && pFwd.perpDist < 30) {
-          hitsProtected = true;
+      const allObstacles = [...validShapes, ...(context.protectedObjects || [])];
+      let isObstructed = false;
+      for (const obs of allObstacles) {
+        if (!obs || obs.id === srcCandidate.id || obs.id === tgtCandidate.id || obs.id === connector.id) continue;
+        const obsBwd = getRayDistanceToShape(backwardRayOrigin, bwdDir, obs);
+        if (obsBwd.isAhead && obsBwd.longDist < bwdEval.longDist - 10 && obsBwd.perpDist < 35) {
+          isObstructed = true;
+          break;
+        }
+        const obsFwd = getRayDistanceToShape(forwardRayOrigin, fwdDir, obs);
+        if (obsFwd.isAhead && obsFwd.longDist < fwdEval.longDist - 10 && obsFwd.perpDist < 35) {
+          isObstructed = true;
           break;
         }
       }
-      if (hitsProtected) continue;
+      if (isObstructed) continue;
 
-      // Score individual metrics:
-      // 1. Source corridor score (0 perp -> 1.0, 140 perp -> 0.4)
-      const srcPerpScore = Math.max(0.4, 1.0 - (bwdEval.perpDist / MAX_CORRIDOR_PERPENDICULAR_DISTANCE) * 0.5);
-      // 2. Target corridor score
-      const tgtPerpScore = Math.max(0.4, 1.0 - (fwdEval.perpDist / MAX_CORRIDOR_PERPENDICULAR_DISTANCE) * 0.5);
-      // 3. Longitudinal gap score (0px gap -> 1.0, 300px -> 0.7)
-      const srcLongScore = Math.max(0.6, 1.0 - (bwdEval.longDist / MAX_CORRIDOR_LONGITUDINAL_DISTANCE) * 0.3);
-      const tgtLongScore = Math.max(0.6, 1.0 - (fwdEval.longDist / MAX_CORRIDOR_LONGITUDINAL_DISTANCE) * 0.3);
-      // 4. Directional alignment score
-      const dirScore = flowDot; // 0.60 to 1.0
+      const srcPerpScore = Math.max(0, 1.0 - (bwdEval.perpDist / MAX_CORRIDOR_PERPENDICULAR_DISTANCE));
+      const tgtPerpScore = Math.max(0, 1.0 - (fwdEval.perpDist / MAX_CORRIDOR_PERPENDICULAR_DISTANCE));
+      const srcLongScore = Math.max(0, 1.0 - (bwdEval.longDist / MAX_CORRIDOR_LONGITUDINAL_DISTANCE));
+      const tgtLongScore = Math.max(0, 1.0 - (fwdEval.longDist / MAX_CORRIDOR_LONGITUDINAL_DISTANCE));
+      const dirScore = flowDot;
 
-      // Combined pair coherence score
       const pairScore = Number(
-        (srcPerpScore * 0.25 + tgtPerpScore * 0.25 + srcLongScore * 0.15 + tgtLongScore * 0.15 + dirScore * 0.20).toFixed(4)
+        (srcPerpScore * 0.25 + tgtPerpScore * 0.25 + srcLongScore * 0.20 + tgtLongScore * 0.20 + dirScore * 0.10).toFixed(4)
       );
 
       const evidence = [

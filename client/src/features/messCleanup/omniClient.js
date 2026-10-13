@@ -24,23 +24,31 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
     const response = await client.post('/mess-cleanup/analyze', {
       workspaceModel,
       image
-    }, { timeout: 15000 });
+    }, {
+      timeout: options.timeout ?? 30000,
+      signal: options.signal
+    });
 
     console.log(`[MessCleanup Diagnostic] Client request completed in ${Date.now() - clientReqStart}ms`);
-    console.log(`[Nemotron Client Diagnostic] Response top-level keys: ${Object.keys(response || {}).join(', ')}`);
+    console.log(`[Gemini Client Diagnostic] Response top-level keys: ${Object.keys(response || {}).join(', ')}`);
 
     const plan = response?.data?.organizationPlan || response?.organizationPlan;
     if (!plan || typeof plan !== 'object') {
-      console.log('[Nemotron Client Diagnostic] Validation failed: plan is null or invalid object');
+      console.log('[Gemini Client Diagnostic] Validation failed: plan is null or invalid object');
       const error = new Error('Server returned an empty or invalid organization plan structure');
       error.code = 'INVALID_SERVER_RESPONSE';
       error.status = 502;
       throw error;
     }
 
+    if (response?.data?.model) {
+      if (!plan.source) plan.source = {};
+      if (!plan.source.model) plan.source.model = response.data.model;
+    }
+
     const groupsOrSections = plan.groups || plan.document?.sections || plan.sections;
     if (!Array.isArray(groupsOrSections)) {
-      console.log('[Nemotron Client Diagnostic] Validation failed: no groups or sections array in plan');
+      console.log('[Gemini Client Diagnostic] Validation failed: no groups or sections array in plan');
       const error = new Error('Server returned an organization plan without valid groups or sections');
       error.code = 'INVALID_PLAN_SCHEMA';
       error.status = 502;
@@ -48,7 +56,7 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
     }
 
     const relationshipCount = Array.isArray(plan.relationships) ? plan.relationships.length : 0;
-    console.log(`[Nemotron Client Diagnostic] Plan received: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${plan.workspaceType || 'unset'}`);
+    console.log(`[Gemini Client Diagnostic] Plan received: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${plan.workspaceType || 'unset'}`);
 
     return plan;
   } catch (err) {
@@ -56,7 +64,7 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
     const message = err?.message || err?.response?.data?.message || 'Mess Cleanup AI server request failed';
     const code = err?.code || err?.response?.data?.errors?.code || 'OMNI_CLIENT_ERROR';
 
-    console.log(`[Nemotron Client Diagnostic] Request error: HTTP ${status} (${code}) - ${message}`);
+    console.log(`[Gemini Client Diagnostic] Request error: HTTP ${status} (${code}) - ${message}`);
 
     const clientError = new Error(message);
     clientError.status = status;

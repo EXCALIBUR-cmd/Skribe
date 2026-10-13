@@ -506,9 +506,17 @@ export const detectDetachedTextOpportunities = (objects, objectMap, ownership) =
     textIds.forEach((tId) => {
       const textObj = objectMap.get(tId);
       if (!textObj || getSemanticType(textObj) !== 'text') return;
+      if (textObj.metadata?.role === 'timestamp' || textObj.elementRole === 'timestamp') return;
       const bText = getObjectBounds(textObj);
 
       if (ownership.ownerTierByText?.get(tId) === 3 && ownership.relationshipTypeByText?.get(tId) === 'inferred-external') return;
+
+      const isNote = Boolean(
+        containerObj.isStickyNote ||
+        containerObj.metadata?.isStickyNote ||
+        containerObj.type === 'note' ||
+        getSemanticType(containerObj) === 'note'
+      );
 
       const relMeta = containerObj.relationshipMetadata || {};
       const textRelMeta = textObj.relationshipMetadata || {};
@@ -759,7 +767,6 @@ export const detectCleanupOpportunities = (workspaceModel, semanticScene, visual
   if (options.cleanupContext?.scopeType === 'SELECTION') {
     const selectedIds = new Set(options.cleanupContext.selectedObjectIds || []);
     allOpportunities = allOpportunities.filter(opp => {
-      // Keep opportunity if any of its objectIds or connectorIds are in the selection
       const hasSelectedObj = opp.objectIds?.some(id => selectedIds.has(id));
       const hasSelectedConn = opp.connectorIds?.some(id => selectedIds.has(id));
       return hasSelectedObj || hasSelectedConn;

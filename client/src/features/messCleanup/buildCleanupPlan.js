@@ -35,8 +35,8 @@ export const ACTION_PRIORITY = Object.freeze({
   align: 5,
   equalizeSpacing: 6,
   normalizeText: 7,
-  macroTranslate: 8,
-  preserve: 9
+  preserve: 8,
+  macroTranslate: 9
 });
 
 export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {}) => {
@@ -133,12 +133,12 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     objectMap,
     ownership
   });
-  const boardEvidence = extractBoardEvidence(blocks, { rawObjects: options.rawObjects || [], objectMap });
+  const boardEvidence = extractBoardEvidence(blocks, { rawObjects: options.rawObjects || rawObjects, objectMap });
   const macroCandidates = generateMacroCandidates(boardEvidence, {
     objectMap,
     ownership,
     selectedCandidates: selectedCompositions,
-    rawObjects: options.rawObjects || []
+    rawObjects: options.rawObjects || rawObjects
   });
   const bestMacroCandidate = macroCandidates.length > 0 ? macroCandidates[0] : null;
 
@@ -572,6 +572,16 @@ export const buildCleanupPlan = (semanticSceneInput, workspaceModel, options = {
     confidence: cand.confidence,
     sourceCandidateId: cand.candidateId
   }));
+
+  validatedExecutableActions.push(...macroActions);
+
+  const macroModifiedObjectIds = new Set();
+  macroActions.forEach(a => {
+    (a.objectIds || []).forEach(id => macroModifiedObjectIds.add(String(id)));
+    (a.connectorIds || []).forEach(id => macroModifiedObjectIds.add(String(id)));
+  });
+
+  validatedUntouchedIds = validatedUntouchedIds.filter(id => !macroModifiedObjectIds.has(String(id)));
 
   const diagnostics = {
     structures: visualStructures,

@@ -360,8 +360,43 @@ export const runLocalSemanticAnalysis = (workspaceModel, options = {}) => {
     relationships,
     hierarchy,
     annotations: annotationsResult,
-    unassignedObjectIds
+    unassignedObjectIds,
+    provenance: {
+      engine: 'deterministic-local',
+      isFallback: false,
+      aiUnavailable: false
+    }
   };
+};
+
+const normalizeFailureCategory = (err) => {
+  if (!err) return 'UPSTREAM_FAILURE';
+  const status = err.status || err.response?.status || err.statusCode;
+  const code = String(err.code || '');
+  const msg = String(err.message || '').toLowerCase();
+
+  if (status === 503 || code === 'SERVICE_UNAVAILABLE' || msg.includes('503') || msg.includes('resourceexhausted') || msg.includes('high demand') || msg.includes('unavailable')) {
+    return 'SERVICE_UNAVAILABLE';
+  }
+  if (status === 504 || code === 'TIMEOUT' || code === 'ECONNABORTED' || msg.includes('timeout') || msg.includes('timed out')) {
+    return 'TIMEOUT';
+  }
+  if (status === 429 || code === 'RATE_LIMITED' || msg.includes('429') || msg.includes('rate limit')) {
+    return 'RATE_LIMITED';
+  }
+  if (status === 502 || code === 'INVALID_SERVER_RESPONSE' || code === 'INVALID_PLAN_SCHEMA' || code === 'MALFORMED_JSON_RESPONSE' || msg.includes('502')) {
+    return 'UPSTREAM_ERROR';
+  }
+  if (status === 401 || status === 403 || code === 'AUTHENTICATION_FAILED' || code === 'NO_API_KEY' || code === 'UNAUTHORIZED') {
+    return 'UNAUTHORIZED';
+  }
+  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'NETWORK_ERROR' || msg.includes('network error')) {
+    return 'NETWORK_ERROR';
+  }
+  if (code === 'INVALID_IMAGE' || code === 'INVALID_WORKSPACE_MODEL') {
+    return 'INVALID_REQUEST';
+  }
+  return 'UPSTREAM_FAILURE';
 };
 
 export const analyzeWorkspace = (workspaceModel, screenshot = null, options = {}) => {
@@ -369,17 +404,44 @@ export const analyzeWorkspace = (workspaceModel, screenshot = null, options = {}
     return (async () => {
       try {
         const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot, options);
-        return validateOrganizationPlan(workspaceModel, rawPlan);
+        const validatedPlan = validateOrganizationPlan(workspaceModel, rawPlan);
+        if (!validatedPlan || !Array.isArray(validatedPlan.sections) || validatedPlan.sections.length === 0) {
+          throw new Error('AI analysis produced invalid plan structure');
+        }
+        validatedPlan.provenance = {
+          engine: 'ai-assisted',
+          isFallback: false,
+          aiUnavailable: false,
+          model: validatedPlan.source?.model || rawPlan?.source?.model || rawPlan?.model || 'gemini-3.8-flash'
+        };
+        return validatedPlan;
       } catch (err) {
         console.warn(
           `[MessCleanup] External AI semantic analysis unavailable (${err.message}). Falling back gracefully to deterministic local semantic engine.`
         );
-        return runLocalSemanticAnalysis(workspaceModel, options);
+        const fallbackPlan = runLocalSemanticAnalysis(workspaceModel, options);
+        if (fallbackPlan) {
+          fallbackPlan.provenance = {
+            engine: 'deterministic-fallback',
+            isFallback: true,
+            aiUnavailable: true,
+            failureCategory: normalizeFailureCategory(err)
+          };
+        }
+        return fallbackPlan;
       }
     })();
   }
 
-  return runLocalSemanticAnalysis(workspaceModel, options);
+  const localPlan = runLocalSemanticAnalysis(workspaceModel, options);
+  if (localPlan) {
+    localPlan.provenance = {
+      engine: 'deterministic-local',
+      isFallback: false,
+      aiUnavailable: false
+    };
+  }
+  return localPlan;
 };
 
 export default analyzeWorkspace;
