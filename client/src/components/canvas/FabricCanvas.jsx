@@ -1793,6 +1793,45 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
   };
 
+  const insertDictatedText = (textString, options = {}) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) {
+      return { success: false, reason: 'Canvas not initialized' };
+    }
+    if (!textString || !String(textString).trim()) {
+      return { success: false, reason: 'Empty transcript' };
+    }
+
+    const trimmed = String(textString).trim();
+    const { x, y } = options.position || getNextViewportPosition(canvas);
+
+    const text = new fabric.Textbox(trimmed, {
+      left: x,
+      top: y,
+      width: Math.min(450, Math.max(220, trimmed.length * 8)),
+      fontSize: options.fontSize || 22,
+      fontFamily: options.fontFamily || 'Quicksand',
+      fontWeight: options.fontWeight || 'bold',
+      fill: options.fill || activeColor || '#000000',
+      contrastResolved: false,
+      metadata: {
+        source: 'voice-dictation',
+        createdAt: Date.now()
+      }
+    });
+
+    ensureObjectId(text);
+    canvas.add(text);
+    tryAttachTextToShape(text);
+    notifyLocalObjectAdded(text);
+    canvas.setActiveObject(text);
+    canvas.requestRenderAll();
+    saveState();
+    if (onToolComplete) onToolComplete();
+
+    return { success: true, objectId: text.id, textObject: text };
+  };
+
   const generateAIStickyCluster = (ideas = []) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
@@ -2598,6 +2637,10 @@ export const FabricCanvas = forwardRef(({
       else if (type === 'line') addLine();
       else if (type === 'arrow' || type === 'connector') addConnector(options.connectorType || 'straight', options);
       else if (type === 'text') addText();
+    },
+
+    insertDictatedText: (textString, options = {}) => {
+      return insertDictatedText(textString, options);
     },
 
     triggerAIAction: (actionId) => {

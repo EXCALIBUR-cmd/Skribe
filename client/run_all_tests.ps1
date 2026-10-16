@@ -17,7 +17,8 @@ try {
     "test:mess-cleanup-omni-client",
     "test:shape-text-relationship",
     "test:mess-cleanup-connector-repair",
-    "test:connector-collision-integrity"
+    "test:connector-collision-integrity",
+    "test:voice-dictation"
   )
 
   $allPassed = $true

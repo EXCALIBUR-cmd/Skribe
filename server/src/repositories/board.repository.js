@@ -17,6 +17,10 @@ export class BoardRepository {
       .exec();
   }
 
+  async findBoardAccess(id) {
+    return await Board.findOne({ _id: id, isDeleted: false }, { owner: 1, members: 1 }).lean();
+  }
+
   async findUserBoards(userId, options = {}) {
     const query = {
       isDeleted: false,

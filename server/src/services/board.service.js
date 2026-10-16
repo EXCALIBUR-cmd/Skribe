@@ -99,7 +99,7 @@ export class BoardService {
   }
 
   async updateBoard(boardId, userId, updatePayload) {
-    const board = await boardRepository.findBoardById(boardId);
+    const board = await boardRepository.findBoardAccess(boardId);
     this._verifyAccess(board, userId);
 
     const { owner, members, _id, createdAt, id, ...allowedUpdates } = updatePayload || {};

@@ -22,6 +22,7 @@ import { createLayoutProposal } from '../features/messCleanup/layoutEngine.js';
 import { buildPreviewRenderModel } from '../features/messCleanup/previewModel.js';
 import { auditCleanupPipeline, computeGeometryDiagnostics } from '../features/messCleanup/auditCleanupPipeline.js';
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
+import VoiceDictationModal from '../features/voice/VoiceDictationModal.jsx';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 
 const isValidViewport = (viewport) => (
@@ -221,7 +222,7 @@ export const MainCanvasPage = () => {
 
     debounceTimerRef.current = setTimeout(() => {
       saveBoardData(latestCanvasDataRef.current);
-    }, 1200);
+    }, 400);
   }, [saveBoardData]);
 
   useEffect(() => {
@@ -528,6 +529,7 @@ export const MainCanvasPage = () => {
     error: ''
   });
   const [wheelAnchorPos, setWheelAnchorPos] = useState({ x: 120, y: 300 });
+  const [isVoiceDictationOpen, setIsVoiceDictationOpen] = useState(false);
 
   const fabricCanvasRef = useRef(null);
   const paletteRef = useRef(null);
@@ -694,10 +696,28 @@ export const MainCanvasPage = () => {
       label: 'Mess Cleanup',
       icon: 'auto_awesome',
       tooltip: 'Clean up rough drawings and messy geometry'
+    },
+    {
+      id: 'voice-dictation',
+      label: 'Voice Dictation',
+      icon: 'mic',
+      tooltip: 'Dictate notes and insert text onto the canvas'
     }
   ];
 
+  const handleInsertDictatedText = useCallback((text) => {
+    const result = fabricCanvasRef.current?.insertDictatedText(text);
+    if (result?.success) {
+      addToast('Text Inserted', 'Dictated text added to canvas', 'check_circle', 'success');
+    }
+    return result;
+  }, [addToast]);
+
   const handleSkribeFeatureClick = async (feature) => {
+    if (feature.id === 'voice-dictation') {
+      setIsVoiceDictationOpen(true);
+      return;
+    }
     if (feature.id !== 'mess-cleanup') return;
     if (messCleanupPreview.loading) return;
 
@@ -909,6 +929,12 @@ export const MainCanvasPage = () => {
         error={messCleanupPreview.error}
         onApply={handleApplyMessCleanup}
         onCancel={handleCancelMessCleanupPreview}
+      />
+
+      <VoiceDictationModal
+        isOpen={isVoiceDictationOpen}
+        onClose={() => setIsVoiceDictationOpen(false)}
+        onInsert={handleInsertDictatedText}
       />
 
       <div
