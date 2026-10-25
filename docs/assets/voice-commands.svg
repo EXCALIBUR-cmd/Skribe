@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="voice-title voice-desc">
+  <title id="voice-title">Skribe voice commands</title>
+  <desc id="voice-desc">In the Voice Command panel the instruction "Create a pink note with dark blue text saying Design" is spoken and appears as text. Run Command is pressed, a confirmation appears, and a pink sticky note reading Design in dark blue lands on the board.</desc>
+  <defs>
+    <pattern id="vdots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#d4dae7"/>
+    </pattern>
+    <filter id="vlift" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#1e293b" flood-opacity="0.12"/>
+    </filter>
+    <clipPath id="line-1"><rect class="type-1" x="104" y="158" width="420" height="30"/></clipPath>
+    <clipPath id="line-2"><rect class="type-2" x="104" y="186" width="420" height="30"/></clipPath>
+  </defs>
+  <style>
+    .ui { font-family: ui-rounded, 'SF Pro Rounded', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+    .title { font-size: 20px; font-weight: 750; fill: #1e293b; }
+    .muted { font-size: 13px; fill: #64748b; }
+    .label { font-size: 12px; font-weight: 650; fill: #64748b; }
+    .typed { font-size: 18px; font-weight: 550; fill: #1e293b; }
+    .seg { font-size: 13px; font-weight: 700; }
+    .btn { font-size: 15px; font-weight: 700; fill: #ffffff; }
+    .ok { font-size: 14px; font-weight: 650; fill: #065f46; }
+    .note-small { font-size: 15px; font-weight: 750; fill: #1e293b; }
+    .note-big { font-size: 22px; font-weight: 800; fill: #1e3a8a; }
+    .type-1 { transform-box: fill-box; transform-origin: 0% 50%; animation: type 1.9s steps(33, end) .7s both; }
+    .type-2 { transform-box: fill-box; transform-origin: 0% 50%; animation: type 1.1s steps(18, end) 2.6s both; }
+    .ring { transform-box: fill-box; transform-origin: 50% 50%; animation: ring 1s ease-out .4s 4 both; }
+    .run { transform-box: fill-box; transform-origin: 50% 50%; animation: press .35s ease-in-out 3.95s both; }
+    .done { animation: fade .45s ease-out 4.35s both; }
+    .landing { transform-box: fill-box; transform-origin: 50% 50%; animation: land .6s cubic-bezier(.3,1.5,.5,1) 4.55s both; }
+    @keyframes type { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes ring { 0% { opacity: .55; transform: scale(1); } 100% { opacity: 0; transform: scale(1.8); } }
+    @keyframes press { 0% { transform: scale(1); } 45% { transform: scale(.92); } 100% { transform: scale(1); } }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes land { from { opacity: 0; transform: scale(.5) rotate(-6deg); } to { opacity: 1; transform: scale(1) rotate(0deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; }
+      .ring { opacity: 0; }
+    }
+  </style>
+
+  <rect width="1200" height="420" rx="28" fill="#f8f9ff"/>
+  <rect width="1200" height="420" rx="28" fill="url(#vdots)"/>
+  <rect x="1" y="1" width="1198" height="418" rx="27" fill="none" stroke="#d4dae7" stroke-width="2"/>
+
+  <g class="ui">
+    <g filter="url(#vlift)">
+      <rect x="60" y="44" width="524" height="336" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    </g>
+
+    <circle class="ring" cx="104" cy="92" r="21" fill="none" stroke="#ae2f34" stroke-width="2"/>
+    <circle cx="104" cy="92" r="21" fill="#ffdad8"/>
+    <rect x="98" y="79" width="12" height="18" rx="6" fill="#ae2f34"/>
+    <path d="M93 92 a11 11 0 0 0 22 0 M104 103 v5" fill="none" stroke="#ae2f34" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="138" y="88" class="title">Voice Command</text>
+    <text x="138" y="108" class="muted">Say what to create, then run the command</text>
+
+    <text x="90" y="146" class="label">Instruction</text>
+    <rect x="88" y="152" width="468" height="78" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+    <g clip-path="url(#line-1)"><text x="106" y="180" class="typed">Create a pink note with dark blue</text></g>
+    <g clip-path="url(#line-2)"><text x="106" y="208" class="typed">text saying Design</text></g>
+
+    <g transform="translate(406 248)">
+      <g class="run">
+        <rect width="150" height="40" rx="20" fill="#ae2f34"/>
+        <text x="28" y="26" class="btn">Run Command</text>
+      </g>
+    </g>
+
+    <g class="done">
+      <rect x="88" y="304" width="468" height="48" rx="12" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.5"/>
+      <circle cx="112" cy="328" r="10" fill="#10b981"/>
+      <path d="M107 328 l3.5 3.5 l6.5 -7" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="132" y="333" class="ok">Created pink sticky note “Design” in dark blue text</text>
+    </g>
+
+    <g transform="translate(704 92) rotate(-4)">
+      <g filter="url(#vlift)">
+        <rect width="112" height="112" rx="10" fill="#fff3a0"/>
+        <path d="M14 52 H98 M14 72 H98 M14 92 H98" stroke="#1e293b" stroke-opacity=".08" stroke-width="1.5"/>
+        <text x="15" y="32" class="note-small">Ideas</text>
+      </g>
+    </g>
+    <g transform="translate(1000 230) rotate(3)">
+      <g filter="url(#vlift)">
+        <rect width="112" height="112" rx="10" fill="#e0f2fe"/>
+        <path d="M14 52 H98 M14 72 H98 M14 92 H98" stroke="#1e293b" stroke-opacity=".08" stroke-width="1.5"/>
+        <text x="15" y="32" class="note-small">Research</text>
+      </g>
+    </g>
+    <g transform="translate(838 168)">
+      <g class="landing" filter="url(#vlift)">
+        <rect width="140" height="140" rx="12" fill="#fce7f3"/>
+        <path d="M18 66 H122 M18 90 H122 M18 114 H122" stroke="#1e293b" stroke-opacity=".08" stroke-width="1.5"/>
+        <text x="18" y="42" class="note-big">Design</text>
+      </g>
+    </g>
+  </g>
+</svg>
