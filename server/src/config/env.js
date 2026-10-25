@@ -19,6 +19,8 @@ export const config = {
   googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/v1/auth/google/callback',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  voiceCommandModel: process.env.VOICE_COMMAND_MODEL || 'openai/gpt-oss-20b',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 };

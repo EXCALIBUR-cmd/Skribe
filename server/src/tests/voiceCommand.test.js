@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   VOICE_COMMAND_RESPONSE_SCHEMA,
-  buildVoiceCommandInput,
-  classifyVoiceProviderError,
+  classifyVoiceProviderStatus,
   interpretVoiceCommand,
   validateVoiceCommandIntent
 } from '../services/voiceCommandService.js';
@@ -32,20 +31,6 @@ const mockRes = () => {
     },
     emit(event) {
       if (listeners[event]) listeners[event]();
-    }
-  };
-};
-
-const mockClient = (behaviour) => {
-  const calls = [];
-  return {
-    calls,
-    interactions: {
-      create: async (params, requestOptions) => {
-        calls.push({ params, requestOptions });
-        if (behaviour.error) throw behaviour.error;
-        return { output_text: behaviour.outputText, model: 'gemini-test-model' };
-      }
     }
   };
 };
@@ -138,109 +123,170 @@ test('ambiguous requests return a clarification and only a valid proposal', () =
   assert.equal(noQuestion.proposal, null);
 });
 
-test('interpretVoiceCommand sends one schema-constrained request with the transcript as data', async () => {
-  const client = mockClient({ outputText: JSON.stringify(intent({ action: 'create_sticky_note', text: 'Buy milk' })) });
-  const output = await interpretVoiceCommand('add a sticky note that says buy milk', { apiKey: 'test-key', client });
+const TEST_KEY = 'gsk_test_secret_value';
 
-  assert.deepEqual(output.result, { status: 'execute', command: { action: 'create_sticky_note', text: 'Buy milk' } });
-  assert.equal(output.model, 'gemini-test-model');
-  assert.equal(client.calls.length, 1);
-  assert.equal(client.calls[0].params.response_format.schema, VOICE_COMMAND_RESPONSE_SCHEMA);
-  assert.deepEqual(client.calls[0].requestOptions.retries, { strategy: 'none' });
-  assert.ok(client.calls[0].params.input[0].text.endsWith(JSON.stringify('add a sticky note that says buy milk')));
-  assert.deepEqual(buildVoiceCommandInput('x')[0].type, 'text');
-});
+const mockFetch = (respond) => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return respond(url, init);
+  };
+  fetchImpl.calls = calls;
+  return fetchImpl;
+};
 
-test('provider timeout, outage and rate limits fail once without retrying', async () => {
+const groqReply = (content) => new Response(JSON.stringify({
+  model: 'openai/gpt-oss-20b',
+  choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }]
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+const hangingFetch = () => mockFetch((url, init) => new Promise((resolve, reject) => {
+  init.signal.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')), { once: true });
+}));
+
+test('valid text, sticky-note and labeled-shape intents each come from exactly one Groq request', async () => {
   const cases = [
-    [Object.assign(new Error('Request timed out'), { name: 'APIConnectionTimeoutError' }), 'AI_TIMEOUT', 504],
-    [Object.assign(new Error('The model is overloaded'), { status: 503 }), 'AI_UNAVAILABLE', 503],
-    [Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }), 'AI_RATE_LIMITED', 429],
-    [Object.assign(new Error('API key not valid'), { status: 400 }), 'AI_UNAVAILABLE', 503],
-    [Object.assign(new Error('socket hang up'), { status: 500 }), 'AI_FAILED', 502]
+    ['write quarterly goals', { action: 'create_text', text: 'quarterly goals' }],
+    ['add a sticky note that says buy milk', { action: 'create_sticky_note', text: 'buy milk' }],
+    ['add a circle labeled start', { action: 'create_shape', shapeType: 'circle', label: 'start' }]
   ];
-
-  for (const [providerError, code, statusCode] of cases) {
-    const client = mockClient({ error: providerError });
-    await assert.rejects(
-      interpretVoiceCommand('add a circle', { apiKey: 'test-key', client }),
-      (err) => err.code === code && err.statusCode === statusCode && err.message.includes('No changes were made')
-    );
-    assert.equal(client.calls.length, 1);
+  for (const [instruction, command] of cases) {
+    const fetchImpl = mockFetch(() => groqReply(JSON.stringify(intent(command))));
+    const output = await interpretVoiceCommand(instruction, { apiKey: TEST_KEY, fetch: fetchImpl });
+    assert.deepEqual(output.result, { status: 'execute', command });
+    assert.equal(output.model, 'openai/gpt-oss-20b');
+    assert.equal(fetchImpl.calls.length, 1);
   }
 });
 
-test('a hung provider call is aborted at the timeout even when a client signal is attached', async () => {
-  const seen = [];
-  const hangingClient = {
-    interactions: {
-      create: (params, requestOptions) => new Promise((resolve, reject) => {
-        seen.push(requestOptions);
-        requestOptions.signal.addEventListener('abort', () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })));
-      })
-    }
-  };
-  const clientSignal = new AbortController().signal;
-  const started = Date.now();
-  await assert.rejects(
-    interpretVoiceCommand('add a circle', { apiKey: 'test-key', client: hangingClient, signal: clientSignal, timeoutMs: 50 }),
-    (err) => err.code === 'AI_TIMEOUT' && err.statusCode === 504
-  );
-  assert.ok(Date.now() - started < 2000);
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].timeout_ms, undefined);
-  assert.notEqual(seen[0].signal, clientSignal);
+test('the request uses the documented Groq endpoint, strict schema and only the transcript as user content', async () => {
+  const fetchImpl = mockFetch(() => groqReply(JSON.stringify(intent({ action: 'create_text', text: 'hi' }))));
+  await interpretVoiceCommand('write hi', { apiKey: TEST_KEY, fetch: fetchImpl, model: 'openai/gpt-oss-20b' });
+  const [{ url, init, body }] = fetchImpl.calls;
+
+  assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(init.method, 'POST');
+  assert.equal(init.headers.Authorization, `Bearer ${TEST_KEY}`);
+  assert.ok(init.signal instanceof AbortSignal);
+  assert.equal(body.model, 'openai/gpt-oss-20b');
+  assert.equal(body.messages.length, 2);
+  assert.equal(body.messages[0].role, 'system');
+  assert.deepEqual(body.messages[1], { role: 'user', content: JSON.stringify('write hi') });
+  assert.deepEqual(body.response_format, {
+    type: 'json_schema',
+    json_schema: { name: 'voice_command_intent', strict: true, schema: VOICE_COMMAND_RESPONSE_SCHEMA }
+  });
+  assert.equal(body.reasoning_effort, 'low');
+  assert.equal(body.include_reasoning, false);
+  assert.equal(init.body.includes(TEST_KEY), false);
 });
 
-test('the timeout holds even when the provider call ignores the abort signal', async () => {
-  const deafClient = { interactions: { create: () => new Promise(() => {}) } };
-  const started = Date.now();
-  await assert.rejects(
-    interpretVoiceCommand('add a circle', { apiKey: 'test-key', client: deafClient, signal: new AbortController().signal, timeoutMs: 50 }),
-    (err) => err.code === 'AI_TIMEOUT' && err.statusCode === 504
-  );
-  assert.ok(Date.now() - started < 2000);
+test('the response schema meets strict-mode rules', () => {
+  assert.deepEqual([...VOICE_COMMAND_RESPONSE_SCHEMA.required].sort(), Object.keys(VOICE_COMMAND_RESPONSE_SCHEMA.properties).sort());
+  assert.equal(VOICE_COMMAND_RESPONSE_SCHEMA.additionalProperties, false);
 });
 
-test('a client disconnect aborts the provider call and is reported as cancelled', async () => {
-  const hangingClient = {
-    interactions: {
-      create: (params, requestOptions) => new Promise((resolve, reject) => {
-        requestOptions.signal.addEventListener('abort', () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })));
-      })
-    }
-  };
-  const disconnect = new AbortController();
-  const pending = interpretVoiceCommand('add a circle', { apiKey: 'test-key', client: hangingClient, signal: disconnect.signal, timeoutMs: 5000 });
-  disconnect.abort();
-  await assert.rejects(pending, (err) => err.code === 'CLIENT_ABORTED' && err.statusCode === 499);
+test('ambiguous, unsupported and injected model answers never become executable commands', async () => {
+  const answers = [
+    [intent({ outcome: 'clarify', action: 'create_sticky_note', text: 'Ideas', clarification: 'Did you mean a sticky note titled Ideas?' }), 'clarify', null],
+    [intent({ outcome: 'unsupported', reason: 'Deleting objects is not supported.' }), 'rejected', 'UNSUPPORTED_COMMAND'],
+    [intent({ action: 'delete_object' }), 'rejected', 'UNKNOWN_ACTION'],
+    [intent({ action: 'create_shape', shapeType: 'circle', objectId: 'shape_1' }), 'rejected', 'UNEXPECTED_OBJECT_ID'],
+    [intent({ action: 'create_text', text: 'hi', x: 10, y: 10 }), 'rejected', 'INVALID_COORDINATES']
+  ];
+  for (const [answer, status, code] of answers) {
+    const fetchImpl = mockFetch(() => groqReply(JSON.stringify(answer)));
+    const { result } = await interpretVoiceCommand('do something', { apiKey: TEST_KEY, fetch: fetchImpl });
+    assert.equal(result.status, status);
+    if (code) assert.equal(result.code, code);
+    assert.equal(fetchImpl.calls.length, 1);
+  }
 });
 
-test('missing provider configuration and invalid transcripts never call the provider', async () => {
-  const client = mockClient({ outputText: '{}' });
-  await assert.rejects(interpretVoiceCommand('add a circle', { apiKey: '', client }), (err) => err.code === 'AI_NOT_CONFIGURED' && err.statusCode === 503);
-  await assert.rejects(interpretVoiceCommand('   ', { apiKey: 'test-key', client }), (err) => err.code === 'INVALID_TRANSCRIPT');
-  await assert.rejects(interpretVoiceCommand('a'.repeat(501), { apiKey: 'test-key', client }), (err) => err.code === 'INVALID_TRANSCRIPT');
-  const aborted = new AbortController();
-  aborted.abort();
-  await assert.rejects(interpretVoiceCommand('add a circle', { apiKey: 'test-key', client, signal: aborted.signal }), (err) => err.code === 'CLIENT_ABORTED');
-  assert.equal(client.calls.length, 0);
-});
-
-test('empty or non-JSON provider output is reported as an invalid response', async () => {
-  for (const outputText of ['', '   ', 'Sure! Here is a circle.', '```json\n{"outcome":"command"}\n```']) {
-    const client = mockClient({ outputText });
+test('malformed provider bodies are reported as invalid responses', async () => {
+  const replies = [
+    () => groqReply('Sure! Here is a circle.'),
+    () => groqReply(''),
+    () => groqReply('{"outcome":'),
+    () => new Response(JSON.stringify({ model: 'openai/gpt-oss-20b', choices: [] }), { status: 200 }),
+    () => new Response('<html>gateway</html>', { status: 200 })
+  ];
+  for (const reply of replies) {
+    const fetchImpl = mockFetch(reply);
     await assert.rejects(
-      interpretVoiceCommand('add a circle', { apiKey: 'test-key', client }),
+      interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl }),
       (err) => err.code === 'AI_INVALID_RESPONSE' && err.statusCode === 502
     );
+    assert.equal(fetchImpl.calls.length, 1);
   }
 });
 
-test('classifyVoiceProviderError passes through typed errors', () => {
-  const typed = Object.assign(new Error('x'), { code: 'AI_TIMEOUT', statusCode: 504 });
-  assert.equal(classifyVoiceProviderError(typed), typed);
-  assert.equal(classifyVoiceProviderError(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })).code, 'AI_TIMEOUT');
+test('authentication, rate-limit and server failures map to typed errors after one request without leaking the key', async () => {
+  const cases = [
+    [401, 'AI_UNAVAILABLE', 503],
+    [403, 'AI_UNAVAILABLE', 503],
+    [429, 'AI_RATE_LIMITED', 429],
+    [498, 'AI_UNAVAILABLE', 503],
+    [500, 'AI_UNAVAILABLE', 503],
+    [502, 'AI_UNAVAILABLE', 503],
+    [503, 'AI_UNAVAILABLE', 503],
+    [400, 'AI_FAILED', 502],
+    [422, 'AI_FAILED', 502]
+  ];
+  for (const [status, code, statusCode] of cases) {
+    const fetchImpl = mockFetch(() => new Response(JSON.stringify({ error: { message: `Invalid API Key ${TEST_KEY}`, type: 'invalid_request_error' } }), { status }));
+    await assert.rejects(interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl }), (err) => {
+      assert.equal(err.code, code);
+      assert.equal(err.statusCode, statusCode);
+      assert.ok(err.message.includes('No changes were made'));
+      assert.equal(JSON.stringify(err, Object.getOwnPropertyNames(err)).includes(TEST_KEY), false);
+      return true;
+    });
+    assert.equal(fetchImpl.calls.length, 1);
+  }
+  assert.equal(classifyVoiceProviderStatus(504).code, 'AI_UNAVAILABLE');
+});
+
+test('a network failure is reported once as unreachable', async () => {
+  const fetchImpl = mockFetch(() => { throw new TypeError('fetch failed'); });
+  await assert.rejects(
+    interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl }),
+    (err) => err.code === 'AI_FAILED' && err.statusCode === 502
+  );
+  assert.equal(fetchImpl.calls.length, 1);
+});
+
+test('the deadline aborts the actual outbound request', async () => {
+  const fetchImpl = hangingFetch();
+  const started = Date.now();
+  await assert.rejects(
+    interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl, timeoutMs: 50, signal: new AbortController().signal }),
+    (err) => err.code === 'AI_TIMEOUT' && err.statusCode === 504
+  );
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.equal(fetchImpl.calls[0].init.signal.aborted, true);
+});
+
+test('caller cancellation reaches the outbound request', async () => {
+  const fetchImpl = hangingFetch();
+  const caller = new AbortController();
+  const pending = interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl, timeoutMs: 5000, signal: caller.signal });
+  caller.abort();
+  await assert.rejects(pending, (err) => err.code === 'CLIENT_ABORTED' && err.statusCode === 499);
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.equal(fetchImpl.calls[0].init.signal.aborted, true);
+});
+
+test('missing configuration, invalid transcripts and pre-cancelled calls never reach the provider', async () => {
+  const fetchImpl = mockFetch(() => groqReply('{}'));
+  await assert.rejects(interpretVoiceCommand('add a circle', { apiKey: '', fetch: fetchImpl }), (err) => err.code === 'AI_NOT_CONFIGURED' && err.statusCode === 503);
+  await assert.rejects(interpretVoiceCommand('   ', { apiKey: TEST_KEY, fetch: fetchImpl }), (err) => err.code === 'INVALID_TRANSCRIPT');
+  await assert.rejects(interpretVoiceCommand('a'.repeat(501), { apiKey: TEST_KEY, fetch: fetchImpl }), (err) => err.code === 'INVALID_TRANSCRIPT');
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await assert.rejects(interpretVoiceCommand('add a circle', { apiKey: TEST_KEY, fetch: fetchImpl, signal: cancelled.signal }), (err) => err.code === 'CLIENT_ABORTED');
+  assert.equal(fetchImpl.calls.length, 0);
 });
 
 test('controller rejects missing or oversized transcripts without calling the interpreter', async () => {
@@ -291,4 +337,29 @@ test('controller writes nothing after the client disconnects', async () => {
   release();
   await pending;
   assert.equal(res.jsonBody, null);
+});
+
+test('controller limits each user to 20 provider calls per minute and blocks before the provider', async () => {
+  let calls = 0;
+  const handler = createInterpretHandler(async () => {
+    calls += 1;
+    return { result: { status: 'rejected', code: 'UNSUPPORTED_COMMAND', message: 'Not supported.' } };
+  });
+
+  const statuses = [];
+  let lastBody = null;
+  for (let i = 0; i < 21; i += 1) {
+    const res = mockRes();
+    await handler({ body: { transcript: 'add a circle' }, user: { id: 'user-a' } }, res, () => {});
+    statuses.push(res.statusCode);
+    lastBody = res.jsonBody;
+  }
+  const otherUser = mockRes();
+  await handler({ body: { transcript: 'add a circle' }, user: { id: 'user-b' } }, otherUser, () => {});
+
+  assert.deepEqual(statuses.slice(0, 20), Array(20).fill(200));
+  assert.equal(statuses[20], 429);
+  assert.equal(lastBody.errors.code, 'VOICE_COMMAND_RATE_LIMITED');
+  assert.equal(otherUser.statusCode, 200);
+  assert.equal(calls, 21);
 });

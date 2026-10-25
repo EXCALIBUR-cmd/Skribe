@@ -479,7 +479,7 @@ export const VoiceDictationModal = ({
           <div className="text-[11px] text-on-surface-variant/75 flex items-center justify-between px-1">
             <span title={disclosure.details}>
               Processing: {disclosure.provider} ({disclosure.processingLocation})
-              {isCommandMode ? ' • Commands: Google Gemini via Skribe server' : ''}
+              {isCommandMode ? ' • Commands: Groq via Skribe server' : ''}
             </span>
             <span className="text-[10px] text-on-surface-variant/60">
               Esc to cancel
