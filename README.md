@@ -1,520 +1,191 @@
 <div align="center">
 
-<img src="docs/assets/skribe-hero.svg" alt="Skribe — collaborative infinite whiteboard" width="100%" />
+<img src="docs/assets/skribe-hero.svg" alt="Skribe, a real-time collaborative whiteboard. Sticky notes land on a dotted board, two collaborators move their cursors, and Mess Cleanup snaps the notes into a tidy, connected row." width="100%" />
 
-<br/>
+<br />
+<br />
 
-✦ Skribe
+![React 19](https://img.shields.io/badge/React-19-1e293b?style=flat-square&logo=react&logoColor=61dafb)
+![Vite 8](https://img.shields.io/badge/Vite-8-1e293b?style=flat-square&logo=vite&logoColor=ffd62e)
+![Fabric.js 7](https://img.shields.io/badge/Fabric.js-7-1e293b?style=flat-square)
+![Socket.IO 4](https://img.shields.io/badge/Socket.IO-4-1e293b?style=flat-square&logo=socketdotio&logoColor=white)
+![Express 4](https://img.shields.io/badge/Express-4-1e293b?style=flat-square&logo=express&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose_8-1e293b?style=flat-square&logo=mongodb&logoColor=47a248)
 
-Think visually. Build together.
-
-<p>
-A real-time collaborative infinite whiteboard for teams to
-<strong>think, sketch, connect, and build ideas together.</strong>
-</p>
-
-<br/>
-
-<a href="#-why-skribe">Why Skribe</a>
-  ·  
-<a href="#-live-collaboration">Collaboration</a>
-  ·  
-<a href="#-mess-cleanup">Mess Cleanup</a>
-  ·  
-<a href="#-architecture">Architecture</a>
-  ·  
-<a href="#-getting-started">Get Started</a>
-
-<br/><br/>
-
-
-
-
-
-
-
+<a href="#what-you-can-do">Features</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="#mess-cleanup">Mess Cleanup</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="#voice">Voice</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="#how-it-works">How it works</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="#run-it-locally">Run it locally</a>
 
 </div>
 
-🎬 See the idea
+<br />
 
-<div align="center">
-  <img src="docs/assets/mess-cleanup.gif" alt="Mess Cleanup animation" width="90%" />
-</div>
+Skribe is an infinite whiteboard for teams. Everyone on a board sees the same canvas, live: strokes as they are drawn, cursors, selections and a laser pointer. When the board gets messy, **Mess Cleanup** suggests a tidier layout that you preview before anything moves. And when talking is faster than typing, **voice dictation and voice commands** put words, notes and shapes on the board for you.
 
-A blank canvas is easy. Making it useful together is the hard part.
-
-✦ Why Skribe?
-
-Most collaboration tools force a choice:
-
-structured productivity or the freedom of a blank canvas.
-
-Skribe is built around the idea that you should get both.
-
-Start messy.
-Draw freely.
-Move things around.
-Connect ideas.
-Collaborate live.
-
-Then, when a local part of the canvas genuinely needs help, Skribe can reason about its structure instead of blindly rearranging the entire board.
-
-<div align="center">
-
-Chaos → Collaboration → Structure
-
-</div>
-
-🎨 The Canvas
+## What you can do
 
 <table>
 <tr>
-<td width="33%" align="center">
+<td width="50%" valign="top">
 
-∞
+### Draw and organise
 
-Infinite
-
-No fixed page.
-No artificial boundaries.
-
-</td>
-<td width="33%" align="center">
-
-✎
-
-Expressive
-
-Draw, sketch, annotate, connect, erase.
+- Pen, eraser, pan and zoom on an infinite canvas
+- Sticky notes in four colours, plus callout notes
+- Rectangles, rounded rectangles, circles, triangles, diamonds and hexagons, each with an editable label
+- Straight, elbow and curved connectors, with dashed, dotted and two-way styles
+- Text, undo and redo, and a properties panel for fill, border and typography
 
 </td>
-<td width="33%" align="center">
+<td width="50%" valign="top">
 
-◎
+### Work together, live
 
-Interactive
-
-Objects aren't pixels.
-They're editable canvas elements.
+- Boards you share with the collaborators you invite
+- Live object edits, drawing strokes and erasing
+- Named cursors, shared selections and a laser pointer for presenting
+- Presence as people join and leave
+- Autosave, including your viewport, so a board reopens where you left it
 
 </td>
 </tr>
 </table>
 
-Create
+## Mess Cleanup
 
-Freehand strokes · Shapes · Sticky notes · Text · Connectors
+<div align="center">
+  <img src="docs/assets/mess-cleanup.gif" alt="Mess Cleanup turning a cluttered board into tidy groups" width="90%" />
+</div>
 
-Navigate
+<br />
 
-Pan · Zoom · Undo / Redo · Infinite workspace
+Press **Clean up** and Skribe reads the board the way a teammate would. It sends the board's objects and a snapshot of the canvas to Google Gemini, which identifies flows, groups and annotations. Skribe then proposes the smallest local change that makes the board clearer. You see a preview first, and nothing moves until you apply it.
 
-Interact
+| It improves | It never |
+| --- | --- |
+| Alignment and spacing inside a group | Invents connections between objects |
+| Empty space between related items | Rearranges the whole board |
+| Readability of flows, branches and merges | Moves freehand sketches or dividers |
+| Labels that drifted away from their shapes | Touches objects outside the change |
 
-Eraser · Laser pointer · Property controls · Stroke controls
+<div align="center">
+  <img src="docs/assets/mess-cleanup-pipeline.svg" alt="Mess Cleanup pipeline: observe the board, reason about a better layout, propose a bounded change, protect everything else, then preview before applying" width="100%" />
+</div>
 
-👥 Live Collaboration
+## Voice
 
-Skribe is built as a collaborative application from the inside out.
+<div align="center">
+  <img src="docs/assets/voice-commands.svg" alt="The Voice Command panel types out an instruction, Run Command is pressed, and a pink sticky note reading Design lands on the board" width="100%" />
+</div>
 
+<br />
+
+Open the microphone in the toolbar and pick a mode.
+
+- **Dictation** turns speech into text you can edit, then inserts it on the board.
+- **Command** turns an instruction into an object. Try "Create a sticky note saying Ideas", "Create a pink note with dark blue text saying Design" or "Create a blue rectangle labelled Planning".
+
+Commands create text, sticky notes and the six basic shapes, with optional note, fill and text colours. Unstyled notes get a light default with dark text, and unreadable colour pairs are adjusted so labels stay legible. The server sends each instruction to Groq (`openai/gpt-oss-20b`), which returns a structured intent. Skribe checks that intent against an allow-list before anything is drawn. Requests to move, delete or restyle existing objects are declined, and ambiguous ones ask you to confirm first.
+
+Speech recognition uses your browser's Web Speech API.
+
+## How it works
+
+```mermaid
 flowchart LR
-    A[👤 User] --> B[React + Fabric.js]
-    B --> C{Socket.IO}
-    C --> D[Board Room]
-    D --> E[👥 Other Users]
-    D --> F[Presence]
-    D --> G[Object Sync]
-    D --> H[Drawing / Eraser / Laser]
-
-What stays live?
-
-Interaction
-
-Synchronized
-
-Canvas objects
-
-✅
-
-Freehand drawing
-
-✅
-
-Eraser actions
-
-✅
-
-Laser pointer
-
-✅
-
-Presence
-
-✅
-
-Join / leave
-
-✅
-
-Reconnection
-
-✅
-
-Duplicate-event protection
-
-✅
-
-Underneath that real-time layer:
-
-Authentication → Authorization → Board Rooms → Persistence
-
-🧠 Mess Cleanup
-
-<div align="center">
-
-Not an auto-layout button.
-
-</div>
-
-Mess Cleanup asks a more interesting question:
-
-What would a human reasonably consider messy here — and what is the smallest high-confidence change that would make it better?
-
-<div align="center">
-  <img src="docs/assets/mess-cleanup-pipeline.svg" alt="Mess Cleanup reasoning pipeline" width="100%" />
-</div>
-
-The flow
-
-Workspace Model
-       ↓
-Semantic Scene
-       ↓
-Visual Structure Discovery
-       ↓
-Current Composition
-       ↓
-Candidate Composition
-       ↓
-Benefit × Confidence − Cost − Risk
-       ↓
-Cleanup Plan
-       ↓
-Preview
-       ↓
-Human Approval
-       ↓
-Apply
-
-It can recognize
-
-Flow · Sequence · Cluster · Annotation · Concept Group
-
-It deliberately protects
-
-Creative strokes · Structural dividers · Unrelated objects · Ambiguous connectors
-
-🛡️ The rules are intentionally conservative
-
-<table>
-<tr>
-<td>
-
-✅ Improve
-
-Meaningful local composition
-
-Excessive spacing
-
-Alignment
-
-Flow readability
-
-Branch / merge structure
-
-Verified connector relationships
-
-</td>
-<td>
-
-🚫 Never invent
-
-Connector topology
-
-Semantic relationships
-
-Global layouts
-
-Intentional creative structure
-
-Ownership of unrelated objects
-
-</td>
-</tr>
-</table>
-
-<div align="center">
-
-Local beats global.
-Intent beats proximity.
-Preservation beats aggression.
-Preview beats surprise.
-Geometry beats assumptions.
-
-</div>
-
-🏗️ Architecture
-
-<div align="center">
-  <img src="docs/assets/skribe-architecture.svg" alt="Skribe system architecture" width="100%" />
-</div>
-
-Two communication paths
-
-                  SKRIBE
-                    │
-          ┌─────────┴─────────┐
-          │                   │
-       DURABLE              LIVE
-          │                   │
-        REST                Socket.IO
-          │                   │
-      Express             Board Rooms
-          │                   │
-       MongoDB          Presence + Sync
-
-This separation keeps persistent application state and low-latency collaboration concerns distinct.
-
-🔐 Built Like a Real Application
-
-Authentication
-
-JWT · HTTP-only cookies · Protected routes · Google OAuth
-
-Authorization
-
-Board ownership · Collaborator access · Board-level permissions · Authenticated sockets
-
-Persistence
-
-Debounced autosave · Canvas restoration · Save-on-unmount · Page unload persistence
-
-Collaboration
-
-Room membership · Object synchronization · Presence · Reconnect · Disconnect handling
-
-🧩 Tech Stack
-
-<div align="center">
-  <img src="docs/assets/stack.svg" alt="Skribe technology stack" width="100%" />
-</div>
-
-Layer
-
-Technologies
-
-Frontend
-
-React · Vite · Fabric.js · Tailwind CSS
-
-Motion
-
-GSAP · Anime.js
-
-Realtime
-
-Socket.IO
-
-Backend
-
-Node.js · Express.js
-
-Database
-
-MongoDB · Mongoose · MongoDB Atlas
-
-Auth
-
-JWT · Passport.js · Google OAuth
-
-Development
-
-JavaScript · REST · WebSockets · Git · GitHub
-
-🔬 Engineering Focus
-
-Skribe crosses several systems that each have different correctness requirements:
-
-Canvas interaction
-       │
-       ▼
-Fabric object model
-       │
-       ▼
-Geometry normalization
-       │
-       ▼
-Persistence
-       │
-       ▼
-Real-time synchronization
-       │
-       ▼
-Authentication / Authorization
-       │
-       ▼
-Visual composition
-
-For Mess Cleanup in particular, correctness is not:
-
-“Did an action execute?”
-
-It is:
-
-Candidate selected
-      ↓
-Actual geometry changed
-      ↓
-Visible improvement exists
-      ↓
-Change stays local
-      ↓
-Unrelated content stays untouched
-
-🧪 Validation
-
-Mess Cleanup is validated across multiple layers:
-
-             ┌────────────────────┐
-             │   Unit Tests       │
-             └─────────┬──────────┘
-                       ↓
-             ┌────────────────────┐
-             │ Geometry / Topology│
-             └─────────┬──────────┘
-                       ↓
-             ┌────────────────────┐
-             │ Composition Tests  │
-             └─────────┬──────────┘
-                       ↓
-             ┌────────────────────┐
-             │ Real-board Eval    │
-             └─────────┬──────────┘
-                       ↓
-             ┌────────────────────┐
-             │ Browser Validation │
-             └────────────────────┘
-
-The system explicitly verifies:
-
-actual candidate geometry
-
-topology safety
-
-preservation of unrelated objects
-
-creative/divider protection
-
-zero-change candidates
-
-browser-visible improvements
-
-📐 Project Structure
-
-Skribe/
-│
-├── client/
-│   ├── src/
-│   │   ├── features/
-│   │   │   └── messCleanup/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   └── utils/
-│   │
-│   ├── scripts/
-│   └── ...
-│
-├── server/
-│   ├── routes/
-│   ├── models/
-│   ├── middleware/
-│   ├── sockets/
-│   └── ...
-│
-├── docs/
-│   └── assets/
-│       ├── skribe-hero.svg
-│       ├── mess-cleanup.gif
-│       ├── mess-cleanup-pipeline.svg
-│       ├── skribe-architecture.svg
-│       └── stack.svg
-│
-├── package.json
-└── README.md
-
-⚡ Getting Started
-
-git clone <your-repository-url>
+  subgraph Browser
+    UI["React + Fabric.js canvas"]
+  end
+  subgraph Server["Node.js + Express"]
+    API["REST API: accounts, boards, collaborators"]
+    RT["Socket.IO board rooms: live edits, cursors, presence"]
+    AI["AI endpoints: Mess Cleanup, voice commands"]
+  end
+  UI -->|"HTTPS with JWT cookie"| API
+  UI <-->|"WebSocket"| RT
+  UI -->|"board snapshot or transcript"| AI
+  API --> DB[("MongoDB")]
+  AI -->|"layout analysis"| Gemini["Google Gemini"]
+  AI -->|"intent parsing"| Groq["Groq"]
+```
+
+Skribe keeps two kinds of traffic apart. Durable state, meaning accounts, boards and their canvas data, goes through the REST API into MongoDB. Live collaboration travels through one Socket.IO room per board, so cursors and strokes never wait on the database. AI requests run only on the server, so API keys never reach the browser.
+
+You sign in with email and password or with Google. Sessions are JSON Web Tokens in HTTP-only cookies, and every socket connection is authenticated before it can join a board.
+
+| Area | Built with |
+| --- | --- |
+| Client | React 19, Vite 8, Fabric.js 7, Tailwind CSS 4, Anime.js |
+| Real time | Socket.IO 4 |
+| Server | Node.js, Express 4, Helmet, Passport with Google OAuth 2.0, JSON Web Tokens |
+| Data | MongoDB with Mongoose 8 |
+| AI | Google Gemini through `@google/genai` for Mess Cleanup, Groq for voice commands |
+| Quality | Node's built-in test runner, oxlint |
+
+## Run it locally
+
+You need Node.js 20.19 or newer, npm, and a MongoDB database, either local or on Atlas.
+
+```bash
+git clone https://github.com/EXCALIBUR-cmd/Skribe.git
 cd Skribe
-
 npm install
+cp server/.env.example server/.env
+```
+
+Fill in `server/.env`, then start the API and the client in two terminals.
+
+```bash
+npm run dev:server
+```
+
+```bash
 npm run dev
+```
 
-Then open the local development URL printed by Vite.
+Open http://localhost:5173. The API listens on http://localhost:5000.
 
-Keep the exact environment-variable names and production commands synchronized with the current project configuration.
+| Variable | Used for | Required |
+| --- | --- | --- |
+| `MONGODB_URI` | Database connection | Yes |
+| `JWT_SECRET` | Signing session tokens | Yes |
+| `PORT`, `CLIENT_URL`, `NODE_ENV` | API port, allowed client origin, environment | No, defaults are `5000`, `http://localhost:5173` and `development` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | Sign in with Google | Only for Google sign-in |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Mess Cleanup analysis | Only for Mess Cleanup |
+| `GROQ_API_KEY`, `VOICE_COMMAND_MODEL` | Voice command interpretation, default model `openai/gpt-oss-20b` | Only for voice commands |
 
-🖼️ Recommended GitHub README layout
+Everything else works without the AI keys. Mess Cleanup and voice commands report that they are not configured instead of changing the board.
 
-Once you add real screenshots, put the strongest visual material near the top:
+## Tests
 
-                 ┌───────────────────────┐
-                 │     HERO / DEMO       │
-                 └───────────────────────┘
+```bash
+npm test --workspace=server
+npm run test:voice-commands --workspace=client
+```
 
-        ┌────────────────┐   ┌────────────────┐
-        │   COLLABORATE  │   │   MESS CLEANUP │
-        │    SCREENSHOT  │   │ BEFORE → AFTER │
-        └────────────────┘   └────────────────┘
+Each client feature has its own suite, listed in `client/package.json`. On Windows, `client/run_all_tests.ps1` runs all of them.
 
-Best assets to add:
+## Project structure
 
-docs/screenshots/collaboration.png
-docs/screenshots/mess-cleanup-before.png
-docs/screenshots/mess-cleanup-after.png
-docs/demo.gif
+```text
+Skribe/
+├── client/                React + Vite app
+│   └── src/
+│       ├── components/    canvas, toolbars and panels
+│       ├── features/
+│       │   ├── messCleanup/   board analysis, layout, preview and apply
+│       │   └── voice/         dictation and voice commands
+│       ├── pages/         welcome, boards and board canvas
+│       ├── services/      Socket.IO client
+│       └── api/           REST client
+├── server/                Express API and Socket.IO
+│   └── src/
+│       ├── routes/  controllers/  services/
+│       ├── sockets/       board rooms and live events
+│       ├── models/        users and boards
+│       └── tests/
+├── shared/                constants shared by client and server
+└── docs/assets/           README artwork
+```
 
-💭 The idea behind the project
+## Roadmap and contributing
 
-A whiteboard should be allowed to become messy.
-
-That's where ideas happen.
-
-The interesting problem isn't forcing every object into a perfect grid.
-
-It's building a canvas that can handle:
-
-<div align="center">
-
-chaos → collaboration → structure
-
-</div>
-
-without taking away the freedom that made the canvas useful in the first place.
-
-<div align="center">
-
-✦ Skribe
-
-A canvas for ideas. A workspace for teams.
-
-<br/>
-
-Think together.    Sketch together.    Build together.
-
-<br/><br/>
-
-<sub>Built with React · Fabric.js · Node.js · Socket.IO · MongoDB</sub>
-
-</div>
+[Roadmap.md](Roadmap.md) lists what is planned next, and [CONTRIBUTING.md](CONTRIBUTING.md) explains how to get involved.
