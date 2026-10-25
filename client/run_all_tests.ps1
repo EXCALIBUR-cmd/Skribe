@@ -18,7 +18,8 @@ try {
     "test:shape-text-relationship",
     "test:mess-cleanup-connector-repair",
     "test:connector-collision-integrity",
-    "test:voice-dictation"
+    "test:voice-dictation",
+    "test:voice-commands"
   )
 
   $allPassed = $true

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node --test src/tests/messCleanup.test.js"
+    "test": "node --test src/tests/messCleanup.test.js src/tests/voiceCommand.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.29.0",

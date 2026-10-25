@@ -24,6 +24,7 @@
     "test:mess-cleanup-connector-repair": "node --test src/features/messCleanup/connectorRepair.test.js",
     "test:connector-collision-integrity": "node --test src/features/messCleanup/connectorCollisionIntegrity.test.js",
     "test:voice-dictation": "node --test src/features/voice/voiceDictation.test.js",
+    "test:voice-commands": "node --test src/features/voice/voiceCommands.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

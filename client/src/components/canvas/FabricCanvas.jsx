@@ -1394,6 +1394,7 @@ export const FabricCanvas = forwardRef(({
     }
 
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
   const addChecklist = (pos = null) => {
@@ -1487,7 +1488,7 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
   };
 
-  const addRect = (pos = null) => {
+  const addRect = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1503,7 +1504,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Rectangle', {
+    const text = new fabric.Textbox(label || 'Rectangle', {
       width: 140,
       fontSize: 16,
       fontFamily: 'Quicksand',
@@ -1513,11 +1514,12 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
-  const addRoundedRect = (pos = null) => {
+  const addRoundedRect = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1533,7 +1535,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Rounded Rect', {
+    const text = new fabric.Textbox(label || 'Rounded Rect', {
       width: 140,
       fontSize: 16,
       fontFamily: 'Quicksand',
@@ -1543,11 +1545,12 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
-  const addCircle = (pos = null) => {
+  const addCircle = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1560,7 +1563,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Circle', {
+    const text = new fabric.Textbox(label || 'Circle', {
       width: 100,
       fontSize: 16,
       fontFamily: 'Quicksand',
@@ -1570,11 +1573,12 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
-  const addTriangle = (pos = null) => {
+  const addTriangle = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1588,7 +1592,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Triangle', {
+    const text = new fabric.Textbox(label || 'Triangle', {
       width: 90,
       fontSize: 15,
       fontFamily: 'Quicksand',
@@ -1598,11 +1602,12 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
-  const addDiamond = (pos = null) => {
+  const addDiamond = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1621,7 +1626,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Decision', {
+    const text = new fabric.Textbox(label || 'Decision', {
       width: 100,
       fontSize: 15,
       fontFamily: 'Quicksand',
@@ -1631,11 +1636,12 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
-  const addHexagon = (pos = null) => {
+  const addHexagon = (pos = null, label = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1656,7 +1662,7 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    const text = new fabric.Textbox('Process', {
+    const text = new fabric.Textbox(label || 'Process', {
       width: 110,
       fontSize: 15,
       fontFamily: 'Quicksand',
@@ -1666,8 +1672,9 @@ export const FabricCanvas = forwardRef(({
       contrastResolved: false
     });
 
-    createLinkedElement(shape, text, x, y);
+    const result = createLinkedElement(shape, text, x, y);
     if (onToolComplete) onToolComplete();
+    return result;
   };
 
   const addLine = (pos = null) => {
@@ -1815,7 +1822,7 @@ export const FabricCanvas = forwardRef(({
       fill: options.fill || activeColor || '#000000',
       contrastResolved: false,
       metadata: {
-        source: 'voice-dictation',
+        source: options.source === 'voice-command' ? 'voice-command' : 'voice-dictation',
         createdAt: Date.now()
       }
     });
@@ -1830,6 +1837,51 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
 
     return { success: true, objectId: text.id, textObject: text };
+  };
+
+  const executeVoiceCommand = (command) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) {
+      return { success: false, reason: 'Canvas not initialized' };
+    }
+    if (!command || typeof command !== 'object') {
+      return { success: false, reason: 'Invalid voice command' };
+    }
+
+    if (command.action === 'create_text') {
+      return insertDictatedText(command.text, { source: 'voice-command' });
+    }
+
+    if (command.action === 'create_sticky_note') {
+      if (typeof command.text !== 'string' || !command.text.trim()) {
+        return { success: false, reason: 'Sticky note text is required' };
+      }
+      const created = addSticky(null, command.text.trim());
+      return created?.shape
+        ? { success: true, objectId: created.shape.id }
+        : { success: false, reason: 'Sticky note could not be created' };
+    }
+
+    if (command.action === 'create_shape') {
+      const shapeCreators = {
+        rectangle: addRect,
+        rounded_rectangle: addRoundedRect,
+        circle: addCircle,
+        triangle: addTriangle,
+        diamond: addDiamond,
+        hexagon: addHexagon
+      };
+      if (!Object.prototype.hasOwnProperty.call(shapeCreators, command.shapeType)) {
+        return { success: false, reason: 'Unsupported shape type' };
+      }
+      const label = typeof command.label === 'string' && command.label.trim() ? command.label.trim() : null;
+      const created = shapeCreators[command.shapeType](null, label);
+      return created?.shape
+        ? { success: true, objectId: created.shape.id }
+        : { success: false, reason: 'Shape could not be created' };
+    }
+
+    return { success: false, reason: 'Unsupported voice command' };
   };
 
   const generateAIStickyCluster = (ideas = []) => {
@@ -2641,6 +2693,10 @@ export const FabricCanvas = forwardRef(({
 
     insertDictatedText: (textString, options = {}) => {
       return insertDictatedText(textString, options);
+    },
+
+    executeVoiceCommand: (command) => {
+      return executeVoiceCommand(command);
     },
 
     triggerAIAction: (actionId) => {

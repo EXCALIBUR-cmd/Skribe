@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { WebSpeechAdapter, isSpeechRecognitionSupported, getSpeechProcessingDisclosure } from './speechRecognitionAdapter.js';
+import { describeVoiceCommand } from './voiceCommands.js';
+
+const COMMAND_RESULT_STYLES = {
+  running: { icon: 'hourglass_top', className: 'bg-primary/5 border-primary/20 text-on-surface' },
+  executed: { icon: 'check_circle', className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200' },
+  clarify: { icon: 'help', className: 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200' },
+  rejected: { icon: 'block', className: 'bg-error-container/40 border-error/30 text-error' },
+  error: { icon: 'cloud_off', className: 'bg-error-container/40 border-error/30 text-error' },
+  cancelled: { icon: 'cancel', className: 'bg-surface-container-high border-outline-variant text-on-surface-variant' }
+};
 
 export const VoiceDictationModal = ({
   isOpen,
   onClose,
   onInsert,
+  onCommand = null,
+  onConfirmCommand = null,
   adapter = null,
   initialText = ''
 }) => {
@@ -14,7 +27,11 @@ export const VoiceDictationModal = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [isInserting, setIsInserting] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
+  const [mode, setMode] = useState('dictation');
+  const [commandResult, setCommandResult] = useState(null);
+  const [isRunningCommand, setIsRunningCommand] = useState(false);
 
+  const commandAbortRef = useRef(null);
   const adapterRef = useRef(null);
   const textareaRef = useRef(null);
   const disclosure = getSpeechProcessingDisclosure();
@@ -24,12 +41,15 @@ export const VoiceDictationModal = ({
     setDictationState(newState);
   }, []);
 
+  const hasUserEditedRef = useRef(false);
+  hasUserEditedRef.current = hasUserEdited;
+
   const handleTranscript = useCallback(({ finalTranscript, interimTranscript, text }) => {
     setInterimText(interimTranscript);
-    if (!hasUserEdited) {
+    if (!hasUserEditedRef.current) {
       setTranscript(text || finalTranscript);
     }
-  }, [hasUserEdited]);
+  }, []);
 
   const handleError = useCallback(({ code, message }) => {
     setErrorMessage(message || 'An error occurred during speech recognition');
@@ -46,11 +66,18 @@ export const VoiceDictationModal = ({
       if (adapterRef.current) {
         adapterRef.current.abort();
       }
+      if (commandAbortRef.current) {
+        commandAbortRef.current.abort();
+        commandAbortRef.current = null;
+      }
       setDictationState('IDLE');
       setInterimText('');
       setErrorMessage('');
       setIsInserting(false);
       setHasUserEdited(false);
+      setMode('dictation');
+      setCommandResult(null);
+      setIsRunningCommand(false);
       return;
     }
 
@@ -129,6 +156,10 @@ export const VoiceDictationModal = ({
     if (adapterRef.current) {
       adapterRef.current.abort();
     }
+    if (commandAbortRef.current) {
+      commandAbortRef.current.abort();
+      commandAbortRef.current = null;
+    }
     setInterimText('');
     setDictationState('IDLE');
     onClose();
@@ -163,6 +194,60 @@ export const VoiceDictationModal = ({
     setHasUserEdited(true);
   };
 
+  const handleModeChange = (nextMode) => {
+    if (nextMode === mode || isInserting || isRunningCommand) return;
+    setMode(nextMode);
+    setCommandResult(null);
+  };
+
+  const finishCommand = (result) => {
+    setIsRunningCommand(false);
+    setCommandResult(result || { status: 'error', message: 'The voice command failed. No changes were made.' });
+    if (result?.status === 'executed') {
+      setTranscript('');
+      setHasUserEdited(false);
+    }
+  };
+
+  const handleRunCommand = async () => {
+    const instruction = transcript.trim();
+    if (!instruction || isRunningCommand || typeof onCommand !== 'function') return;
+
+    if (adapterRef.current) {
+      adapterRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    commandAbortRef.current = controller;
+    setIsRunningCommand(true);
+    setCommandResult({ status: 'running', message: 'Interpreting your instruction…' });
+
+    let result;
+    try {
+      result = await onCommand(instruction, { signal: controller.signal });
+    } catch (err) {
+      result = { status: 'error', message: err?.message || 'The voice command failed. No changes were made.' };
+    }
+
+    if (commandAbortRef.current !== controller || controller.signal.aborted) return;
+    commandAbortRef.current = null;
+    finishCommand(result);
+  };
+
+  const handleConfirmProposal = async () => {
+    const proposal = commandResult?.proposal;
+    if (!proposal || isRunningCommand || typeof onConfirmCommand !== 'function') return;
+
+    setIsRunningCommand(true);
+    let result;
+    try {
+      result = await onConfirmCommand(proposal);
+    } catch (err) {
+      result = { status: 'error', message: err?.message || 'The voice command failed. No changes were made.' };
+    }
+    finishCommand(result);
+  };
+
   if (!isOpen) return null;
 
   const isListening = dictationState === 'LISTENING';
@@ -170,8 +255,12 @@ export const VoiceDictationModal = ({
   const isUnsupported = dictationState === 'UNSUPPORTED';
   const isError = dictationState === 'ERROR';
   const canInsert = Boolean(transcript.trim()) && !isInserting;
+  const commandsAvailable = typeof onCommand === 'function';
+  const isCommandMode = commandsAvailable && mode === 'command';
+  const canRunCommand = Boolean(transcript.trim()) && !isRunningCommand;
+  const commandStyle = commandResult ? (COMMAND_RESULT_STYLES[commandResult.status] || COMMAND_RESULT_STYLES.error) : null;
 
-  return (
+  return ReactDOM.createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 select-none pointer-events-auto"
       role="dialog"
@@ -192,7 +281,7 @@ export const VoiceDictationModal = ({
             </div>
             <div>
               <h2 id="voice-dictation-title" className="text-base font-bold font-headline leading-tight">
-                Voice Dictation
+                {isCommandMode ? 'Voice Command' : 'Voice Dictation'}
               </h2>
               <span className="text-[11px] font-medium text-on-surface-variant">
                 {isListening
@@ -203,6 +292,8 @@ export const VoiceDictationModal = ({
                   ? 'Speech recognition unavailable — manual entry mode'
                   : isError
                   ? 'Recognition paused'
+                  : isCommandMode
+                  ? 'Say what to create, then run the command'
                   : 'Speak or edit text, then insert to canvas'}
               </span>
             </div>
@@ -219,6 +310,39 @@ export const VoiceDictationModal = ({
         </div>
 
         <div className="p-6 flex flex-col gap-4">
+          {commandsAvailable && (
+            <div
+              role="radiogroup"
+              aria-label="Voice mode"
+              className="self-center inline-flex items-center gap-1 p-1 rounded-full bg-surface-container-high border border-outline-variant/60"
+            >
+              {[
+                { id: 'dictation', label: 'Dictation', icon: 'notes' },
+                { id: 'command', label: 'Command', icon: 'auto_awesome' }
+              ].map((option) => {
+                const isActive = (option.id === 'command') === isCommandMode;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={isActive}
+                    onClick={() => handleModeChange(option.id)}
+                    disabled={isInserting || isRunningCommand}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-primary text-on-primary shadow-xs'
+                        : 'text-on-surface-variant hover:bg-surface-container-highest'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">{option.icon}</span>
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex flex-col items-center justify-center py-2">
             {!isUnsupported ? (
               <div className="flex flex-col items-center gap-2">
@@ -273,7 +397,7 @@ export const VoiceDictationModal = ({
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between text-xs text-on-surface-variant">
               <label htmlFor="voice-transcript-editor" className="font-semibold">
-                Transcript & Text Review
+                {isCommandMode ? 'Instruction' : 'Transcript & Text Review'}
               </label>
               <div className="flex items-center gap-3">
                 {transcript && (
@@ -298,7 +422,11 @@ export const VoiceDictationModal = ({
                 ref={textareaRef}
                 value={transcript}
                 onChange={handleTextChange}
-                placeholder={isListening ? 'Listening for speech...' : 'Recognized speech will appear here. You can also type or edit text directly...'}
+                placeholder={isListening
+                  ? 'Listening for speech...'
+                  : isCommandMode
+                  ? 'Try “add a sticky note that says buy milk” or “add a circle labeled start”'
+                  : 'Recognized speech will appear here. You can also type or edit text directly...'}
                 rows={5}
                 className="w-full rounded-xl border border-outline-variant bg-surface-container-lowest px-3.5 py-2.5 text-sm font-sans text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all resize-none"
               />
@@ -309,11 +437,49 @@ export const VoiceDictationModal = ({
                 </div>
               )}
             </div>
+
+            {isCommandMode && (
+              <p className="text-[11px] text-on-surface-variant leading-relaxed px-1">
+                Supported: text, sticky notes, and rectangles, rounded rectangles, circles, triangles, diamonds or hexagons with an optional label. New objects appear in your current view.
+              </p>
+            )}
           </div>
+
+          {isCommandMode && commandResult && commandStyle && (
+            <div
+              data-testid="voice-command-result"
+              data-status={commandResult.status}
+              role={commandResult.status === 'running' ? 'status' : 'alert'}
+              className={`flex items-start gap-2.5 p-3 rounded-xl border text-xs ${commandStyle.className}`}
+            >
+              <span className={`material-symbols-outlined text-base shrink-0 mt-0.5 ${commandResult.status === 'running' ? 'animate-pulse' : ''}`}>
+                {commandStyle.icon}
+              </span>
+              <div className="flex-1 flex flex-col gap-1.5 leading-relaxed">
+                <span className="font-semibold">
+                  {commandResult.status === 'executed' ? commandResult.summary : commandResult.message}
+                </span>
+                {commandResult.status === 'clarify' && commandResult.proposal && (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Suggested: {describeVoiceCommand(commandResult.proposal)}</span>
+                    <button
+                      type="button"
+                      onClick={handleConfirmProposal}
+                      disabled={isRunningCommand}
+                      className="shrink-0 px-3 py-1 rounded-full bg-primary text-on-primary font-bold hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Create it
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="text-[11px] text-on-surface-variant/75 flex items-center justify-between px-1">
             <span title={disclosure.details}>
               Processing: {disclosure.provider} ({disclosure.processingLocation})
+              {isCommandMode ? ' • Commands: Google Gemini via Skribe server' : ''}
             </span>
             <span className="text-[10px] text-on-surface-variant/60">
               Esc to cancel
@@ -330,24 +496,43 @@ export const VoiceDictationModal = ({
             Cancel
           </button>
 
-          <button
-            type="button"
-            onClick={handleInsert}
-            disabled={!canInsert}
-            className={`flex items-center gap-1.5 px-5 py-2 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
-              canInsert
-                ? 'bg-primary text-on-primary hover:bg-primary/90 hover:scale-102 active:scale-98'
-                : 'bg-outline-variant/40 text-on-surface-variant/40 cursor-not-allowed shadow-none'
-            }`}
-          >
-            <span className="material-symbols-outlined text-base">
-              {isInserting ? 'hourglass_bottom' : 'add'}
-            </span>
-            <span>{isInserting ? 'Inserting...' : 'Insert into Canvas'}</span>
-          </button>
+          {isCommandMode ? (
+            <button
+              type="button"
+              onClick={handleRunCommand}
+              disabled={!canRunCommand}
+              className={`flex items-center gap-1.5 px-5 py-2 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                canRunCommand
+                  ? 'bg-primary text-on-primary hover:bg-primary/90 hover:scale-102 active:scale-98'
+                  : 'bg-outline-variant/40 text-on-surface-variant/40 cursor-not-allowed shadow-none'
+              }`}
+            >
+              <span className="material-symbols-outlined text-base">
+                {isRunningCommand ? 'hourglass_bottom' : 'auto_awesome'}
+              </span>
+              <span>{isRunningCommand ? 'Interpreting...' : 'Run Command'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInsert}
+              disabled={!canInsert}
+              className={`flex items-center gap-1.5 px-5 py-2 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                canInsert
+                  ? 'bg-primary text-on-primary hover:bg-primary/90 hover:scale-102 active:scale-98'
+                  : 'bg-outline-variant/40 text-on-surface-variant/40 cursor-not-allowed shadow-none'
+              }`}
+            >
+              <span className="material-symbols-outlined text-base">
+                {isInserting ? 'hourglass_bottom' : 'add'}
+              </span>
+              <span>{isInserting ? 'Inserting...' : 'Insert into Canvas'}</span>
+            </button>
+          )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

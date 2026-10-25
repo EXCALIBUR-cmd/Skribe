@@ -23,6 +23,7 @@ import { buildPreviewRenderModel } from '../features/messCleanup/previewModel.js
 import { auditCleanupPipeline, computeGeometryDiagnostics } from '../features/messCleanup/auditCleanupPipeline.js';
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
 import VoiceDictationModal from '../features/voice/VoiceDictationModal.jsx';
+import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterpretation } from '../features/voice/voiceCommands.js';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 
 const isValidViewport = (viewport) => (
@@ -701,7 +702,7 @@ export const MainCanvasPage = () => {
       id: 'voice-dictation',
       label: 'Voice Dictation',
       icon: 'mic',
-      tooltip: 'Dictate notes and insert text onto the canvas'
+      tooltip: 'Dictate notes or create text, sticky notes and shapes with voice commands'
     }
   ];
 
@@ -712,6 +713,35 @@ export const MainCanvasPage = () => {
     }
     return result;
   }, [addToast]);
+
+  const executeVoiceCommandOnCanvas = useCallback((command) => {
+    const canvasApi = fabricCanvasRef.current;
+    if (!canvasApi || typeof canvasApi.executeVoiceCommand !== 'function') {
+      return { success: false, reason: 'Canvas is not ready' };
+    }
+    return canvasApi.executeVoiceCommand(command);
+  }, []);
+
+  const reportVoiceCommandResult = useCallback((result) => {
+    if (result?.status === 'executed') {
+      addToast('Voice Command', result.summary, 'check_circle', 'success');
+    }
+    return result;
+  }, [addToast]);
+
+  const handleVoiceCommand = useCallback(async (transcript, { signal } = {}) => {
+    const result = await runVoiceCommand(transcript, {
+      interpret: (instruction, options) => requestVoiceCommandInterpretation(instruction, { signal: options?.signal }),
+      execute: executeVoiceCommandOnCanvas,
+      signal
+    });
+    return reportVoiceCommandResult(result);
+  }, [executeVoiceCommandOnCanvas, reportVoiceCommandResult]);
+
+  const handleConfirmVoiceCommand = useCallback(async (proposal) => {
+    const result = await confirmVoiceCommandProposal(proposal, executeVoiceCommandOnCanvas);
+    return reportVoiceCommandResult(result);
+  }, [executeVoiceCommandOnCanvas, reportVoiceCommandResult]);
 
   const handleSkribeFeatureClick = async (feature) => {
     if (feature.id === 'voice-dictation') {
@@ -935,6 +965,8 @@ export const MainCanvasPage = () => {
         isOpen={isVoiceDictationOpen}
         onClose={() => setIsVoiceDictationOpen(false)}
         onInsert={handleInsertDictatedText}
+        onCommand={handleVoiceCommand}
+        onConfirmCommand={handleConfirmVoiceCommand}
       />
 
       <div
