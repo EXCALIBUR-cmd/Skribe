@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  VOICE_COMMAND_COLORS,
   VOICE_COMMAND_RESPONSE_SCHEMA,
+  VOICE_COMMAND_SYSTEM_PROMPT,
   classifyVoiceProviderStatus,
   interpretVoiceCommand,
   validateVoiceCommandIntent
@@ -100,6 +102,30 @@ test('missing text, invalid shapes, coordinates and object identifiers are rejec
   assert.equal(validateVoiceCommandIntent(intent({ action: 'create_text', text: 'hi', targetId: 'text_1' })).code, 'UNEXPECTED_OBJECT_ID');
 });
 
+test('the prompt lists every allowed color and no longer forbids colors', () => {
+  for (const name of VOICE_COMMAND_COLORS) assert.ok(VOICE_COMMAND_SYSTEM_PROMPT.includes(name), name);
+  assert.equal(VOICE_COMMAND_SYSTEM_PROMPT.split('\n').some((line) => line.includes('Never output') && line.includes('colors')), false);
+});
+
+test('optional colors are kept when allowlisted and rejected otherwise', () => {
+  assert.deepEqual(
+    validateVoiceCommandIntent(intent({ action: 'create_sticky_note', text: 'Design', color: 'pink', textColor: 'dark blue' })),
+    { status: 'execute', command: { action: 'create_sticky_note', text: 'Design', color: 'pink', textColor: 'dark blue' } }
+  );
+  assert.deepEqual(
+    validateVoiceCommandIntent(intent({ action: 'create_shape', shapeType: 'rectangle', label: 'Planning', color: 'blue', textColor: 'white' })),
+    { status: 'execute', command: { action: 'create_shape', shapeType: 'rectangle', label: 'Planning', color: 'blue', textColor: 'white' } }
+  );
+  assert.deepEqual(
+    validateVoiceCommandIntent(intent({ action: 'create_text', text: 'Hi', color: 'red' })),
+    { status: 'execute', command: { action: 'create_text', text: 'Hi', textColor: 'red' } }
+  );
+  for (const bad of ['#000000', 'rgb(0,0,0)', 'url(javascript:alert(1))', 'navy', 7]) {
+    assert.equal(validateVoiceCommandIntent(intent({ action: 'create_sticky_note', text: 'x', color: bad })).code, 'INVALID_COLOR');
+    assert.equal(validateVoiceCommandIntent(intent({ action: 'create_shape', shapeType: 'circle', textColor: bad })).code, 'INVALID_COLOR');
+  }
+});
+
 test('ambiguous requests return a clarification and only a valid proposal', () => {
   const withProposal = validateVoiceCommandIntent(intent({
     outcome: 'clarify',
@@ -148,7 +174,8 @@ test('valid text, sticky-note and labeled-shape intents each come from exactly o
   const cases = [
     ['write quarterly goals', { action: 'create_text', text: 'quarterly goals' }],
     ['add a sticky note that says buy milk', { action: 'create_sticky_note', text: 'buy milk' }],
-    ['add a circle labeled start', { action: 'create_shape', shapeType: 'circle', label: 'start' }]
+    ['add a circle labeled start', { action: 'create_shape', shapeType: 'circle', label: 'start' }],
+    ['create a pink note with dark blue text saying design', { action: 'create_sticky_note', text: 'design', color: 'pink', textColor: 'dark blue' }]
   ];
   for (const [instruction, command] of cases) {
     const fetchImpl = mockFetch(() => groqReply(JSON.stringify(intent(command))));

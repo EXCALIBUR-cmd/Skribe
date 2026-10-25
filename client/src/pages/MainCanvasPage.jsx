@@ -23,7 +23,7 @@ import { buildPreviewRenderModel } from '../features/messCleanup/previewModel.js
 import { auditCleanupPipeline, computeGeometryDiagnostics } from '../features/messCleanup/auditCleanupPipeline.js';
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
 import VoiceDictationModal from '../features/voice/VoiceDictationModal.jsx';
-import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterpretation } from '../features/voice/voiceCommands.js';
+import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterpretation, resolveVoiceCommandStyle } from '../features/voice/voiceCommands.js';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 
 const isValidViewport = (viewport) => (
@@ -719,8 +719,10 @@ export const MainCanvasPage = () => {
     if (!canvasApi || typeof canvasApi.executeVoiceCommand !== 'function') {
       return { success: false, reason: 'Canvas is not ready' };
     }
-    return canvasApi.executeVoiceCommand(command);
-  }, []);
+    const style = resolveVoiceCommandStyle(command, { activeColor });
+    const result = canvasApi.executeVoiceCommand(command, style);
+    return style.textAdjusted && result?.success ? { ...result, textAdjusted: true } : result;
+  }, [activeColor]);
 
   const reportVoiceCommandResult = useCallback((result) => {
     if (result?.status === 'executed') {

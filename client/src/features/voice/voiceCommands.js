@@ -1,6 +1,45 @@
 import { apiClient } from '../../api/apiClient.js';
+import { TOOL_REGISTRY } from '../../components/config/ToolRegistry.js';
+import { SHAPE_DEFAULT_STYLES } from '../../components/canvas/shapeDefaults.js';
+import { getContrastRatio } from '../../utils/contrastUtils.js';
 
 export const VOICE_COMMAND_ACTIONS = Object.freeze(['create_text', 'create_sticky_note', 'create_shape']);
+
+export const VOICE_COMMAND_COLORS = Object.freeze(['yellow', 'orange', 'pink', 'red', 'purple', 'blue', 'green', 'teal', 'gray', 'black', 'white', 'dark blue']);
+
+const stickyColorDot = (id) => TOOL_REGISTRY.sticky.items.find((item) => item.id === id).colorDot;
+
+const NOTE_COLORS = Object.freeze({
+  yellow: stickyColorDot('sticky_yellow'),
+  pink: stickyColorDot('sticky_pink'),
+  blue: stickyColorDot('sticky_blue'),
+  green: stickyColorDot('sticky_green'),
+  orange: '#ffedd5',
+  red: '#ffe4e6',
+  purple: '#f3e8ff',
+  teal: '#ccfbf1',
+  gray: '#f1f5f9',
+  white: '#ffffff',
+  black: '#1e293b',
+  'dark blue': '#1e3a8a'
+});
+
+const INK_COLORS = Object.freeze({
+  yellow: '#facc15',
+  orange: '#f97316',
+  pink: '#ec4899',
+  red: '#ef4444',
+  purple: '#8b5cf6',
+  blue: '#3b82f6',
+  green: '#22c55e',
+  teal: '#14b8a6',
+  gray: '#64748b',
+  black: '#111827',
+  white: '#ffffff',
+  'dark blue': '#1e3a8a'
+});
+
+const STICKY_TEXT_DEFAULT = '#1e293b';
 
 export const VOICE_COMMAND_SHAPES = Object.freeze(['rectangle', 'rounded_rectangle', 'circle', 'triangle', 'diamond', 'hexagon']);
 
@@ -20,9 +59,9 @@ const SHAPE_NAMES = Object.freeze({
 });
 
 const COMMAND_KEYS = Object.freeze({
-  create_text: ['action', 'text'],
-  create_sticky_note: ['action', 'text'],
-  create_shape: ['action', 'shapeType', 'label']
+  create_text: ['action', 'text', 'textColor'],
+  create_sticky_note: ['action', 'text', 'color', 'textColor'],
+  create_shape: ['action', 'shapeType', 'label', 'color', 'textColor']
 });
 
 const invalid = (code, message) => ({ valid: false, code, message });
@@ -41,6 +80,12 @@ export const validateVoiceCommand = (command) => {
     return invalid('UNEXPECTED_FIELD', 'The command contained fields that voice commands cannot use.');
   }
 
+  const badColor = ['color', 'textColor'].find((key) => command[key] !== undefined && command[key] !== null && !VOICE_COMMAND_COLORS.includes(command[key]));
+  if (badColor) {
+    return invalid('INVALID_COLOR', 'That color is not supported by voice commands.');
+  }
+  const style = { ...(command.color ? { color: command.color } : {}), ...(command.textColor ? { textColor: command.textColor } : {}) };
+
   if (command.action === 'create_text' || command.action === 'create_sticky_note') {
     const text = typeof command.text === 'string' ? command.text.trim() : '';
     if (!text) {
@@ -49,7 +94,7 @@ export const validateVoiceCommand = (command) => {
     if (text.length > VOICE_COMMAND_LIMITS.text) {
       return invalid('TEXT_TOO_LONG', `Text is limited to ${VOICE_COMMAND_LIMITS.text} characters.`);
     }
-    return { valid: true, command: { action: command.action, text } };
+    return { valid: true, command: { action: command.action, text, ...style } };
   }
 
   if (!VOICE_COMMAND_SHAPES.includes(command.shapeType)) {
@@ -67,18 +112,47 @@ export const validateVoiceCommand = (command) => {
 
   return {
     valid: true,
-    command: label
-      ? { action: 'create_shape', shapeType: command.shapeType, label }
-      : { action: 'create_shape', shapeType: command.shapeType }
+    command: { action: 'create_shape', shapeType: command.shapeType, ...(label ? { label } : {}), ...style }
   };
 };
 
 export const describeVoiceCommand = (command) => {
   if (!command) return '';
-  if (command.action === 'create_text') return `text “${command.text}”`;
-  if (command.action === 'create_sticky_note') return `sticky note “${command.text}”`;
+  const colorPrefix = command.color ? `${command.color} ` : '';
+  const textSuffix = command.textColor ? ` in ${command.textColor} text` : '';
+  if (command.action === 'create_text') return `text “${command.text}”${textSuffix}`;
+  if (command.action === 'create_sticky_note') return `${colorPrefix}sticky note “${command.text}”${textSuffix}`;
   const shapeName = SHAPE_NAMES[command.shapeType] || 'shape';
-  return command.label ? `${shapeName} labeled “${command.label}”` : shapeName;
+  return command.label ? `${colorPrefix}${shapeName} labeled “${command.label}”${textSuffix}` : `${colorPrefix}${shapeName}`;
+};
+
+const mostReadableText = (background) => (
+  getContrastRatio(background, INK_COLORS.black) >= getContrastRatio(background, INK_COLORS.white) ? INK_COLORS.black : INK_COLORS.white
+);
+
+const readableText = (background, requested, preferred) => {
+  if (requested) {
+    return getContrastRatio(background, requested) >= 3 ? requested : mostReadableText(background);
+  }
+  return getContrastRatio(background, preferred) >= 4.5 ? preferred : mostReadableText(background);
+};
+
+const withTextAdjustment = (fill, requestedText, textColor) => (
+  requestedText && textColor !== requestedText ? { fill, textColor, textAdjusted: true } : { fill, textColor }
+);
+
+export const resolveVoiceCommandStyle = (command, { activeColor } = {}) => {
+  const requestedText = INK_COLORS[command?.textColor] || null;
+  if (command?.action === 'create_sticky_note') {
+    const fill = NOTE_COLORS[command.color] || NOTE_COLORS.yellow;
+    return withTextAdjustment(fill, requestedText, readableText(fill, requestedText, STICKY_TEXT_DEFAULT));
+  }
+  if (command?.action === 'create_shape') {
+    const defaults = SHAPE_DEFAULT_STYLES[command.shapeType] || SHAPE_DEFAULT_STYLES.rectangle;
+    const fill = INK_COLORS[command.color] || defaults.fill || activeColor || '#000000';
+    return withTextAdjustment(fill, requestedText, readableText(fill, requestedText, defaults.textColor));
+  }
+  return { fill: null, textColor: requestedText };
 };
 
 const toRequestError = (raw) => {
@@ -127,7 +201,7 @@ const executeOnce = async (command, execute) => {
   return {
     status: 'executed',
     command,
-    summary: `Created ${describeVoiceCommand(command)}`,
+    summary: `Created ${describeVoiceCommand(command)}${outcome.textAdjusted ? ' (text color adjusted for readability)' : ''}`,
     objectId: outcome.objectId || null
   };
 };

@@ -4,9 +4,15 @@ import {
   confirmVoiceCommandProposal,
   describeVoiceCommand,
   requestVoiceCommandInterpretation,
+  resolveVoiceCommandStyle,
   runVoiceCommand,
   validateVoiceCommand
 } from './voiceCommands.js';
+import { getContrastRatio } from '../../utils/contrastUtils.js';
+import { TOOL_REGISTRY } from '../../components/config/ToolRegistry.js';
+import { SHAPE_DEFAULT_STYLES } from '../../components/canvas/shapeDefaults.js';
+
+const registryNote = (id) => TOOL_REGISTRY.sticky.items.find((item) => item.id === id).colorDot;
 
 const createCanvasSpy = (outcome = { success: true, objectId: 'shape_elem_1' }) => {
   const calls = [];
@@ -210,4 +216,96 @@ test('validation and descriptions cover every supported shape', () => {
   }
   assert.equal(describeVoiceCommand({ action: 'create_sticky_note', text: 'Buy milk' }), 'sticky note “Buy milk”');
   assert.equal(describeVoiceCommand({ action: 'create_text', text: 'Hi' }), 'text “Hi”');
+});
+
+test('an unstyled voice sticky note gets the light yellow default and dark text even when the pen is black', () => {
+  const style = resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Ideas' }, { activeColor: '#000000' });
+  assert.equal(style.fill, registryNote('sticky_yellow'));
+  assert.equal(style.textColor, '#1e293b');
+  assert.notEqual(style.fill, '#000000');
+  assert.ok(getContrastRatio(style.fill, style.textColor) >= 4.5);
+});
+
+test('requested note background and text colors are applied independently', () => {
+  assert.deepEqual(
+    resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Design', color: 'pink', textColor: 'dark blue' }),
+    { fill: registryNote('sticky_pink'), textColor: '#1e3a8a' }
+  );
+  assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Design', color: 'blue' }), { fill: registryNote('sticky_blue'), textColor: '#1e293b' });
+  assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Design', textColor: 'dark blue' }), { fill: registryNote('sticky_yellow'), textColor: '#1e3a8a' });
+  assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_text', text: 'Hi', textColor: 'red' }), { fill: null, textColor: '#ef4444' });
+  assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_text', text: 'Hi' }), { fill: null, textColor: null });
+});
+
+test('shape fill and label color are resolved separately and stay readable', () => {
+  assert.deepEqual(
+    resolveVoiceCommandStyle({ action: 'create_shape', shapeType: 'rectangle', label: 'Planning', color: 'blue', textColor: 'white' }),
+    { fill: '#3b82f6', textColor: '#ffffff' }
+  );
+  const blueDefaultLabel = resolveVoiceCommandStyle({ action: 'create_shape', shapeType: 'rectangle', label: 'Planning', color: 'blue' });
+  assert.equal(blueDefaultLabel.fill, '#3b82f6');
+  assert.ok(getContrastRatio(blueDefaultLabel.fill, blueDefaultLabel.textColor) >= 4.5);
+
+  const unreadable = resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'x', color: 'yellow', textColor: 'yellow' });
+  assert.ok(getContrastRatio(unreadable.fill, unreadable.textColor) >= 4.5);
+
+  for (const shapeType of ['circle', 'triangle', 'diamond', 'hexagon']) {
+    assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_shape', shapeType }), { fill: SHAPE_DEFAULT_STYLES[shapeType].fill, textColor: SHAPE_DEFAULT_STYLES[shapeType].textColor });
+  }
+  assert.deepEqual(resolveVoiceCommandStyle({ action: 'create_shape', shapeType: 'rectangle' }, { activeColor: '#000000' }), { fill: '#000000', textColor: '#ffffff' });
+});
+
+test('several notes can use distinct coordinated palette colors', () => {
+  const fills = ['yellow', 'pink', 'blue', 'green', 'purple'].map((color) => resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'x', color }));
+  assert.equal(new Set(fills.map((style) => style.fill)).size, 5);
+  for (const style of fills) assert.ok(getContrastRatio(style.fill, style.textColor) >= 4.5);
+});
+
+test('invalid colors are rejected before any canvas action', async () => {
+  for (const command of [
+    { action: 'create_sticky_note', text: 'x', color: '#000000' },
+    { action: 'create_sticky_note', text: 'x', color: 'navy' },
+    { action: 'create_shape', shapeType: 'circle', textColor: 'url(javascript:alert(1))' },
+    { action: 'create_text', text: 'x', color: 'red' }
+  ]) {
+    const canvas = createCanvasSpy();
+    const result = await runVoiceCommand('do it', { interpret: interpreterReturning({ status: 'execute', command }), execute: canvas.execute });
+    assert.equal(result.status, 'rejected', JSON.stringify(command));
+    assert.equal(canvas.calls.length, 0);
+  }
+});
+
+test('a styled accepted command runs exactly one canvas action carrying its colors', async () => {
+  const canvas = createCanvasSpy();
+  const command = { action: 'create_sticky_note', text: 'Design', color: 'pink', textColor: 'dark blue' };
+  const result = await runVoiceCommand('create a pink note with dark blue text saying design', { interpret: interpreterReturning({ status: 'execute', command }), execute: canvas.execute });
+  assert.equal(result.status, 'executed');
+  assert.deepEqual(canvas.calls, [command]);
+  assert.equal(result.summary, 'Created pink sticky note “Design” in dark blue text');
+  assert.equal(describeVoiceCommand({ action: 'create_shape', shapeType: 'rectangle', label: 'Planning', color: 'blue' }), 'blue rectangle labeled “Planning”');
+});
+
+test('the shared shape defaults keep the established toolbar values', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(SHAPE_DEFAULT_STYLES)), {
+    rectangle: { fill: null, textColor: '#ffffff' },
+    rounded_rectangle: { fill: null, textColor: '#ffffff' },
+    circle: { fill: '#79f3ea', textColor: '#006f69' },
+    triangle: { fill: '#ffd600', textColor: '#3b2f2f' },
+    diamond: { fill: '#e0f2fe', textColor: '#0369a1' },
+    hexagon: { fill: '#f3e8ff', textColor: '#6b21a8' }
+  });
+});
+
+test('an overridden unreadable text color is flagged and reported truthfully', async () => {
+  const style = resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Hi', color: 'yellow', textColor: 'white' });
+  assert.equal(style.textAdjusted, true);
+  assert.notEqual(style.textColor, '#ffffff');
+  assert.equal(resolveVoiceCommandStyle({ action: 'create_sticky_note', text: 'Hi', color: 'pink', textColor: 'dark blue' }).textAdjusted, undefined);
+
+  const canvas = createCanvasSpy({ success: true, objectId: 'shape_elem_9', textAdjusted: true });
+  const result = await runVoiceCommand('yellow note with white text saying hi', {
+    interpret: interpreterReturning({ status: 'execute', command: { action: 'create_sticky_note', text: 'Hi', color: 'yellow', textColor: 'white' } }),
+    execute: canvas.execute
+  });
+  assert.equal(result.summary, 'Created yellow sticky note “Hi” in white text (text color adjusted for readability)');
 });

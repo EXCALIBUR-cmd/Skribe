@@ -3,6 +3,12 @@ import ReactDOM from 'react-dom';
 import { WebSpeechAdapter, isSpeechRecognitionSupported, getSpeechProcessingDisclosure } from './speechRecognitionAdapter.js';
 import { describeVoiceCommand } from './voiceCommands.js';
 
+const COMMAND_EXAMPLES = [
+  'Create a sticky note saying Ideas',
+  'Create a pink note with dark blue text saying Design',
+  'Create a blue rectangle labelled Planning'
+];
+
 const COMMAND_RESULT_STYLES = {
   running: { icon: 'hourglass_top', className: 'bg-primary/5 border-primary/20 text-on-surface' },
   executed: { icon: 'check_circle', className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200' },
@@ -192,6 +198,13 @@ export const VoiceDictationModal = ({
     setTranscript('');
     setInterimText('');
     setHasUserEdited(true);
+  };
+
+  const handleUseExample = (example) => {
+    setTranscript(example);
+    setHasUserEdited(true);
+    setCommandResult(null);
+    textareaRef.current?.focus();
   };
 
   const handleModeChange = (nextMode) => {
@@ -439,9 +452,22 @@ export const VoiceDictationModal = ({
             </div>
 
             {isCommandMode && (
-              <p className="text-[11px] text-on-surface-variant leading-relaxed px-1">
-                Supported: text, sticky notes, and rectangles, rounded rectangles, circles, triangles, diamonds or hexagons with an optional label. New objects appear in your current view.
-              </p>
+              <div className="flex flex-col gap-1.5 px-1">
+                <span className="text-[11px] font-semibold text-on-surface-variant">Try saying…</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {COMMAND_EXAMPLES.map((example) => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => handleUseExample(example)}
+                      disabled={isRunningCommand}
+                      className="px-2.5 py-1 rounded-full border border-outline-variant/70 bg-surface-container-low text-[11px] text-on-surface-variant hover:border-primary hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 

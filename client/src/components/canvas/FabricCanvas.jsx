@@ -28,6 +28,7 @@ import {
   SKRIBE_SERIALIZABLE_PROPERTIES
 } from '../../utils/fabricHydration.js';
 import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
+import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -1320,7 +1321,7 @@ export const FabricCanvas = forwardRef(({
     return text;
   };
 
-  const addSticky = (pos = null, initialText = '', customColor = null) => {
+  const addSticky = (pos = null, initialText = '', customColor = null, textColor = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
@@ -1354,7 +1355,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 16,
       fontFamily: 'Nunito Sans',
       fontWeight: 'bold',
-      fill: '#1e293b',
+      fill: textColor || '#1e293b',
       textAlign: 'left',
       contrastResolved: false
     });
@@ -1488,7 +1489,7 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
   };
 
-  const addRect = (pos = null, label = null) => {
+  const addRect = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1496,7 +1497,7 @@ export const FabricCanvas = forwardRef(({
     const shape = new fabric.Rect({
       width: 160,
       height: 110,
-      fill: activeColor,
+      fill: style.fill || activeColor,
       rx: 8,
       ry: 8,
       stroke: '#000000',
@@ -1509,7 +1510,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 16,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#ffffff',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.rectangle.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1519,7 +1520,7 @@ export const FabricCanvas = forwardRef(({
     return result;
   };
 
-  const addRoundedRect = (pos = null, label = null) => {
+  const addRoundedRect = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1527,7 +1528,7 @@ export const FabricCanvas = forwardRef(({
     const shape = new fabric.Rect({
       width: 160,
       height: 110,
-      fill: activeColor,
+      fill: style.fill || activeColor,
       rx: 24,
       ry: 24,
       stroke: '#000000',
@@ -1540,7 +1541,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 16,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#ffffff',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.rounded_rectangle.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1550,14 +1551,14 @@ export const FabricCanvas = forwardRef(({
     return result;
   };
 
-  const addCircle = (pos = null, label = null) => {
+  const addCircle = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
 
     const shape = new fabric.Circle({
       radius: 60,
-      fill: '#79f3ea',
+      fill: style.fill || SHAPE_DEFAULT_STYLES.circle.fill,
       stroke: '#000000',
       strokeWidth: 2,
       contrastResolved: false
@@ -1568,7 +1569,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 16,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#006f69',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.circle.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1578,7 +1579,7 @@ export const FabricCanvas = forwardRef(({
     return result;
   };
 
-  const addTriangle = (pos = null, label = null) => {
+  const addTriangle = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1586,7 +1587,7 @@ export const FabricCanvas = forwardRef(({
     const shape = new fabric.Triangle({
       width: 140,
       height: 120,
-      fill: '#ffd600',
+      fill: style.fill || SHAPE_DEFAULT_STYLES.triangle.fill,
       stroke: '#000000',
       strokeWidth: 2,
       contrastResolved: false
@@ -1597,7 +1598,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 15,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#3b2f2f',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.triangle.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1607,7 +1608,7 @@ export const FabricCanvas = forwardRef(({
     return result;
   };
 
-  const addDiamond = (pos = null, label = null) => {
+  const addDiamond = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1620,7 +1621,7 @@ export const FabricCanvas = forwardRef(({
     ];
 
     const shape = new fabric.Polygon(points, {
-      fill: '#e0f2fe',
+      fill: style.fill || SHAPE_DEFAULT_STYLES.diamond.fill,
       stroke: '#000000',
       strokeWidth: 2,
       contrastResolved: false
@@ -1631,7 +1632,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 15,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#0369a1',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.diamond.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1641,7 +1642,7 @@ export const FabricCanvas = forwardRef(({
     return result;
   };
 
-  const addHexagon = (pos = null, label = null) => {
+  const addHexagon = (pos = null, label = null, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
     const { x, y } = pos || getNextViewportPosition(canvas);
@@ -1656,7 +1657,7 @@ export const FabricCanvas = forwardRef(({
     ];
 
     const shape = new fabric.Polygon(points, {
-      fill: '#f3e8ff',
+      fill: style.fill || SHAPE_DEFAULT_STYLES.hexagon.fill,
       stroke: '#000000',
       strokeWidth: 2,
       contrastResolved: false
@@ -1667,7 +1668,7 @@ export const FabricCanvas = forwardRef(({
       fontSize: 15,
       fontFamily: 'Quicksand',
       fontWeight: 'bold',
-      fill: '#6b21a8',
+      fill: style.textColor || SHAPE_DEFAULT_STYLES.hexagon.textColor,
       textAlign: 'center',
       contrastResolved: false
     });
@@ -1839,7 +1840,7 @@ export const FabricCanvas = forwardRef(({
     return { success: true, objectId: text.id, textObject: text };
   };
 
-  const executeVoiceCommand = (command) => {
+  const executeVoiceCommand = (command, style = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) {
       return { success: false, reason: 'Canvas not initialized' };
@@ -1847,16 +1848,19 @@ export const FabricCanvas = forwardRef(({
     if (!command || typeof command !== 'object') {
       return { success: false, reason: 'Invalid voice command' };
     }
+    const hexOrNull = (value) => (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : null);
+    const fill = hexOrNull(style?.fill);
+    const textColor = hexOrNull(style?.textColor);
 
     if (command.action === 'create_text') {
-      return insertDictatedText(command.text, { source: 'voice-command' });
+      return insertDictatedText(command.text, { source: 'voice-command', ...(textColor ? { fill: textColor } : {}) });
     }
 
     if (command.action === 'create_sticky_note') {
       if (typeof command.text !== 'string' || !command.text.trim()) {
         return { success: false, reason: 'Sticky note text is required' };
       }
-      const created = addSticky(null, command.text.trim());
+      const created = addSticky(null, command.text.trim(), fill || '#fff3a0', textColor);
       return created?.shape
         ? { success: true, objectId: created.shape.id }
         : { success: false, reason: 'Sticky note could not be created' };
@@ -1875,7 +1879,7 @@ export const FabricCanvas = forwardRef(({
         return { success: false, reason: 'Unsupported shape type' };
       }
       const label = typeof command.label === 'string' && command.label.trim() ? command.label.trim() : null;
-      const created = shapeCreators[command.shapeType](null, label);
+      const created = shapeCreators[command.shapeType](null, label, { fill, textColor });
       return created?.shape
         ? { success: true, objectId: created.shape.id }
         : { success: false, reason: 'Shape could not be created' };
@@ -2695,8 +2699,8 @@ export const FabricCanvas = forwardRef(({
       return insertDictatedText(textString, options);
     },
 
-    executeVoiceCommand: (command) => {
-      return executeVoiceCommand(command);
+    executeVoiceCommand: (command, style) => {
+      return executeVoiceCommand(command, style);
     },
 
     triggerAIAction: (actionId) => {
