@@ -2633,10 +2633,26 @@ export const FabricCanvas = forwardRef(({
       };
     },
 
-    serializeForSync: () => {
+    serializeForSync: (ids = null) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas) return [];
-      return canvas.getObjects().filter((o) => !isTemporaryObject(o)).map(serializeFabricObject).filter(Boolean);
+      const wanted = Array.isArray(ids) ? new Set(ids) : null;
+      return canvas.getObjects()
+        .filter((o) => !isTemporaryObject(o) && (!wanted || wanted.has(o.id)))
+        .map(serializeFabricObject)
+        .filter(Boolean);
+    },
+
+    linkedObjectIds: (objectId) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas || !objectId) return [];
+      const objects = canvas.getObjects();
+      const target = objects.find((o) => o.id === objectId);
+      if (!target) return [objectId];
+      const group = target.elementId ? objects.filter((o) => o.elementId === target.elementId) : [target];
+      const groupIds = new Set(group.map((o) => o.id));
+      const connectors = objects.filter((o) => o.isConnector && (groupIds.has(o.sourceShapeId) || groupIds.has(o.targetShapeId)));
+      return [...new Set([objectId, ...groupIds, ...connectors.map((o) => o.id)])].filter(Boolean);
     },
 
     isSyncBusy: () => {
@@ -2701,6 +2717,14 @@ export const FabricCanvas = forwardRef(({
         });
         let added = false;
         fresh.forEach((created) => {
+          if (created.strokeId) {
+            finalizedStrokeIdsRef.current.add(created.strokeId);
+            const temporary = remoteDrawPathsRef.current[created.strokeId];
+            if (temporary) {
+              canvas.remove(temporary);
+              delete remoteDrawPathsRef.current[created.strokeId];
+            }
+          }
           const existing = live.get(created.id);
           if (existing) {
             if (existing.__localPaddingX !== undefined && created.__localPaddingX === undefined) {

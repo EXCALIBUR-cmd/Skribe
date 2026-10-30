@@ -299,19 +299,18 @@ export const BoardsPage = () => {
 
       <nav
         ref={sidebarRef}
-        className="hidden md:flex flex-col py-6 fixed left-0 top-16 h-[calc(100vh-64px)] w-64 rounded-r-2xl bg-surface-container-lowest border-r-2 border-outline-variant shadow-md z-40 overflow-hidden"
+        aria-label="Boards navigation"
+        className={`hidden md:flex flex-col py-6 fixed left-0 top-16 h-[calc(100vh-64px)] rounded-r-2xl bg-surface-container-lowest border-r-2 border-outline-variant shadow-md z-40 overflow-hidden ${
+          isSidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
       >
         <div
-          className={`py-3 flex items-center mb-4 border-b border-surface-variant ${
-            isSidebarCollapsed ? 'px-2 gap-1 justify-center' : 'px-4 justify-between'
+          className={`py-3 flex items-center mb-4 border-b border-surface-variant shrink-0 ${
+            isSidebarCollapsed ? 'flex-col gap-2 justify-center' : 'px-4 justify-between'
           }`}
         >
           <div className="flex items-center gap-3 overflow-hidden">
-            <div
-              className={`rounded-lg bg-secondary-container border-2 border-secondary flex items-center justify-center shrink-0 -rotate-2 ${
-                isSidebarCollapsed ? 'w-8 h-8' : 'w-10 h-10'
-              }`}
-            >
+            <div className="rounded-lg bg-secondary-container border-2 border-secondary flex items-center justify-center shrink-0 -rotate-2 w-10 h-10">
               <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>
                 folder_open
               </span>
@@ -330,28 +329,34 @@ export const BoardsPage = () => {
           <button
             onClick={() => setIsSidebarCollapsed((prev) => !prev)}
             className={`rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer ${
-              isSidebarCollapsed ? 'p-1' : 'p-1.5'
+              isSidebarCollapsed ? 'w-10 h-8 flex items-center justify-center' : 'p-1.5'
             }`}
             title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            aria-label={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            aria-expanded={!isSidebarCollapsed}
           >
-            <span className={`material-symbols-outlined ${isSidebarCollapsed ? 'text-lg' : 'text-xl'}`}>
+            <span className="material-symbols-outlined text-xl">
               {isSidebarCollapsed ? 'chevron_right' : 'chevron_left'}
             </span>
           </button>
         </div>
 
-        <div className="px-4 mb-6">
+        <div className={`mb-6 shrink-0 ${isSidebarCollapsed ? 'flex justify-center' : 'px-4'}`}>
           <button
             onClick={handleOpenCreateBoard}
             disabled={isCreatingBoard}
-            className="w-full bg-primary text-on-primary font-label text-sm font-bold py-3 px-3 rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-102 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            title={isSidebarCollapsed ? 'New Board' : undefined}
+            aria-label="New Board"
+            className={`bg-primary text-on-primary font-label text-sm font-bold rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-102 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+              isSidebarCollapsed ? 'w-12 h-12' : 'w-full py-3 px-3'
+            }`}
           >
             <span className="material-symbols-outlined">add</span>
             {!isSidebarCollapsed && <span>{isCreatingBoard ? 'Creating...' : 'New Board'}</span>}
           </button>
         </div>
 
-        <ul className="flex flex-col gap-1 w-full flex-1 px-2">
+        <ul className={`flex flex-col w-full flex-1 ${isSidebarCollapsed ? 'items-center gap-2 min-h-0 overflow-y-auto [scrollbar-width:none]' : 'gap-1 px-2'}`}>
           {[
             { name: 'All Boards', icon: 'dashboard' },
             { name: 'Recent', icon: 'schedule', fill: true },
@@ -362,9 +367,16 @@ export const BoardsPage = () => {
               <li key={tab.name}>
                 <button
                   onClick={() => setActiveTab(tab.name)}
-                  className={`w-full flex items-center gap-3 py-3 px-3 rounded-xl font-label text-sm font-bold transition-all cursor-pointer relative overflow-hidden ${
+                  title={isSidebarCollapsed ? tab.name : undefined}
+                  aria-label={tab.name}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex items-center rounded-xl font-label text-sm font-bold transition-all cursor-pointer relative overflow-hidden ${
+                    isSidebarCollapsed ? 'w-12 h-12 justify-center' : 'w-full gap-3 py-3 px-3'
+                  } ${
                     isActive
-                      ? 'bg-secondary-container text-on-secondary-container border-l-4 border-secondary shadow-sm scale-102'
+                      ? isSidebarCollapsed
+                        ? 'bg-secondary-container text-on-secondary-container border-2 border-secondary'
+                        : 'bg-secondary-container text-on-secondary-container border-l-4 border-secondary shadow-sm scale-102'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
                   }`}
                 >
@@ -383,10 +395,14 @@ export const BoardsPage = () => {
           })}
         </ul>
 
-        <div className="px-3 pt-2 space-y-2">
+        <div className={`pt-2 shrink-0 ${isSidebarCollapsed ? 'flex flex-col items-center gap-2' : 'px-3 space-y-2'}`}>
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
-            className="w-full bg-surface-container-high text-on-surface-variant hover:text-primary p-2.5 rounded-xl border border-outline-variant/60 flex items-center justify-between text-xs font-label font-semibold cursor-pointer transition-colors"
+            title={isSidebarCollapsed ? 'Quick Search (⌘K)' : undefined}
+            aria-label="Quick Search"
+            className={`bg-surface-container-high text-on-surface-variant hover:text-primary rounded-xl border border-outline-variant/60 flex items-center text-xs font-label font-semibold cursor-pointer transition-colors ${
+              isSidebarCollapsed ? 'w-12 h-12 justify-center' : 'w-full p-2.5 justify-between'
+            }`}
           >
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-base">search</span>
@@ -401,8 +417,11 @@ export const BoardsPage = () => {
 
           <button
             onClick={logout}
-            className="w-full bg-error-container/40 text-on-error-container hover:bg-error-container hover:text-on-error-container p-2.5 rounded-xl border border-error/20 flex items-center justify-center gap-2 text-xs font-label font-bold cursor-pointer transition-colors"
+            className={`bg-error-container/40 text-on-error-container hover:bg-error-container hover:text-on-error-container rounded-xl border border-error/20 flex items-center justify-center gap-2 text-xs font-label font-bold cursor-pointer transition-colors ${
+              isSidebarCollapsed ? 'w-12 h-12' : 'w-full p-2.5'
+            }`}
             title="Log Out"
+            aria-label="Log Out"
           >
             <span className="material-symbols-outlined text-base">logout</span>
             {!isSidebarCollapsed && <span>Log Out</span>}
@@ -410,7 +429,7 @@ export const BoardsPage = () => {
         </div>
       </nav>
 
-      <main ref={mainContentRef} className="pt-8 pb-16 pl-[288px] pr-8 w-full min-h-[calc(100vh-64px)] relative z-10">
+      <main ref={mainContentRef} className={`pt-8 pb-16 pr-8 w-full min-h-[calc(100vh-64px)] relative z-10 ${isSidebarCollapsed ? 'pl-[104px]' : 'pl-[288px]'}`}>
         <div className="relative z-10 max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
             <div>

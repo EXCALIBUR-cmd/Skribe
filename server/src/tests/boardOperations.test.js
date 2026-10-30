@@ -229,20 +229,27 @@ test('boards saved before revisions existed start at revision zero', needsMongo,
   assert.deepEqual(result, { status: 'committed', revision: 1 });
 });
 
-test('legacy full-board saves keep working until the board has a committed operation', needsMongo, async () => {
+test('with the flag on, unversioned canvas saves are refused on every board without writing', needsMongo, async () => {
   const boardId = await createBoard();
-  const first = await boardService.updateBoard(boardId, ownerId, { canvasData: { version: '7.4.0', objects: [shape('shape_x')] } });
-  const second = await boardService.updateBoard(boardId, memberId, { canvasData: { version: '7.4.0', objects: [shape('shape_x'), shape('shape_y')] } });
-  assert.deepEqual([first.canvasRevision, second.canvasRevision], [1, 2]);
-  assert.equal('recentOperations' in second, false);
+  const fresh = await stored(boardId);
+  await assert.rejects(
+    boardService.updateBoard(boardId, ownerId, { canvasData: { version: '7.4.0', objects: [shape('shape_x')] } }),
+    (err) => err.statusCode === 409 && err.code === 'REVISION_REQUIRED' && err.currentRevision === 0
+  );
+  assert.deepEqual((await stored(boardId)).canvasData, fresh.canvasData);
+  const first = await boardService.updateBoard(boardId, memberId, { baseRevision: 0, canvasData: { version: '7.4.0', objects: [shape('shape_x'), shape('shape_y')] } });
+  assert.equal(first.canvasRevision, 1);
 
-  await commitCanvasOperation({ boardId, userId: ownerId, op: operation(2, { deletes: ['shape_y'] }) });
+  await commitCanvasOperation({ boardId, userId: ownerId, op: operation(1, { deletes: ['shape_y'] }) });
   const before = await stored(boardId);
   await assert.rejects(
     boardService.updateBoard(boardId, ownerId, { canvasData: { version: '7.4.0', objects: [] } }),
-    (err) => err.statusCode === 409 && err.code === 'REVISION_REQUIRED' && err.currentRevision === 3
+    (err) => err.statusCode === 409 && err.code === 'REVISION_REQUIRED' && err.currentRevision === 2
   );
   assert.deepEqual((await stored(boardId)).canvasData, before.canvasData);
+  const renamed = await boardService.updateBoard(boardId, ownerId, { title: 'Metadata only' });
+  assert.equal(renamed.title, 'Metadata only');
+  assert.equal((await stored(boardId)).canvasRevision, 2);
 });
 
 test('revision-aware saves compare and set, and stale saves get 409 without writing', needsMongo, async () => {
@@ -260,6 +267,7 @@ test('revision-aware saves compare and set, and stale saves get 409 without writ
 test('board updates ignore revision, ownership and deletion fields sent by clients', needsMongo, async () => {
   const boardId = await createBoard();
   const saved = await boardService.updateBoard(boardId, ownerId, {
+    baseRevision: 0,
     canvasData: { version: '7.4.0', objects: [shape('shape_x')] },
     canvasRevision: 99,
     lastOperationRevision: 0,
@@ -342,7 +350,7 @@ test('the board PATCH controller returns 409 bodies and announces each saved rev
   const boardId = await createBoard();
   emitted.length = 0;
   const ok = fakeResponse();
-  await boardController.update({ user: { id: ownerId.toString() }, params: { id: boardId }, body: { canvasData: { version: '7.4.0', objects: [] } } }, ok, (err) => { throw err; });
+  await boardController.update({ user: { id: ownerId.toString() }, params: { id: boardId }, body: { baseRevision: 0, canvasData: { version: '7.4.0', objects: [] } } }, ok, (err) => { throw err; });
   assert.equal(ok.statusCode, 200);
   assert.equal(ok.body.data.board.canvasRevision, 1);
   assert.deepEqual(emitted, [{ room: boardRoomName(boardId), event: 'board:revision', data: { boardId, revision: 1, source: 'save' } }]);

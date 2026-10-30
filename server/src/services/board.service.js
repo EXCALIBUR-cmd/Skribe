@@ -133,7 +133,9 @@ export class BoardService {
     }
     const savedBoard = hasBaseRevision
       ? await boardRepository.saveCanvasAtRevision(boardId, payload.baseRevision, allowedUpdates)
-      : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: config.collabOperationsEnabled });
+      : config.collabOperationsEnabled
+        ? null
+        : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: false });
     if (savedBoard) return savedBoard.toJSON();
 
     const latest = await boardRepository.findBoardRevision(boardId);
