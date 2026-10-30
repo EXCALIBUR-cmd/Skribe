@@ -2,6 +2,7 @@ import anime from 'animejs';
 
 export const isReducedMotion = () => {
   if (typeof window === 'undefined') return false;
+  if (document.documentElement.dataset.reduceMotion === 'true') return true;
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 };
 

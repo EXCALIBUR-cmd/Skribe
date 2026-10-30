@@ -28,7 +28,7 @@
     "test:connector-collision-integrity": "node --test src/features/messCleanup/connectorCollisionIntegrity.test.js",
     "test:voice-dictation": "node --test src/features/voice/voiceDictation.test.js",
     "test:voice-commands": "node --test src/features/voice/voiceCommands.test.js",
-    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js",
+    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js src/features/i18n/translate.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },
