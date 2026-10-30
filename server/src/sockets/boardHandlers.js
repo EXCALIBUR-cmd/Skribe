@@ -1,6 +1,20 @@
+import mongoose from 'mongoose';
+import config from '../config/env.js';
 import boardRepository from '../repositories/board.repository.js';
+import { commitCanvasOperation, validateCanvasOperation } from '../services/boardOperation.service.js';
 
 export const boardRoomName = (boardId) => `board:${boardId}`;
+
+export const OPERATION_RATE_LIMIT = Object.freeze({ limit: 20, windowMs: 5000 });
+
+const allowOperation = (socket) => {
+  const now = Date.now();
+  const recent = (socket.data.operationTimes || []).filter((time) => now - time < OPERATION_RATE_LIMIT.windowMs);
+  const allowed = recent.length < OPERATION_RATE_LIMIT.limit;
+  if (allowed) recent.push(now);
+  socket.data.operationTimes = recent;
+  return allowed;
+};
 
 const roomPresenceMap = new Map();
 const socketRoomMap = new Map();
@@ -197,6 +211,44 @@ export const registerBoardHandlers = (io, socket) => {
     const room = boardRoomName(boardId);
     if (!socket.rooms.has(room)) return;
     socket.to(room).emit('canvas:object-removed', { boardId, objectId, objectIds: objectIds || (objectId ? [objectId] : []), senderSocketId: socket.id });
+  });
+
+  socket.on('canvas:op', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    if (!config.collabOperationsEnabled) return reply({ ok: false, code: 'OPERATIONS_DISABLED' });
+    const boardId = payload?.boardId;
+    if (typeof boardId !== 'string' || !mongoose.Types.ObjectId.isValid(boardId)) return reply({ ok: false, code: 'INVALID_OPERATION' });
+    const room = boardRoomName(boardId);
+    if (!socket.rooms.has(room)) return reply({ ok: false, code: 'NOT_IN_ROOM' });
+    if (!allowOperation(socket)) return reply({ ok: false, code: 'RATE_LIMITED' });
+
+    const validation = validateCanvasOperation(payload);
+    if (!validation.ok) return reply({ ok: false, code: validation.code });
+    const { op } = validation;
+
+    try {
+      const result = await commitCanvasOperation({ boardId, userId: socket.user.id, op });
+      if (result.status === 'committed') {
+        console.log(`[Socket] canvas:op committed | board ${boardId} | user ${socket.user.id} | op ${op.opId} | revision ${result.revision}`);
+        socket.to(room).emit('canvas:op-committed', {
+          boardId,
+          opId: op.opId,
+          revision: result.revision,
+          baseRevision: op.baseRevision,
+          op: { kind: op.kind, upserts: op.upserts, deletes: op.deletes, ...(op.order ? { order: op.order } : {}) },
+          senderSocketId: socket.id
+        });
+        return reply({ ok: true, revision: result.revision });
+      }
+      if (result.status === 'duplicate') return reply({ ok: true, duplicate: true, revision: result.revision });
+      if (result.status === 'stale') return reply({ ok: false, code: 'STALE_REVISION', currentRevision: result.currentRevision });
+      if (result.status === 'conflict') return reply({ ok: false, code: result.code, currentRevision: result.currentRevision });
+      if (result.status === 'forbidden') return reply({ ok: false, code: 'FORBIDDEN' });
+      return reply({ ok: false, code: 'BOARD_NOT_FOUND' });
+    } catch (err) {
+      console.error(`[Socket] canvas:op failed | board ${boardId} | op ${op.opId}:`, err.message);
+      return reply({ ok: false, code: 'SERVER_ERROR' });
+    }
   });
 
   socket.on('laser:move', ({ boardId, sceneX, sceneY, color, width } = {}) => {

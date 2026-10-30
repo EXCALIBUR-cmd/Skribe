@@ -1,5 +1,8 @@
 import boardRepository from '../repositories/board.repository.js';
 import userRepository from '../repositories/user.repository.js';
+import config from '../config/env.js';
+
+const UPDATABLE_BOARD_FIELDS = Object.freeze(['title', 'canvasData', 'isArchived', 'thumbnail']);
 
 export class BoardService {
   _isOwner(board, userId) {
@@ -102,14 +105,50 @@ export class BoardService {
     const board = await boardRepository.findBoardAccess(boardId);
     this._verifyAccess(board, userId);
 
-    const { owner, members, _id, createdAt, id, ...allowedUpdates } = updatePayload || {};
+    const payload = updatePayload || {};
+    const allowedUpdates = Object.fromEntries(
+      UPDATABLE_BOARD_FIELDS.filter((field) => payload[field] !== undefined).map((field) => [field, payload[field]])
+    );
 
     if (allowedUpdates.title && typeof allowedUpdates.title === 'string') {
       allowedUpdates.title = allowedUpdates.title.trim();
     }
 
-    const updatedBoard = await boardRepository.updateBoard(boardId, allowedUpdates);
-    return updatedBoard.toJSON();
+    if (allowedUpdates.canvasData === undefined) {
+      const updatedBoard = await boardRepository.updateBoard(boardId, allowedUpdates);
+      if (!updatedBoard) {
+        const err = new Error('Board not found');
+        err.statusCode = 404;
+        throw err;
+      }
+      return updatedBoard.toJSON();
+    }
+
+    const hasBaseRevision = payload.baseRevision !== undefined;
+    if (hasBaseRevision && !config.collabOperationsEnabled) {
+      const err = new Error('Revision-aware saves are not enabled on this server');
+      err.statusCode = 400;
+      err.code = 'REVISION_PROTOCOL_DISABLED';
+      throw err;
+    }
+    const savedBoard = hasBaseRevision
+      ? await boardRepository.saveCanvasAtRevision(boardId, payload.baseRevision, allowedUpdates)
+      : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: config.collabOperationsEnabled });
+    if (savedBoard) return savedBoard.toJSON();
+
+    const latest = await boardRepository.findBoardRevision(boardId);
+    if (!latest) {
+      const err = new Error('Board not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    const err = new Error(hasBaseRevision
+      ? 'The board changed since this version was loaded'
+      : 'This board now requires revision-aware saves; reload it to continue');
+    err.statusCode = 409;
+    err.code = hasBaseRevision ? 'STALE_REVISION' : 'REVISION_REQUIRED';
+    err.currentRevision = latest.canvasRevision || 0;
+    throw err;
   }
 
   async deleteBoard(boardId, userId) {

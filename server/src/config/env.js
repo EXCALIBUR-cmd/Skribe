@@ -23,6 +23,7 @@ export const config = {
   voiceCommandModel: process.env.VOICE_COMMAND_MODEL || 'openai/gpt-oss-20b',
   groqMessCleanupApiKey: process.env.GROQ_MESS_CLEANUP_API_KEY || '',
   messCleanupModel: process.env.MESS_CLEANUP_MODEL || 'qwen/qwen3.8-27b',
+  collabOperationsEnabled: process.env.COLLAB_OPERATIONS_ENABLED === 'true',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 };
