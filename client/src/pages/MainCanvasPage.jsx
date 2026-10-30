@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallba
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { flushCanvasBeforeNavigate, openSettingsFromBoard } from '../features/settings/boardSettingsNavigation';
+import { usePreferences } from '../context/PreferencesContext';
+import { resolveCanvasBackground } from '../features/settings/preferenceOptions';
+import BoardPreferencesPanel from '../components/canvas/BoardPreferencesPanel';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
 import ContextMenu from '../components/canvas/ContextMenu';
@@ -69,6 +72,9 @@ const createPendingOperationJournal = (boardId) => {
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
   const { user } = useAuth();
+  const { resolvedTheme, t } = usePreferences();
+  const [canvasBackground, setCanvasBackground] = useState('default');
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const navigate = useNavigate();
 
   const [boardTitle, setBoardTitle] = useState('Untitled Board');
@@ -286,6 +292,7 @@ export const MainCanvasPage = () => {
         if (res.success && res.data?.board) {
           setCurrentBoard(res.data.board);
           setBoardTitle(res.data.board.title || 'Untitled Board');
+          setCanvasBackground(res.data.board.canvasBackground || 'default');
           const canvasData = res.data.board.canvasData;
           const userViewportState = res.data.board.viewportStates?.find(
             (s) => String(s.userId) === String(user?._id || user?.id)
@@ -1178,6 +1185,30 @@ export const MainCanvasPage = () => {
     isOpeningSettingsRef.current = false;
   }, [addToast, boardId, flushViewportSave, navigate]);
 
+  const closePreferences = useCallback(() => setIsPreferencesOpen(false), []);
+
+  const handleCanvasBackgroundChange = useCallback(async (key) => {
+    const previous = canvasBackground;
+    if (!boardId || key === previous) return;
+    setCanvasBackground(key);
+    try {
+      const res = await apiClient.patch(`/boards/${boardId}`, { canvasBackground: key });
+      if (!res?.success) throw new Error('Background was not saved');
+    } catch {
+      setCanvasBackground((current) => (current === key ? previous : current));
+      addToast(t('preferences.backgroundFailedTitle'), t('preferences.backgroundFailed'), 'error', 'error');
+    }
+  }, [addToast, boardId, canvasBackground, t]);
+
+  useEffect(() => {
+    if (!boardId) return undefined;
+    const handleBoardPreferences = (payload) => {
+      if (payload?.boardId === boardId && typeof payload.canvasBackground === 'string') setCanvasBackground(payload.canvasBackground);
+    };
+    socketService.on('board:preferences', handleBoardPreferences);
+    return () => socketService.off('board:preferences', handleBoardPreferences);
+  }, [boardId]);
+
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
       <MessCleanupPreviewModal
@@ -1278,6 +1309,14 @@ export const MainCanvasPage = () => {
         </button>
       </div>
 
+      <BoardPreferencesPanel
+        open={isPreferencesOpen}
+        onClose={closePreferences}
+        canvasBackground={canvasBackground}
+        onCanvasBackgroundChange={handleCanvasBackgroundChange}
+        onOpenSettings={handleOpenSettings}
+      />
+
       <ShareBoardModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
@@ -1370,6 +1409,7 @@ export const MainCanvasPage = () => {
         onLocalDrawStream={handleLocalDrawStream}
         onLocalObjectRemoved={handleLocalObjectRemoved}
         onLocalHistoryOperation={handleLocalHistoryOperation}
+        canvasBackground={resolveCanvasBackground(canvasBackground, resolvedTheme)}
         className="absolute inset-0 z-0"
       />
 
@@ -1505,11 +1545,14 @@ export const MainCanvasPage = () => {
         </button>
 
         <button
-          onClick={handleOpenSettings}
+          onClick={() => setIsPreferencesOpen((open) => !open)}
+          aria-expanded={isPreferencesOpen}
+          aria-haspopup="dialog"
+          data-preferences-toggle
           className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105 transition-all cursor-pointer relative group"
-          data-toolbar-tooltip="Settings"
-          title="Settings"
-          aria-label="Settings"
+          data-toolbar-tooltip={t('toolbar.preferences')}
+          title={t('toolbar.preferences')}
+          aria-label={t('toolbar.preferences')}
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
         </button>

@@ -31,6 +31,9 @@ import {
 import { resolveElementLinks, serializeCanvasObject, isTimestampObject, isTextObject, longestIncreasingIndices } from '../../utils/boardNormalization.js';
 import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
+import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../features/settings/canvasTheme.js';
+
+installThemeRendering(fabric.FabricObject);
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -68,6 +71,7 @@ export const FabricCanvas = forwardRef(({
   onLocalDrawStream,
   onLocalObjectRemoved,
   onLocalHistoryOperation,
+  canvasBackground = null,
   className = ''
 }, ref) => {
   const canvasRef = useRef(null);
@@ -3970,6 +3974,10 @@ export const FabricCanvas = forwardRef(({
   }, []);
 
   useEffect(() => {
+    applyCanvasTheme(fabricCanvasRef.current, canvasBackground);
+  }, [canvasBackground]);
+
+  useEffect(() => {
     updatePanCursorAndSelection();
   }, [activeTool, activeColor]);
 
@@ -3984,7 +3992,15 @@ export const FabricCanvas = forwardRef(({
   }, [activeTool]);
 
   return (
-    <div ref={containerRef} className={`w-full h-full relative overflow-hidden ${className}`}>
+    <div
+      ref={containerRef}
+      className={`w-full h-full relative overflow-hidden ${className}`}
+      style={canvasBackground ? {
+        backgroundColor: canvasBackground,
+        backgroundImage: `radial-gradient(${isDarkSurface(canvasBackground) ? 'rgba(255, 255, 255, 0.08)' : 'rgba(30, 41, 59, 0.1)'} 1px, transparent 1px)`,
+        backgroundSize: '24px 24px'
+      } : undefined}
+    >
       <canvas ref={canvasRef} />
 
       {rotationBadge && (
