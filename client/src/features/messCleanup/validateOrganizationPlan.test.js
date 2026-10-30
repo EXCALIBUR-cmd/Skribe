@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { validateOrganizationPlan } from './validateOrganizationPlan.js';
+import { analyzeWorkspace } from './analyzeWorkspace.js';
 
 const workspace = (objects) => ({
   version: 1,
@@ -240,4 +242,148 @@ test('TEST 16: Same input produces byte-equivalent JSON output', () => {
   const second = JSON.stringify(validateOrganizationPlan(model, rawPlan));
 
   assert.equal(first, second);
+});
+
+const realGroq = JSON.parse(readFileSync(new URL('./fixtures/real_groq_groups_plan.json', import.meta.url), 'utf8'));
+const realPlan = () => structuredClone(realGroq.response.data.organizationPlan);
+const realModelIds = () => realGroq.workspaceModel.board.objects.map((object) => object.id);
+const byLocale = (ids) => [...ids].sort((a, b) => String(a).localeCompare(String(b)));
+const screenshot = 'data:image/jpeg;base64,AAAA';
+
+test('TEST 17: A real Groq groups-only plan becomes sanitized sections and groups with the same object ids', () => {
+  const rawPlan = realPlan();
+  assert.equal(rawPlan.sections, undefined);
+  assert.equal(rawPlan.document, undefined);
+
+  const plan = validateOrganizationPlan(realGroq.workspaceModel, rawPlan);
+  assert.deepEqual(plan.sections.map((section) => section.id), rawPlan.groups.map((group) => group.id));
+  plan.sections.forEach((section, index) => {
+    assert.deepEqual(section.objectIds, byLocale(rawPlan.groups[index].objectIds));
+  });
+  assert.deepEqual(plan.document.sections, plan.sections);
+  assert.deepEqual(
+    plan.groups.map((group) => [group.id, group.type, group.titleObjectId, group.objectIds]),
+    rawPlan.groups.map((group) => [group.id, group.type, group.titleObjectId, byLocale(group.objectIds)])
+  );
+  assert.notEqual(plan.groups, rawPlan.groups);
+
+  const assigned = plan.groups.flatMap((group) => group.objectIds);
+  assert.equal(new Set(assigned).size, assigned.length);
+  assert.deepEqual(byLocale(assigned), byLocale(realModelIds()));
+  assert.deepEqual(plan.unassignedObjectIds, []);
+
+  const groupOf = new Map(plan.groups.flatMap((group) => group.objectIds.map((id) => [id, group.id])));
+  realGroq.workspaceModel.board.objects
+    .filter((object) => object.relationshipMetadata?.attachedTextId)
+    .forEach((object) => assert.equal(groupOf.get(object.relationshipMetadata.attachedTextId), groupOf.get(object.id)));
+
+  const modelIds = new Set(realModelIds());
+  assert.equal(plan.relationships.length, rawPlan.relationships.length);
+  plan.relationships.forEach((relationship) => {
+    assert.ok(modelIds.has(relationship.sourceObjectId));
+    relationship.targetObjectIds.forEach((id) => assert.ok(modelIds.has(id)));
+  });
+  assert.deepEqual(plan.source, { engine: 'groq', model: 'qwen/qwen3.8-27b' });
+});
+
+test('TEST 18: The real Groq response is accepted as AI-assisted through analyzeWorkspace', async () => {
+  const calls = [];
+  const apiClient = {
+    post: async (url, body) => {
+      calls.push({ url, body });
+      return structuredClone(realGroq.response);
+    }
+  };
+
+  const plan = await analyzeWorkspace(realGroq.workspaceModel, screenshot, { apiClient });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/mess-cleanup/analyze');
+  assert.deepEqual(plan.provenance, { engine: 'ai-assisted', isFallback: false, aiUnavailable: false, model: 'qwen/qwen3.8-27b' });
+  assert.equal(plan.sections.length, 3);
+  assert.equal(plan.groups.length, 3);
+  assert.deepEqual(plan.unassignedObjectIds, []);
+});
+
+test('TEST 19: Existing sections and document.sections still take precedence, and raw groups are never passed on', () => {
+  const model = workspace([shape('s1'), shape('s2')]);
+
+  const fromSections = validateOrganizationPlan(model, {
+    sections: [{ id: 'sec1', type: 'notes', objectIds: ['s1'] }],
+    groups: [{ id: 'g1', type: 'notes', objectIds: ['s2'] }]
+  });
+  assert.deepEqual(fromSections.sections.map((section) => [section.id, section.objectIds]), [['sec1', ['s1']]]);
+  assert.deepEqual(fromSections.unassignedObjectIds, ['s2']);
+  assert.equal(fromSections.groups, undefined);
+
+  const fromDocument = validateOrganizationPlan(model, {
+    document: { sections: [{ id: 'doc1', type: 'notes', objectIds: ['s2'] }] },
+    groups: [{ id: 'g1', type: 'notes', objectIds: ['s1'] }]
+  });
+  assert.deepEqual(fromDocument.sections.map((section) => [section.id, section.objectIds]), [['doc1', ['s2']]]);
+  assert.equal(fromDocument.groups, undefined);
+
+  const titledGroups = validateOrganizationPlan(model, {
+    document: { titleObjectId: 's1' },
+    groups: [{ id: 'g1', type: 'notes', objectIds: ['s1', 's2'] }]
+  });
+  assert.equal(titledGroups.document.titleObjectId, 's1');
+  assert.deepEqual(titledGroups.groups.map((group) => [group.id, group.objectIds]), [['g1', ['s1', 's2']]]);
+});
+
+test('TEST 20: Malformed groups are sanitized before layout, and a plan with no real objects falls back', async () => {
+  const model = workspace([
+    shape('s1', { relationshipMetadata: { attachedTextId: 't1' } }),
+    text('t1', 'Label', { relationshipMetadata: { parentShapeId: 's1' } }),
+    shape('n1'),
+    shape('n2')
+  ]);
+
+  const plan = validateOrganizationPlan(model, {
+    groups: [
+      null,
+      'oops',
+      { id: 'gA', type: 'notes', titleObjectId: 't1', objectIds: ['n1', 't1', 'ghost'] },
+      { id: 'gB', type: 'flowchart', objectIds: ['s1', 'n1'] },
+      { id: 'gA', type: 'concept', objectIds: ['n2', 'n2'] },
+      { id: 'gC', objectIds: 'not-an-array' }
+    ]
+  });
+  assert.deepEqual(
+    plan.groups.map((group) => [group.id, group.type, group.titleObjectId, group.objectIds]),
+    [
+      ['gA', 'notes', null, ['n1']],
+      ['gB', 'flowchart', null, ['s1', 't1']],
+      ['section_5', 'concept', null, ['n2']]
+    ]
+  );
+  const grouped = plan.groups.flatMap((group) => group.objectIds);
+  assert.equal(new Set(grouped).size, grouped.length);
+  assert.equal(grouped.includes('ghost'), false);
+  assert.equal(new Set(plan.sections.map((section) => section.id)).size, plan.sections.length);
+  assert.deepEqual(plan.unassignedObjectIds, []);
+  assert.equal(validateOrganizationPlan(model, { groups: 'not-an-array' }).sections.length, 0);
+  assert.equal(validateOrganizationPlan(model, { groups: { g1: ['s1'] } }).sections.length, 0);
+
+  const fallbackFor = async (organizationPlan) => analyzeWorkspace(model, screenshot, {
+    apiClient: { post: async () => ({ success: true, data: { organizationPlan, model: 'qwen/qwen3.8-27b' } }) }
+  });
+  const ghostGroups = await fallbackFor({ version: 1, workspaceType: 'notes', groups: [{ id: 'g1', type: 'notes', objectIds: ['ghost_1', 'ghost_2'] }], relationships: [] });
+  assert.equal(ghostGroups.provenance.engine, 'deterministic-fallback');
+  assert.equal(ghostGroups.provenance.isFallback, true);
+  const emptySections = await fallbackFor({ version: 1, sections: [{ id: 'sec1', type: 'notes', objectIds: ['ghost_1'] }] });
+  assert.equal(emptySections.provenance.engine, 'deterministic-fallback');
+});
+
+test('TEST 21: Connectors in groups keep their ids and only real endpoints', () => {
+  const model = workspace([shape('s1'), shape('s2'), connector('c1', 's1', 's2')]);
+  const plan = validateOrganizationPlan(model, {
+    groups: [{ id: 'flow', type: 'flowchart', objectIds: ['s1', 'c1', 's2'] }],
+    relationships: [
+      { sourceObjectId: 's1', targetObjectIds: ['s2', 'ghost'], type: 'connects_to' },
+      { sourceObjectId: 'ghost', targetObjectIds: ['s2'], type: 'connects_to' }
+    ]
+  });
+  assert.deepEqual(plan.groups.map((group) => [group.type, group.objectIds]), [['flowchart', ['c1', 's1', 's2']]]);
+  assert.deepEqual(plan.relationships.map((relationship) => [relationship.sourceObjectId, relationship.targetObjectIds]), [['s1', ['s2']]]);
+  assert.deepEqual(plan.unassignedObjectIds, []);
 });

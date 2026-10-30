@@ -405,7 +405,7 @@ export const analyzeWorkspace = (workspaceModel, screenshot = null, options = {}
       try {
         const rawPlan = await analyzeWorkspaceWithOmni(workspaceModel, screenshot, options);
         const validatedPlan = validateOrganizationPlan(workspaceModel, rawPlan);
-        if (!validatedPlan || !Array.isArray(validatedPlan.sections) || validatedPlan.sections.length === 0) {
+        if (!validatedPlan || !Array.isArray(validatedPlan.sections) || !validatedPlan.sections.some((section) => section.objectIds.length > 0)) {
           throw new Error('AI analysis produced invalid plan structure');
         }
         validatedPlan.provenance = {

@@ -1,0 +1,411 @@
+{
+  "workspaceModel": {
+    "version": 1,
+    "board": {
+      "objects": [
+        {
+          "id": "shape_elem_1792923684141_smgwb",
+          "type": "shape",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923684141_smgwb",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923684141_smgwb",
+          "type": "text",
+          "text": "Rectangle",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923684141_smgwb",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923684162_dkod3",
+          "type": "shape",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923684162_dkod3",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923684162_dkod3",
+          "type": "text",
+          "text": "Circle",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923684162_dkod3",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923684191_8i82d",
+          "type": "note",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923684191_8i82d",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923686611_levvv",
+          "type": "note",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923686611_levvv",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923687614_lsgv7",
+          "type": "note",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923687614_lsgv7",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923688727_r68rb",
+          "type": "shape",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923688727_r68rb",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923688727_r68rb",
+          "type": "text",
+          "text": "Planning",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923688727_r68rb",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792923692078_1e9b9",
+          "type": "note",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "text_elem_1792923692078_1e9b9",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "shape_elem_1792924129574_4ntxc",
+          "type": "note",
+          "text": null,
+          "relationshipMetadata": {
+            "attachedTextId": "timestamp_elem_1792924129574_4ntxc",
+            "parentShapeId": null,
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "timestamp_elem_1792923684191_8i82d",
+          "type": "text",
+          "text": "25 Oct",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923684191_8i82d",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "timestamp_elem_1792923686611_levvv",
+          "type": "text",
+          "text": "25 Oct",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923686611_levvv",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "timestamp_elem_1792923687614_lsgv7",
+          "type": "text",
+          "text": "25 Oct",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923687614_lsgv7",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "timestamp_elem_1792923692078_1e9b9",
+          "type": "text",
+          "text": "25 Oct",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923692078_1e9b9",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923692078_1e9b9",
+          "type": "text",
+          "text": "Design",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923692078_1e9b9",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923687614_lsgv7",
+          "type": "text",
+          "text": "Research",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923687614_lsgv7",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923686611_levvv",
+          "type": "text",
+          "text": "Ideas",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923686611_levvv",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792923684191_8i82d",
+          "type": "text",
+          "text": "",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792923684191_8i82d",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "text_elem_1792924129574_4ntxc",
+          "type": "text",
+          "text": "Hi",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792924129574_4ntxc",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        },
+        {
+          "id": "timestamp_elem_1792924129574_4ntxc",
+          "type": "text",
+          "text": "25 Oct",
+          "relationshipMetadata": {
+            "attachedTextId": null,
+            "parentShapeId": "shape_elem_1792924129574_4ntxc",
+            "sourceShapeId": null,
+            "targetShapeId": null
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "success": true,
+    "message": "Mess Cleanup analysis completed successfully",
+    "data": {
+      "organizationPlan": {
+        "annotations": [],
+        "groups": [
+          {
+            "id": "group_shapes_1",
+            "objectIds": [
+              "shape_elem_1792923684141_smgwb",
+              "text_elem_1792923684141_smgwb",
+              "shape_elem_1792923688727_r68rb",
+              "text_elem_1792923688727_r68rb",
+              "shape_elem_1792923684162_dkod3",
+              "text_elem_1792923684162_dkod3"
+            ],
+            "purpose": "Basic geometric shapes demonstrating text-in-shape capabilities.",
+            "titleObjectId": null,
+            "type": "diagram"
+          },
+          {
+            "id": "group_notes_1",
+            "objectIds": [
+              "shape_elem_1792923684191_8i82d",
+              "timestamp_elem_1792923684191_8i82d",
+              "text_elem_1792923684191_8i82d",
+              "shape_elem_1792924129574_4ntxc",
+              "timestamp_elem_1792924129574_4ntxc",
+              "text_elem_1792924129574_4ntxc"
+            ],
+            "purpose": "Left-side cluster of digital sticky notes.",
+            "titleObjectId": null,
+            "type": "notes"
+          },
+          {
+            "id": "group_notes_2",
+            "objectIds": [
+              "shape_elem_1792923692078_1e9b9",
+              "timestamp_elem_1792923692078_1e9b9",
+              "text_elem_1792923692078_1e9b9",
+              "shape_elem_1792923686611_levvv",
+              "timestamp_elem_1792923686611_levvv",
+              "text_elem_1792923686611_levvv",
+              "shape_elem_1792923687614_lsgv7",
+              "timestamp_elem_1792923687614_lsgv7",
+              "text_elem_1792923687614_lsgv7"
+            ],
+            "purpose": "Right-side cluster of themed research notes.",
+            "titleObjectId": null,
+            "type": "notes"
+          }
+        ],
+        "hierarchy": {
+          "mainConceptIds": [
+            "group_shapes_1",
+            "group_notes_1",
+            "group_notes_2"
+          ],
+          "rootTitleObjectId": null
+        },
+        "readingOrder": [
+          "group_shapes_1",
+          "group_notes_1",
+          "group_notes_2"
+        ],
+        "relationships": [
+          {
+            "confidence": 1,
+            "evidence": [
+              "Text is visually centered and constrained within the blue rectangle's boundaries."
+            ],
+            "sourceObjectId": "shape_elem_1792923688727_r68rb",
+            "targetObjectIds": [
+              "text_elem_1792923688727_r68rb"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Text is positioned near the white rectangle label, visually acting as a subtitle or label."
+            ],
+            "sourceObjectId": "shape_elem_1792923684141_smgwb",
+            "targetObjectIds": [
+              "text_elem_1792923684141_smgwb"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Text is centered within the circle shape."
+            ],
+            "sourceObjectId": "shape_elem_1792923684162_dkod3",
+            "targetObjectIds": [
+              "text_elem_1792923684162_dkod3"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "The note shape serves as the container for its content and metadata."
+            ],
+            "sourceObjectId": "shape_elem_1792923684191_8i82d",
+            "targetObjectIds": [
+              "text_elem_1792923684191_8i82d",
+              "timestamp_elem_1792923684191_8i82d"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Note contains a 'Hi' text and a timestamp element."
+            ],
+            "sourceObjectId": "shape_elem_1792924129574_4ntxc",
+            "targetObjectIds": [
+              "text_elem_1792924129574_4ntxc",
+              "timestamp_elem_1792924129574_4ntxc"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Note contains 'Design' label and timestamp."
+            ],
+            "sourceObjectId": "shape_elem_1792923692078_1e9b9",
+            "targetObjectIds": [
+              "text_elem_1792923692078_1e9b9",
+              "timestamp_elem_1792923692078_1e9b9"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Note contains 'Ideas' label and timestamp."
+            ],
+            "sourceObjectId": "shape_elem_1792923686611_levvv",
+            "targetObjectIds": [
+              "text_elem_1792923686611_levvv",
+              "timestamp_elem_1792923686611_levvv"
+            ],
+            "type": "label-of"
+          },
+          {
+            "confidence": 1,
+            "evidence": [
+              "Note contains 'Research' label and timestamp."
+            ],
+            "sourceObjectId": "shape_elem_1792923687614_lsgv7",
+            "targetObjectIds": [
+              "text_elem_1792923687614_lsgv7",
+              "timestamp_elem_1792923687614_lsgv7"
+            ],
+            "type": "label-of"
+          }
+        ],
+        "version": 1,
+        "workspaceType": "mixed",
+        "source": {
+          "engine": "groq",
+          "model": "qwen/qwen3.8-27b"
+        }
+      },
+      "model": "qwen/qwen3.8-27b"
+    }
+  }
+}
