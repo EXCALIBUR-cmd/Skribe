@@ -79,6 +79,19 @@ export const Header = () => {
               <span className="material-symbols-outlined text-base">dashboard</span>
               <span>Boards</span>
             </button>
+            {!isCanvasRoute && (
+              <button
+                onClick={() => navigate('/settings')}
+                title="Settings"
+                aria-label="Settings"
+                aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}
+                className={`bg-surface-container hover:bg-surface-container-high border-2 rounded-full p-1.5 transition-all cursor-pointer flex items-center justify-center ${
+                  location.pathname.startsWith('/settings') ? 'border-primary text-primary' : 'border-outline text-on-surface'
+                }`}
+              >
+                <span className="material-symbols-outlined text-base" aria-hidden="true">settings</span>
+              </button>
+            )}
             <button
               onClick={logout}
               className="bg-error-container/40 text-on-error-container hover:bg-error-container text-xs font-bold px-3 py-1.5 rounded-full border border-error/20 transition-all cursor-pointer flex items-center gap-1"
