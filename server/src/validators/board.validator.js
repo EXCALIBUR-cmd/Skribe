@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { error } from '../utils/apiResponse.js';
+import { CANVAS_BACKGROUNDS } from '../constants/preferences.js';
 
 export const validateBoardId = (req, res, next) => {
   const { id } = req.params;
@@ -27,7 +28,7 @@ export const validateCreateBoard = (req, res, next) => {
 };
 
 export const validateUpdateBoard = (req, res, next) => {
-  const { title, canvasData, isArchived, thumbnail, baseRevision } = req.body || {};
+  const { title, canvasData, isArchived, thumbnail, baseRevision, canvasBackground } = req.body || {};
   const validationErrors = {};
 
   if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || baseRevision < 0)) {
@@ -48,6 +49,10 @@ export const validateUpdateBoard = (req, res, next) => {
 
   if (thumbnail !== undefined && typeof thumbnail !== 'string') {
     validationErrors.thumbnail = 'thumbnail must be a string URL/base64 data';
+  }
+
+  if (canvasBackground !== undefined && !CANVAS_BACKGROUNDS.includes(canvasBackground)) {
+    validationErrors.canvasBackground = `canvasBackground must be one of: ${CANVAS_BACKGROUNDS.join(', ')}`;
   }
 
   if (Object.keys(validationErrors).length > 0) {

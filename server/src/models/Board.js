@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CANVAS_BACKGROUNDS } from '../constants/preferences.js';
 
 const boardSchema = new mongoose.Schema(
   {
@@ -56,6 +57,11 @@ const boardSchema = new mongoose.Schema(
     thumbnail: {
       type: String,
       default: ''
+    },
+    canvasBackground: {
+      type: String,
+      enum: CANVAS_BACKGROUNDS,
+      default: 'default'
     },
     isArchived: {
       type: Boolean,

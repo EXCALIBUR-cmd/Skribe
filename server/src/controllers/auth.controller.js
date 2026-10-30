@@ -1,4 +1,6 @@
 import authService from '../services/auth.service.js';
+import boardService from '../services/board.service.js';
+import userRepository from '../repositories/user.repository.js';
 import { success } from '../utils/apiResponse.js';
 import { COOKIE_NAME, getCookieOptions, getClearCookieOptions } from '../utils/cookieOptions.js';
 import config from '../config/env.js';
@@ -49,6 +51,30 @@ export class AuthController {
   async getMe(req, res, next) {
     try {
       return success(res, { user: req.user }, 'Current user profile retrieved successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async updatePreferences(req, res, next) {
+    try {
+      const updates = Object.fromEntries(Object.entries(req.body).map(([key, value]) => [`preferences.${key}`, value]));
+      const user = await userRepository.updateUser(req.user.id, updates);
+      if (!user) {
+        const err = new Error('User not found');
+        err.statusCode = 404;
+        throw err;
+      }
+      return success(res, { preferences: user.toJSON().preferences }, 'Preferences updated successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getLanding(req, res, next) {
+    try {
+      const path = await boardService.resolveLandingPath(req.user);
+      return success(res, { path }, 'Landing page resolved', 200);
     } catch (err) {
       next(err);
     }

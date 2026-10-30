@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { APPEARANCES, DEFAULT_PREFERENCES, LANDING_PAGES, LANGUAGES } from '../constants/preferences.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -41,6 +42,17 @@ const userSchema = new mongoose.Schema(
     avatar: {
       type: String,
       default: ''
+    },
+    preferences: {
+      appearance: { type: String, enum: APPEARANCES, default: DEFAULT_PREFERENCES.appearance },
+      language: { type: String, enum: LANGUAGES, default: DEFAULT_PREFERENCES.language },
+      landingPage: { type: String, enum: LANDING_PAGES, default: DEFAULT_PREFERENCES.landingPage },
+      reduceMotion: { type: Boolean, default: DEFAULT_PREFERENCES.reduceMotion }
+    },
+    lastOpenedBoard: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Board',
+      default: null
     }
   },
   {
