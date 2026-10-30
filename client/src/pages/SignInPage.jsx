@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { resolvePostSignInPath } from '../features/settings/landing';
 
 export const SignInPage = () => {
   const { user, login } = useAuth();
@@ -21,9 +22,11 @@ export const SignInPage = () => {
     }
   }, [location.search]);
 
+  const destination = resolvePostSignInPath(location.state?.from);
+
   useEffect(() => {
     if (user) {
-      navigate('/boards', { replace: true });
+      navigate(destination, { replace: true });
     }
   }, [user, navigate]);
 
@@ -39,7 +42,7 @@ export const SignInPage = () => {
     try {
       setIsSubmitting(true);
       await login(email, password);
-      navigate('/boards', { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setFormError(err.message || 'Invalid email or password. Please try again.');
     } finally {

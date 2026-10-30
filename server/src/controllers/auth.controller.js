@@ -41,7 +41,7 @@ export class AuthController {
 
       res.cookie(COOKIE_NAME, req.user.token, getCookieOptions());
 
-      return res.redirect(`${config.clientUrl}/boards`);
+      return res.redirect(`${config.clientUrl}/start`);
     } catch (err) {
       console.error('[AuthController] Google callback error:', err.message);
       return res.redirect(`${config.clientUrl}/signin?error=oauth_failed`);

@@ -8,6 +8,7 @@ import MainCanvasPage from '../pages/MainCanvasPage';
 import AIAssistPage from '../pages/AIAssistPage';
 import MobileCanvasPage from '../pages/MobileCanvasPage';
 import SettingsPage from '../pages/SettingsPage';
+import LandingRedirect from '../features/settings/LandingRedirect';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 
 export const AppRoutes = () => {
@@ -54,6 +55,14 @@ export const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <MobileCanvasPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/start"
+        element={
+          <ProtectedRoute>
+            <LandingRedirect />
           </ProtectedRoute>
         }
       />
