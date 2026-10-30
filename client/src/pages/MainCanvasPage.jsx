@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import FabricCanvas from '../components/canvas/FabricCanvas';
@@ -34,6 +34,36 @@ const isValidViewport = (viewport) => (
   typeof viewport.zoom === 'number' && Number.isFinite(viewport.zoom) &&
   viewport.zoom >= 0.2 && viewport.zoom <= 5
 );
+
+const PENDING_OPERATION_PREFIX = 'skribe:pending-canvas-ops:';
+
+const createPendingOperationJournal = (boardId) => {
+  const prefix = `${PENDING_OPERATION_PREFIX}${boardId}:`;
+  try {
+    window.localStorage.setItem(`${PENDING_OPERATION_PREFIX}probe`, '1');
+    window.localStorage.removeItem(`${PENDING_OPERATION_PREFIX}probe`);
+  } catch {
+    return null;
+  }
+  return {
+    available: true,
+    write: (instanceId, record) => window.localStorage.setItem(`${prefix}${instanceId}`, JSON.stringify(record)),
+    remove: (instanceId) => window.localStorage.removeItem(`${prefix}${instanceId}`),
+    list: () => {
+      const records = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key || !key.startsWith(prefix)) continue;
+        try {
+          records.push({ instanceId: key.slice(prefix.length), record: JSON.parse(window.localStorage.getItem(key)) });
+        } catch {
+          records.push({ instanceId: key.slice(prefix.length), record: null });
+        }
+      }
+      return records;
+    }
+  };
+};
 
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
@@ -99,6 +129,7 @@ export const MainCanvasPage = () => {
   const isInitialLoadingRef = useRef(true);
   const lastSavedJsonRef = useRef(null);
   const latestCanvasDataRef = useRef(null);
+  const lastCanvasHandleRef = useRef(null);
   const debounceTimerRef = useRef(null);
   const saveSequenceRef = useRef(0);
   const syncControllerRef = useRef(null);
@@ -198,7 +229,10 @@ export const MainCanvasPage = () => {
       return;
     }
 
-    const currentCanvasData = fabricCanvasRef.current?.toJSON();
+    const handle = fabricCanvasRef.current;
+    const currentCanvasData = handle?.serializeForSync
+      ? { version: handle.getCanvas?.()?.version || '6.5.1', objects: handle.serializeForSync() }
+      : handle?.toJSON?.();
     if (!currentCanvasData) {
       console.log('[BOARD SAVE DEBUG] handleCanvasChange fired but fabricCanvasRef.toJSON() returned null');
       return;
@@ -214,6 +248,22 @@ export const MainCanvasPage = () => {
     }
 
     setSaveStatus('saving');
+
+    const syncController = syncControllerRef.current;
+    if (syncController?.isEnabled?.()) {
+      const ticket = ++saveSequenceRef.current;
+      syncController.submitLocalChanges().then((result) => {
+        if (syncControllerRef.current !== syncController || ticket !== saveSequenceRef.current) return;
+        if (result?.mode === 'operation' || result?.mode === 'noop' || result?.mode === 'save') {
+          setSaveStatus('saved');
+        } else if (result?.mode === 'legacy') {
+          saveBoardData(latestCanvasDataRef.current);
+        } else if (result?.mode !== 'disposed') {
+          setSaveStatus('error');
+        }
+      });
+      return;
+    }
 
     debounceTimerRef.current = setTimeout(() => {
       saveBoardData(latestCanvasDataRef.current);
@@ -253,11 +303,22 @@ export const MainCanvasPage = () => {
           syncControllerRef.current?.dispose();
           syncControllerRef.current = createBoardSyncController({
             boardId,
+            journal: createPendingOperationJournal(boardId),
             api: {
               getBoard: async () => {
                 const latest = await apiClient.get(`/boards/${boardId}`);
                 const latestBoard = latest?.data?.board;
                 return latestBoard ? { revision: latestBoard.canvasRevision ?? 0, objects: latestBoard.canvasData?.objects || [] } : null;
+              },
+              saveOnUnload: (body) => {
+                try {
+                  const payload = JSON.stringify(body);
+                  if (payload.length > 60000) return false;
+                  fetch(`${apiClient.defaults.baseURL}/boards/${boardId}`, { method: 'PATCH', keepalive: true, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: payload });
+                  return true;
+                } catch {
+                  return false;
+                }
               },
               saveBoard: async (body) => {
                 try {
@@ -268,9 +329,21 @@ export const MainCanvasPage = () => {
                 }
               }
             },
-            socket: { emitOperation: (payload, timeoutMs) => socketService.emitWithAck('canvas:op', payload, timeoutMs) },
+            socket: {
+              emitOperation: (payload, timeoutMs) => socketService.emitWithAck('canvas:op', payload, timeoutMs),
+              send: (payload) => socketService.emit('canvas:op', payload),
+              isConnected: () => Boolean(socketService.getSocket()?.connected),
+              rejoin: () => socketService.joinBoard(boardId)
+            },
             canvas: {
               serialize: () => fabricCanvasRef.current?.serializeForSync?.() || [],
+              serializeIds: (ids) => fabricCanvasRef.current?.serializeForSync?.(ids) || [],
+              finalSnapshot: () => {
+                const handle = fabricCanvasRef.current || lastCanvasHandleRef.current;
+                const liveCanvas = handle?.getCanvas?.();
+                if (!liveCanvas || !handle?.serializeForSync) return null;
+                return { version: liveCanvas.version || '6.5.1', objects: handle.serializeForSync() };
+              },
               snapshot: () => {
                 const handle = fabricCanvasRef.current;
                 if (!handle?.serializeForSync) return null;
@@ -285,6 +358,14 @@ export const MainCanvasPage = () => {
                 addToast('Edit conflict', `${detail.ids.length} of your changes overlapped with a collaborator's edits. Your version was kept; press Undo to restore theirs.`, 'sync_problem', 'info');
               } else if (kind === 'conflict' && detail.orderConflict) {
                 addToast('Layer order conflict', 'You and a collaborator both changed the layer order. Your order was kept.', 'sync_problem', 'info');
+              } else if (kind === 'sync-error') {
+                setSaveStatus('error');
+              } else if (kind === 'recovered') {
+                addToast('Changes recovered', detail.conflicts > 0
+                  ? `${detail.recovered} unsaved change${detail.recovered === 1 ? '' : 's'} from your last visit were restored. ${detail.conflicts} could not be restored because a collaborator changed the same object.`
+                  : `${detail.recovered} unsaved change${detail.recovered === 1 ? '' : 's'} from your last visit were restored.`, 'restore', 'info');
+              } else if (kind === 'synced') {
+                setSaveStatus('saved');
               }
             },
             requestSave: () => handleCanvasChangeRef.current?.()
@@ -307,6 +388,9 @@ export const MainCanvasPage = () => {
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);
                   syncControllerRef.current?.markLoaded();
+                  syncControllerRef.current?.recoverPending().catch((err) => {
+                    console.error('[MainCanvasPage] Pending change recovery failed:', err);
+                  });
                   isInitialLoadingRef.current = false;
                   setSaveStatus('saved');
                 }
@@ -424,6 +508,10 @@ export const MainCanvasPage = () => {
     const handleRemoteObjectTransform = ({ boardId: id, objectId, transform }) => {
       if (id === boardId && fabricCanvasRef.current) {
         fabricCanvasRef.current.applyRemoteObjectTransform({ objectId, transform });
+        const controller = syncControllerRef.current;
+        if (controller?.boardId === boardId && controller.isEnabled()) {
+          controller.notePreview(fabricCanvasRef.current.linkedObjectIds?.(objectId) || [objectId]);
+        }
       }
     };
 
@@ -510,18 +598,21 @@ export const MainCanvasPage = () => {
   }, [boardId]);
 
   const handleLocalObjectAdded = useCallback(({ objectId, objectData }) => {
+    if (syncControllerRef.current?.isEnabled?.()) return;
     if (boardId && objectId && objectData) {
       socketService.emit('canvas:object-added', { boardId, objectId, objectData });
     }
   }, [boardId]);
 
   const handleLocalPathCreated = useCallback(({ objectId, strokeId, objectData }) => {
+    if (syncControllerRef.current?.isEnabled?.()) return;
     if (boardId && objectId && objectData) {
       socketService.emit('canvas:path-created', { boardId, objectId, strokeId, objectData });
     }
   }, [boardId]);
 
   const handleLocalObjectModified = useCallback(({ objectId, objectData }) => {
+    if (syncControllerRef.current?.isEnabled?.()) return;
     if (boardId && objectId && objectData) {
       socketService.emit('canvas:object-modified', { boardId, objectId, objectData });
     }
@@ -540,9 +631,24 @@ export const MainCanvasPage = () => {
   }, [boardId]);
 
   const handleLocalObjectRemoved = useCallback(({ objectId, objectIds }) => {
+    if (syncControllerRef.current?.isEnabled?.()) return;
     if (boardId && (objectId || objectIds)) {
       socketService.emit('canvas:object-removed', { boardId, objectId, objectIds });
     }
+  }, [boardId]);
+
+  useLayoutEffect(() => {
+    if (fabricCanvasRef.current) lastCanvasHandleRef.current = fabricCanvasRef.current;
+  });
+
+  useLayoutEffect(() => () => {
+    const controller = syncControllerRef.current;
+    if (controller?.boardId !== boardId || !controller.isEnabled()) return;
+    controller.persist(null, { final: true }).then((result) => {
+      if (result && !result.ok && !result.skipped) console.error('[MainCanvasPage] Leave flush was not saved:', result.code);
+    }).catch((err) => {
+      console.error('[MainCanvasPage] Leave flush failed:', err);
+    });
   }, [boardId]);
 
   useEffect(() => {
@@ -559,7 +665,7 @@ export const MainCanvasPage = () => {
         const currentJson = JSON.stringify(latestCanvasDataRef.current);
         if (currentJson !== lastSavedJsonRef.current) {
           syncControllerRef.current?.persist(latestCanvasDataRef.current, { final: true }).then((result) => {
-            if (result && !result.ok) console.error('[MainCanvasPage] Unmount flush was not saved:', result.code);
+            if (result && !result.ok && !result.skipped) console.error('[MainCanvasPage] Unmount flush was not saved:', result.code);
           }).catch((err) => {
             console.error('[MainCanvasPage] Unmount flush failed:', err);
           });
@@ -569,25 +675,19 @@ export const MainCanvasPage = () => {
   }, [boardId]);
 
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (event) => {
       if (boardId && isValidViewport(latestViewportRef.current)) {
         const viewportBlob = new Blob([JSON.stringify(latestViewportRef.current)], {
           type: 'application/json'
         });
         navigator.sendBeacon(`/api/v1/boards/${boardId}/viewport`, viewportBlob);
       }
-
-      if (
-        !isInitialLoadingRef.current &&
-        latestCanvasDataRef.current &&
-        boardId
-      ) {
-        const currentJson = JSON.stringify(latestCanvasDataRef.current);
-        if (currentJson !== lastSavedJsonRef.current) {
-          const blob = new Blob([JSON.stringify({ canvasData: latestCanvasDataRef.current })], {
-            type: 'application/json'
-          });
-          navigator.sendBeacon(`/api/v1/boards/${boardId}`, blob);
+      const controller = syncControllerRef.current;
+      if (controller?.boardId === boardId && controller.isEnabled()) {
+        controller.flushOnUnload();
+        if (!controller.canRecover() && controller.hasUnsavedWork()) {
+          event.preventDefault();
+          event.returnValue = '';
         }
       }
     };
@@ -1013,6 +1113,7 @@ export const MainCanvasPage = () => {
 
   const handleBackToBoards = useCallback(async () => {
     await flushViewportSave();
+    await syncControllerRef.current?.drain?.();
     if (
       !isInitialLoadingRef.current &&
       latestCanvasDataRef.current &&

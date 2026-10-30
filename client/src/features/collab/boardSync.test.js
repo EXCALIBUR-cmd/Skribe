@@ -53,11 +53,12 @@ const createServer = ({ enabled = true, objects = startingBoard() } = {}) => {
   return server;
 };
 
-const createClient = (name, server, overrides = {}, { normalize = (objects) => objects, getBoard = null, onPrepare = null } = {}) => {
-  const client = { name, server, connected: true, busy: false, objects: [], undoBase: null, merges: [], conflicts: [], legacyBroadcasts: 0, saveRequests: 0, hold: null, held: [] };
+const createClient = (name, server, overrides = {}, { normalize = (objects) => objects, getBoard = null, onPrepare = null, journalStore = null, instanceId = undefined } = {}) => {
+  const client = { name, server, stalled: [], recoveries: [], connected: true, busy: false, objects: [], undoBase: null, merges: [], conflicts: [], syncErrors: [], failOps: [], rejoins: 0, legacyBroadcasts: 0, saveRequests: 0, hold: null, held: [] };
   const canvas = {
     serialize: () => clone(client.objects),
-    snapshot: () => ({ version: '7.4.0', objects: clone(client.objects) }),
+    serializeIds: (wanted) => clone(client.objects.filter((object) => wanted.includes(object.id))),
+    snapshot: () => (client.detached ? null : { version: '7.4.0', objects: clone(client.objects) }),
     prepare: async (objects) => {
       if (onPrepare) await onPrepare(objects);
       return new Map(objects.map((object) => [object.id, clone(object)]));
@@ -72,12 +73,43 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
   };
   client.controller = createBoardSyncController({
     boardId: 'board_1',
-    api: { getBoard: async () => (getBoard ? getBoard() : server.getBoard()), saveBoard: async (body) => server.saveBoard(client, clone(body)) },
-    socket: { emitOperation: async (payload) => (client.connected ? server.operation(client, clone(payload)) : { ok: false, code: 'DISCONNECTED' }) },
+    api: {
+      getBoard: async () => (getBoard ? getBoard() : server.getBoard()),
+      saveBoard: async (body) => (client.saveFails ? { ok: false, code: 'NETWORK_ERROR' } : server.saveBoard(client, clone(body))),
+      saveOnUnload: (body) => { client.unloadSaves = (client.unloadSaves || 0) + 1; server.saveBoard(client, clone(body)); return true; }
+    },
+    socket: {
+      emitOperation: async (payload) => {
+        if (client.stall) return new Promise((resolve) => client.stalled.push({ payload: clone(payload), resolve }));
+        if (client.failOps[0] === 'COMMIT_THEN_TIMEOUT') {
+          client.failOps.shift();
+          server.operation(client, clone(payload));
+          return { ok: false, code: 'ACK_TIMEOUT' };
+        }
+        if (client.failOps.length > 0) return { ok: false, code: client.failOps.shift() };
+        return client.connected ? server.operation(client, clone(payload)) : { ok: false, code: 'DISCONNECTED' };
+      },
+      rejoin: () => { client.rejoins += 1; },
+      isConnected: () => client.connected,
+      send: (payload) => { client.sent = (client.sent || 0) + 1; if (client.connected) server.operation(client, clone(payload)); }
+    },
     canvas,
-    notify: (kind, detail) => { if (kind === 'conflict') client.conflicts.push(...detail.ids); },
+    notify: (kind, detail) => {
+      if (kind === 'conflict') client.conflicts.push(...detail.ids);
+      if (kind === 'sync-error') client.syncErrors.push(detail.code);
+      if (kind === 'synced') client.synced = (client.synced || 0) + 1;
+      if (kind === 'recovered') client.recoveries.push(detail);
+    },
     requestSave: () => { client.saveRequests += 1; },
-    options: { pullDelayMs: 5, gapTimeoutMs: 20, idlePollMs: 2, ...overrides }
+    random: () => 0,
+    journal: journalStore ? {
+      available: true,
+      write: (id, record) => { if (journalStore.failWrites) throw new Error('QuotaExceededError'); journalStore.records[id] = clone(record); },
+      remove: (id) => { delete journalStore.records[id]; },
+      list: () => Object.entries(journalStore.records).map(([id, record]) => ({ instanceId: id, record: clone(record) }))
+    } : null,
+    ...(instanceId ? { instanceId } : {}),
+    options: { pullDelayMs: 5, gapTimeoutMs: 20, idlePollMs: 2, editDelayMs: 5, retryBaseMs: 20, retryMaxMs: 80, ...overrides }
   });
   client.deliver = (method, event) => {
     if (client.hold) { client.held.push([method, event]); return; }
@@ -95,6 +127,10 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
   };
   client.edit = (mutate) => {
     client.objects = mutate(clone(client.objects));
+  };
+  client.commit = (mutate) => {
+    client.objects = mutate(clone(client.objects));
+    return client.controller.submitLocalChanges();
   };
   const board = server.getBoard();
   client.controller.load(board);
@@ -401,17 +437,21 @@ test('with the flag off the client stays on the legacy path synchronously, and s
   assert.equal((await a.history('undo', patch('shape_b', { top: 10 }))).mode, 'operation');
 });
 
-test('an oversized or rejected operation falls back to a compare-and-set save of the merged board', async () => {
+test('an oversized operation is saved only through a compare-and-set save of the merged board', async () => {
   const server = createServer();
   const a = createClient('A', server);
+  const b = createClient('B', server);
+  await b.commit(patch('shape_c', { left: 701 }));
+  await settle(a, b);
   const big = 'x'.repeat(OPERATION_BYTE_LIMIT);
+  a.connected = false;
   const result = await a.history('apply', patch('shape_b', { blob: big }));
   assert.deepEqual([result.mode, result.reason], ['save', 'OPERATION_TOO_LARGE']);
-  assert.equal(server.ops.length, 0);
-  assert.equal(a.saveRequests, 1);
-  assert.equal(a.controller.getState().hasLocalChanges, true);
-  assert.equal((await a.save()).ok, true);
+  assert.equal(server.ops.filter((op) => op.from === 'A').length, 0);
+  assert.deepEqual(server.saves.map((save) => [save.from, save.baseRevision]), [['A', 1]]);
   assert.equal(find(server.objects, 'shape_b').blob.length, OPERATION_BYTE_LIMIT);
+  assert.equal(find(server.objects, 'shape_c').left, 701);
+  assert.equal(a.controller.getState().hasLocalChanges, false);
 });
 
 test('a save right after an acknowledged operation is skipped instead of writing the same board again', async () => {
@@ -436,7 +476,8 @@ test('a final save that meets a 409 merges the latest board once, keeps both edi
   assert.equal(find(server.objects, 'shape_c'), undefined);
   assert.equal(find(server.objects, 'shape_a').left, 5);
   assert.deepEqual(server.saves.map((save) => [save.from, save.baseRevision]), [['A', 0], ['A', 1]]);
-  assert.deepEqual(await a.controller.persist(null, { final: true }), { ok: false, code: 'NO_CANVAS' });
+  assert.deepEqual(await a.controller.persist({ version: '7.4.0', objects: [] }, { final: true }), { ok: false, skipped: true, code: 'ALREADY_MERGED' });
+  assert.equal(a.controller.flushOnUnload(), false);
   assert.equal(server.saves.length, 2);
   assert.ok(server.objects.length > 0);
 });
@@ -449,8 +490,8 @@ test('a final save bypasses a queue that is waiting for the canvas and still kee
   await a.history('apply', patch('shape_c', { left: 760 }));
   await wait(10);
   b.edit(patch('shape_b', { left: 404 }));
-  b.controller.dispose();
   const result = await b.save({ final: true });
+  b.controller.dispose();
   assert.equal(result.ok, true);
   assert.equal(find(server.objects, 'shape_c').left, 760);
   assert.equal(find(server.objects, 'shape_b').left, 404);
@@ -568,4 +609,625 @@ test('a failed board fetch or canvas preparation during resync is retried instea
   assert.equal(b.controller.getState().knownRevision, 3);
   assert.deepEqual(b.controller.getState().pendingRevisions, []);
   assert.equal(fetchFailures + prepareFailures, 0);
+});
+
+test('one logical edit becomes one operation that every client applies once, with no save and no echo', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  const results = await Promise.all([
+    a.commit(patch('shape_a', { left: 300 })),
+    a.commit(patch('text_a', { left: 305, text: 'Moved label' })),
+    a.commit(patch('shape_c', { checklistItems: [{ id: 'c1', checked: true, text: 'Ship' }], metadata: { isStickyNote: true, nested: { keep: [1, 2, 3] } } }))
+  ]);
+  await settle(a, b);
+  assert.deepEqual(results.map((result) => result.mode), ['operation', 'operation', 'operation']);
+  assert.equal(server.ops.length, 1);
+  assert.equal(server.saves.length, 0);
+  assert.equal(server.revision, 1);
+  assert.deepEqual([a.objects, b.objects], [server.objects, server.objects]);
+  assert.deepEqual(find(b.objects, 'shape_c').metadata.nested.keep, [1, 2, 3]);
+  assert.equal(b.merges.length, 1);
+  assert.equal(a.merges.length, 0);
+});
+
+test('operations carry the z-order only when it changed', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  const sent = [];
+  const original = server.operation;
+  server.operation = (from, payload) => { sent.push(payload); return original(from, payload); };
+  await a.commit(patch('shape_b', { left: 410 }));
+  await a.commit((objects) => [...objects.filter((object) => object.id !== 'shape_a'), find(objects, 'shape_a')]);
+  await a.commit((objects) => [...objects, shape('shape_new', { left: 900 })]);
+  await settle(a, b);
+  assert.deepEqual(sent.map((payload) => Array.isArray(payload.order)), [false, true, false]);
+  assert.deepEqual(ids(b.objects), ids(server.objects));
+  assert.equal(ids(server.objects).at(-1), 'shape_new');
+  assert.equal(ids(server.objects).at(-2), 'shape_a');
+});
+
+test('rapid successive edits, additions and deletions from two clients all persist in revision order', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  for (let step = 1; step <= 5; step += 1) {
+    a.commit(patch('shape_a', { left: 10 + step }));
+    b.commit(patch('shape_b', { top: 10 + step }));
+    await wait(3);
+  }
+  await b.commit((objects) => objects.filter((object) => object.id !== 'conn_ab'));
+  await a.commit((objects) => [...objects, shape('shape_added', { left: 1200 })]);
+  await wait(120);
+  await settle(a, b);
+  assert.equal(find(server.objects, 'shape_a').left, 15);
+  assert.equal(find(server.objects, 'shape_b').top, 15);
+  assert.equal(find(server.objects, 'conn_ab'), undefined);
+  assert.ok(find(server.objects, 'shape_added'));
+  assert.deepEqual(a.objects, server.objects);
+  assert.deepEqual(b.objects, server.objects);
+  assert.equal(server.saves.length, 0);
+  assert.equal(new Set(server.ops.map((op) => op.opId)).size, server.ops.length);
+  assert.deepEqual([a.conflicts, b.conflicts], [[], []]);
+});
+
+test('edits made while text is being edited are sent once, after editing ends', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  a.busy = true;
+  const pending = [a.commit(patch('text_a', { text: 'H' })), a.commit(patch('text_a', { text: 'He' })), a.commit(patch('text_a', { text: 'Hello' }))];
+  await wait(60);
+  assert.equal(server.ops.length, 0);
+  a.busy = false;
+  await Promise.all(pending);
+  await settle(a, b);
+  assert.equal(server.ops.length, 1);
+  assert.equal(find(b.objects, 'text_a').text, 'Hello');
+});
+
+test('a disconnected or unroutable client keeps its edits, rejoins and retries without any full-board save', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  a.connected = false;
+  const first = await a.commit(patch('shape_a', { left: 222 }));
+  assert.deepEqual([first.mode, first.code], ['pending', 'DISCONNECTED']);
+  assert.equal(find(a.objects, 'shape_a').left, 222);
+  a.connected = true;
+  a.failOps.push('NOT_IN_ROOM');
+  await wait(150);
+  await settle(a, b);
+  assert.equal(a.rejoins, 1);
+  assert.equal(find(server.objects, 'shape_a').left, 222);
+  assert.equal(find(b.objects, 'shape_a').left, 222);
+  assert.equal(server.saves.length, 0);
+  assert.deepEqual(a.syncErrors, ['DISCONNECTED', 'NOT_IN_ROOM']);
+  assert.equal(a.controller.getState().hasLocalChanges, false);
+});
+
+test('an operation the server cannot apply is saved through a compare-and-set save, never an unconditional one', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  await b.commit(patch('shape_c', { left: 702 }));
+  await settle(a, b);
+  a.failOps.push('INVALID_OPERATION');
+  const result = await a.commit(patch('shape_a', { left: 333 }));
+  assert.deepEqual([result.mode, result.reason], ['save', 'INVALID_OPERATION']);
+  assert.deepEqual(server.saves.map((save) => [save.from, save.baseRevision]), [['A', 1]]);
+  assert.equal(find(server.objects, 'shape_a').left, 333);
+  assert.equal(find(server.objects, 'shape_c').left, 702);
+  assert.equal(a.controller.getState().hasLocalChanges, false);
+});
+
+test('a forbidden operation is reported without retrying or saving, and local edits stay', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  a.failOps.push('FORBIDDEN');
+  const result = await a.commit(patch('shape_a', { left: 334 }));
+  assert.deepEqual([result.mode, result.code], ['error', 'FORBIDDEN']);
+  await wait(80);
+  assert.deepEqual([server.saves.length, server.ops.length], [0, 0]);
+  assert.equal(a.controller.getState().hasLocalChanges, true);
+});
+
+test('an edit touching more objects than one operation allows uses a compare-and-set save', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const many = Array.from({ length: 1001 }, (_, index) => shape(`shape_bulk_${index}`, { left: index }));
+  const result = await a.commit((objects) => [...objects, ...many]);
+  assert.deepEqual([result.mode, result.reason], ['save', 'OPERATION_TOO_LARGE']);
+  assert.equal(server.ops.length, 0);
+  assert.deepEqual(server.saves.map((save) => save.baseRevision), [0]);
+  assert.equal(server.objects.length, startingBoard().length + 1001);
+});
+
+test('a background retry that succeeds reports the board as synced, and retries stop after the cap', async () => {
+  const server = createServer();
+  const a = createClient('A', server, { maxRetries: 2 });
+  a.failOps.push('SERVER_ERROR');
+  const first = await a.commit(patch('shape_a', { left: 444 }));
+  assert.deepEqual([first.mode, first.code], ['pending', 'SERVER_ERROR']);
+  await wait(80);
+  await a.controller.idle();
+  assert.equal(find(server.objects, 'shape_a').left, 444);
+  assert.equal(a.synced, 1);
+  a.failOps.push('RATE_LIMITED', 'RATE_LIMITED', 'RATE_LIMITED');
+  await a.commit(patch('shape_a', { left: 445 }));
+  await wait(200);
+  await a.controller.idle();
+  assert.equal(a.syncErrors.at(-1), 'SYNC_STALLED');
+  assert.equal(find(server.objects, 'shape_a').left, 444);
+  assert.equal(a.controller.getState().hasLocalChanges, true);
+  assert.equal((await a.commit((objects) => objects)).mode, 'operation');
+  assert.equal(find(server.objects, 'shape_a').left, 445);
+});
+
+test('a local edit made after a collaborator preview is still sent as the local user\'s change', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  b.edit(patch('shape_b', { left: 520 }));
+  b.controller.notePreview(['shape_b']);
+  await b.commit(patch('shape_b', { fill: '#ff0000' }));
+  assert.equal(find(server.objects, 'shape_b').fill, '#ff0000');
+  await settle(a, b);
+  assert.equal(find(a.objects, 'shape_b').fill, '#ff0000');
+});
+
+test('a collaborator drag preview never conflicts with the final edit and is reset if no edit follows', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  b.edit(patch('shape_b', { left: 520 }));
+  b.controller.notePreview(['shape_b']);
+  await b.commit(patch('shape_c', { top: 77 }));
+  assert.equal(server.ops.filter((op) => op.from === 'B').length, 1);
+  assert.equal(find(server.objects, 'shape_b').left, 400);
+  await a.commit(patch('shape_b', { left: 530 }));
+  await settle(a, b);
+  assert.equal(find(b.objects, 'shape_b').left, 530);
+  assert.deepEqual(b.conflicts, []);
+
+  b.edit(patch('shape_a', { left: 640 }));
+  b.controller.notePreview(['shape_a']);
+  await a.commit(patch('shape_c', { left: 711 }));
+  await settle(a, b);
+  assert.equal(find(b.objects, 'shape_a').left, 10);
+  assert.deepEqual(b.objects, server.objects);
+  assert.deepEqual(b.conflicts, []);
+});
+
+test('undo after ordinary edits is sent as a sequenced operation and reaches the other client', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  const before = clone(a.objects);
+  await a.commit(patch('shape_a', { left: 260 }));
+  await a.commit((objects) => objects.filter((object) => object.id !== 'shape_c'));
+  assert.equal((await a.history('undo', () => clone(before))).mode, 'operation');
+  await settle(a, b);
+  assert.deepEqual([a.objects, b.objects, server.objects], [before, before, before]);
+  assert.deepEqual(server.ops.map((op) => op.from), ['A', 'A', 'A']);
+});
+
+test('the final flush on leave sends pending edits as an operation', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  a.edit(patch('shape_a', { left: 91 }));
+  const result = await a.save({ final: true });
+  assert.deepEqual(result, { ok: true, operation: true });
+  assert.equal(server.saves.length, 0);
+  assert.equal(find(server.objects, 'shape_a').left, 91);
+});
+
+test('a stale operation is rebuilt after merging the collaborator edit, keeping both', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  b.hold = true;
+  await a.commit(patch('shape_a', { left: 55 }));
+  const result = await b.commit(patch('shape_b', { left: 455 }));
+  assert.equal(result.mode, 'operation');
+  b.release();
+  await settle(a, b);
+  assert.equal(find(server.objects, 'shape_a').left, 55);
+  assert.equal(find(server.objects, 'shape_b').left, 455);
+  assert.deepEqual([a.objects, b.objects], [server.objects, server.objects]);
+  assert.deepEqual(b.conflicts, []);
+});
+
+const richBoard = () => [
+  ...startingBoard(),
+  { type: 'Path', id: 'stroke_1', strokeId: 'stroke_1', elementId: 'stroke_1', isVectorStroke: true, path: [['M', 5, 5], ['L', 60, 40]], metadata: { tool: 'pen', nested: { width: 3 } } },
+  shape('shape_meta', { metadata: { tags: ['keep'], nested: { deep: { value: 7 } } }, checklistItems: [{ id: 'c1', checked: true, text: 'Done' }] })
+];
+
+const passiveSetup = async () => {
+  const server = createServer({ objects: richBoard() });
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  const staleAtLoad = { version: '7.4.0', objects: [] };
+  await a.commit(patch('shape_a', { left: 140 }));
+  await a.commit((objects) => [...objects, connector('conn_new', 'shape_b', 'shape_meta', [['M', 400, 40], ['L', 600, 40]]), { type: 'Path', id: 'stroke_2', strokeId: 'stroke_2', elementId: 'stroke_2', isVectorStroke: true, path: [['M', 1, 1], ['L', 9, 9]] }]);
+  await a.commit(patch('shape_meta', { metadata: { tags: ['keep', 'remote'], nested: { deep: { value: 8 } } } }));
+  await settle(a, b);
+  return { server, a, b, staleAtLoad };
+};
+
+test('a passive viewer that only received remote edits never sends a deletion when it reloads', async () => {
+  const { server, a, b, staleAtLoad } = await passiveSetup();
+  const before = clone(server.objects);
+  const opsBefore = server.ops.length;
+  assert.deepEqual(b.objects, before);
+  assert.equal(b.controller.flushOnUnload(staleAtLoad), false);
+  assert.equal(b.sent || 0, 0);
+  await wait(20);
+  assert.equal(server.objects.length, before.length);
+  assert.deepEqual(server.objects, before);
+  assert.equal(server.ops.length, opsBefore);
+  assert.deepEqual(ids(server.objects), ['shape_a', 'text_a', 'shape_b', 'conn_ab', 'shape_c', 'stroke_1', 'shape_meta', 'conn_new', 'stroke_2']);
+  assert.deepEqual(find(server.objects, 'shape_meta').metadata, { tags: ['keep', 'remote'], nested: { deep: { value: 8 } } });
+  assert.equal(find(server.objects, 'stroke_1').metadata.nested.width, 3);
+  assert.equal(find(server.objects, 'conn_new').targetShapeId, 'shape_meta');
+  assert.equal(a.controller.getState().knownRevision, server.revision);
+});
+
+test('a passive viewer leaving the board saves nothing and keeps every remote change', async () => {
+  const { server, b, staleAtLoad } = await passiveSetup();
+  const before = clone(server.objects);
+  const revision = server.revision;
+  assert.deepEqual(await b.controller.persist(staleAtLoad, { final: true }), { ok: true, skipped: true });
+  b.controller.dispose();
+  assert.deepEqual(server.objects, before);
+  assert.equal(server.revision, revision);
+  assert.equal(server.saves.length, 0);
+});
+
+test('an unavailable or disposed canvas skips the final save instead of using an old snapshot', async () => {
+  const { server, b, staleAtLoad } = await passiveSetup();
+  const before = clone(server.objects);
+  b.edit(patch('shape_b', { left: 999 }));
+  b.detached = true;
+  assert.deepEqual(await b.controller.persist(staleAtLoad, { final: true }), { ok: false, skipped: true, code: 'NO_CANVAS' });
+  assert.equal(b.controller.flushOnUnload(staleAtLoad), false);
+  b.detached = false;
+  b.controller.dispose();
+  assert.deepEqual(await b.controller.persist(staleAtLoad, { final: true }), { ok: false, skipped: true, code: 'NO_CANVAS' });
+  assert.equal(b.controller.flushOnUnload(), false);
+  assert.deepEqual(server.objects, before);
+  assert.equal(server.saves.length, 0);
+});
+
+test('a local edit made just before navigation is sent from the live canvas with every remote change kept', async () => {
+  const { server, b, staleAtLoad } = await passiveSetup();
+  const pending = b.commit(patch('shape_c', { left: 777 }));
+  const result = await b.controller.persist(staleAtLoad, { final: true });
+  assert.deepEqual(result, { ok: true, operation: true });
+  b.controller.dispose();
+  await pending;
+  assert.equal(find(server.objects, 'shape_c').left, 777);
+  assert.equal(server.objects.length, richBoard().length + 2);
+  assert.equal(find(server.objects, 'shape_a').left, 140);
+  assert.equal(server.saves.length, 0);
+  assert.equal(server.ops.filter((op) => op.from === 'B').length, 1);
+});
+
+test('an unload flush sends only the live local edit, and a stale navigation save merges instead of overwriting', async () => {
+  const { server, a, b } = await passiveSetup();
+  b.edit(patch('shape_b', { top: 61 }));
+  assert.equal(b.controller.flushOnUnload({ version: '7.4.0', objects: [] }), true);
+  await wait(10);
+  assert.equal(find(server.objects, 'shape_b').top, 61);
+  assert.equal(server.objects.length, richBoard().length + 2);
+
+  const c = createClient('C', server);
+  c.hold = true;
+  await a.commit(patch('shape_meta', { left: 321 }));
+  c.edit(patch('shape_c', { top: 42 }));
+  const result = await c.controller.persist(null, { final: true });
+  assert.equal(result.ok, true);
+  assert.equal(find(server.objects, 'shape_meta').left, 321);
+  assert.equal(find(server.objects, 'shape_c').top, 42);
+  assert.equal(server.objects.length, richBoard().length + 2);
+});
+
+test('a collaborator drag preview alone never makes a leaving viewer save anything', async () => {
+  const { server, b } = await passiveSetup();
+  const before = clone(server.objects);
+  b.edit(patch('shape_b', { left: 612, top: 77 }));
+  b.controller.notePreview(['shape_b']);
+  assert.deepEqual(await b.controller.persist(null, { final: true }), { ok: true, skipped: true });
+  assert.equal(b.controller.flushOnUnload(), false);
+  assert.deepEqual(server.objects, before);
+  assert.equal(server.saves.length, 0);
+});
+
+test('an unload while offline or too large falls back to a revision-checked save of the live canvas only', async () => {
+  const { server, a, b } = await passiveSetup();
+  b.connected = false;
+  b.edit(patch('shape_c', { top: 88 }));
+  assert.equal(b.controller.flushOnUnload(), true);
+  assert.equal(b.unloadSaves, 1);
+  assert.deepEqual(server.saves.at(-1), { from: 'B', baseRevision: server.revision - 1 });
+  assert.equal(find(server.objects, 'shape_c').top, 88);
+  assert.equal(server.objects.length, richBoard().length + 2);
+
+  const c = createClient('C', server);
+  c.hold = true;
+  await a.commit(patch('shape_a', { left: 141 }));
+  c.connected = false;
+  c.edit(patch('shape_b', { top: 99 }));
+  const revision = server.revision;
+  assert.equal(c.controller.flushOnUnload(), true);
+  assert.equal(server.revision, revision);
+  assert.equal(find(server.objects, 'shape_a').left, 141);
+  assert.equal(server.objects.length, richBoard().length + 2);
+});
+
+const journalStore = () => ({ records: {} });
+const pendingEntries = (store) => Object.values(store.records).flatMap((record) => record.entries || []);
+
+test('acknowledged and definitively rejected operations leave nothing in the pending journal', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  await a.commit(patch('shape_a', { left: 31 }));
+  assert.deepEqual(pendingEntries(store), []);
+  a.hold = true;
+  await b.commit(patch('shape_b', { left: 32 }));
+  const stale = await a.commit(patch('shape_c', { left: 33 }));
+  assert.equal(stale.mode, 'operation');
+  assert.equal(find(server.objects, 'shape_c').left, 33);
+  assert.deepEqual(pendingEntries(store), []);
+  a.release();
+  a.failOps.push('FORBIDDEN');
+  await a.commit(patch('shape_a', { left: 34 }));
+  assert.deepEqual(pendingEntries(store), []);
+  a.controller.dispose();
+});
+
+test('an operation committed but not acknowledged before the tab closed is never applied twice after reload', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.failOps.push('COMMIT_THEN_TIMEOUT');
+  const result = await a.commit(patch('shape_a', { left: 41 }));
+  assert.deepEqual([result.mode, result.code], ['pending', 'ACK_TIMEOUT']);
+  assert.equal(pendingEntries(store).length, 1);
+  a.controller.dispose();
+  const revision = server.revision;
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.revision, revision);
+  assert.equal(find(server.objects, 'shape_a').left, 41);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('an operation in flight when the tab closes is recovered, and the edit made after it is held back and replayed in order', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 51 }));
+  await wait(30);
+  assert.equal(a.stalled.length, 1);
+  a.edit(patch('shape_a', { top: 52 }));
+  a.edit(patch('shape_b', { left: 53 }));
+  const sentBefore = a.sent || 0;
+  assert.equal(a.controller.flushOnUnload(), true);
+  assert.equal(a.sent || 0, sentBefore);
+  const entries = pendingEntries(store);
+  assert.equal(entries.length, 2);
+  assert.deepEqual([entries[1].op.baseRevision, entries[1].after], [1, entries[0].op.opId]);
+  a.controller.dispose();
+  assert.equal(server.revision, 0);
+
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  const recovery = await reloaded.controller.recoverPending();
+  await settle(reloaded, b);
+  assert.deepEqual(recovery, { recovered: 2, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 51);
+  assert.equal(find(server.objects, 'shape_a').top, 52);
+  assert.equal(find(server.objects, 'shape_b').left, 53);
+  assert.equal(server.revision, 2);
+  assert.deepEqual(reloaded.objects, server.objects);
+  assert.deepEqual(b.objects, server.objects);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('when the in-flight operation does commit, the held-back edit is replayed exactly once', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 61 }));
+  await wait(30);
+  a.edit(patch('shape_c', { left: 62 }));
+  a.controller.flushOnUnload();
+  const [inFlight] = a.stalled;
+  server.operation(a, inFlight.payload);
+  a.controller.dispose();
+  assert.equal(server.revision, 1);
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 61);
+  assert.equal(find(server.objects, 'shape_c').left, 62);
+  assert.equal(server.revision, 2);
+  const again = createClient('A3', server, {}, { journalStore: store, instanceId: 'inst_a3' });
+  assert.deepEqual(await again.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.revision, 2);
+  reloaded.controller.dispose();
+  again.controller.dispose();
+});
+
+test('a held-back edit is not applied blindly when a collaborator took the predicted revision', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 63 }));
+  await wait(30);
+  a.edit(patch('shape_b', { left: 64 }));
+  a.controller.flushOnUnload();
+  a.controller.dispose();
+  await b.commit(patch('shape_b', { left: 465, top: 9 }));
+  assert.equal(server.revision, 1);
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  const recovery = await reloaded.controller.recoverPending();
+  assert.equal(find(server.objects, 'shape_a').left, 63);
+  assert.deepEqual([find(server.objects, 'shape_b').left, find(server.objects, 'shape_b').top], [465, 9]);
+  assert.equal(recovery.conflicts, 1);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('a recovered operation that went stale applies only objects nobody else changed and reports the rest', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  a.stall = true;
+  a.commit((objects) => patch('shape_b', { left: 71 })(patch('shape_a', { left: 72 })(objects)));
+  await wait(30);
+  a.controller.dispose();
+  await b.commit(patch('shape_b', { left: 499 }));
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  const recovery = await reloaded.controller.recoverPending();
+  assert.deepEqual(recovery, { recovered: 1, conflicts: 1, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 72);
+  assert.equal(find(server.objects, 'shape_b').left, 499);
+  assert.deepEqual(reloaded.recoveries, [{ recovered: 1, conflicts: 1, kept: 0 }]);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('a recovered change that already reached the board another way is not applied again', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 81 }));
+  await wait(30);
+  a.controller.dispose();
+  await b.commit(patch('shape_a', { left: 81 }));
+  const opsBefore = server.ops.length;
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.ops.length, opsBefore + 1);
+  assert.equal(server.revision, 1);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('pending operations of another open tab are left alone until that tab stops beating', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, { foreignJournalAgeMs: 200 }, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 91 }));
+  await wait(30);
+  const other = createClient('B', server, { foreignJournalAgeMs: 200 }, { journalStore: store, instanceId: 'inst_b' });
+  assert.deepEqual(await other.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(pendingEntries(store).length, 1);
+  assert.equal(server.revision, 0);
+  other.controller.dispose();
+  store.records.inst_a.beat = Date.now() - 1000;
+  const later = createClient('C', server, { foreignJournalAgeMs: 200 }, { journalStore: store, instanceId: 'inst_c' });
+  assert.equal((await later.controller.recoverPending()).recovered, 1);
+  assert.equal(find(server.objects, 'shape_a').left, 91);
+  later.controller.dispose();
+  a.controller.dispose();
+});
+
+test('leaving through the app waits for the in-flight operation and pending edits before the final save', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, { editDelayMs: 500 }, { journalStore: store, instanceId: 'inst_a' });
+  a.commit(patch('shape_a', { left: 101 }));
+  assert.equal(a.controller.hasUnsavedWork(), true);
+  await a.controller.drain();
+  assert.equal(a.controller.hasUnsavedWork(), false);
+  assert.equal(find(server.objects, 'shape_a').left, 101);
+  assert.deepEqual(await a.controller.persist(null, { final: true }), { ok: true, skipped: true });
+  assert.deepEqual(pendingEntries(store), []);
+  assert.equal(a.controller.canRecover(), true);
+  const noJournal = createClient('N', server);
+  assert.equal(noJournal.controller.canRecover(), false);
+  a.controller.dispose();
+});
+
+test('a final save made while an operation is in flight waits for it and sends only the newer edit', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 111 }));
+  await wait(30);
+  a.edit(patch('shape_c', { left: 112 }));
+  const final = a.controller.persist(null, { final: true });
+  const [inFlight] = a.stalled;
+  a.stall = false;
+  inFlight.resolve(server.operation(a, inFlight.payload));
+  assert.deepEqual(await final, { ok: true, operation: true });
+  assert.equal(find(server.objects, 'shape_a').left, 111);
+  assert.equal(find(server.objects, 'shape_c').left, 112);
+  assert.equal(server.revision, 2);
+  assert.equal(server.saves.length, 0);
+});
+
+test('a failed final save keeps the change journaled and the next visit restores it', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_c', { top: 121 }));
+  a.connected = false;
+  a.saveFails = true;
+  const result = await a.controller.persist(null, { final: true });
+  assert.equal(result.ok, false);
+  assert.equal(pendingEntries(store).length, 1);
+  a.controller.dispose();
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  assert.equal((await reloaded.controller.recoverPending()).recovered, 1);
+  assert.equal(find(server.objects, 'shape_c').top, 121);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('a journal that cannot be written turns the leave warning back on and keeps unsaved work visible', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.failWrites = true;
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 131 }));
+  await wait(30);
+  assert.equal(a.controller.canRecover(), false);
+  assert.equal(a.controller.hasUnsavedWork(), true);
+  a.controller.dispose();
+});
+
+test('recovery that meets a disconnected socket keeps every entry for later instead of dropping it', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  a.commit(patch('shape_a', { left: 141 }));
+  await wait(30);
+  a.controller.dispose();
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2' });
+  reloaded.connected = false;
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 1 });
+  assert.equal(pendingEntries(store).length, 1);
+  reloaded.connected = true;
+  assert.equal((await reloaded.controller.recoverPending()).recovered, 1);
+  assert.equal(find(server.objects, 'shape_a').left, 141);
+  reloaded.controller.dispose();
 });

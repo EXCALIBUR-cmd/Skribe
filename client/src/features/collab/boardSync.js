@@ -1,5 +1,7 @@
 export const OPERATION_BYTE_LIMIT = 900000;
 
+export const OPERATION_LIMITS = Object.freeze({ maxUpserts: 1000, maxDeletes: 1000, maxOrder: 5000 });
+
 export const UNSETTABLE_FIELDS = Object.freeze([
   'elementId',
   'strokeId',
@@ -57,7 +59,7 @@ export const sameObjectList = (a, b) => (
   a.length === b.length && a.every((object, index) => object.id === b[index].id && sameObject(object, b[index]))
 );
 
-export const buildCanvasOperation = ({ serverObjects, canvasObjects, baseRevision, kind, opId = createOperationId(), storedObjects = serverObjects }) => {
+export const buildCanvasOperation = ({ serverObjects, canvasObjects, baseRevision, kind, opId = createOperationId(), storedObjects = serverObjects, orderMode = 'always' }) => {
   const server = indexObjects(serverObjects);
   const stored = indexObjects(storedObjects);
   const current = (Array.isArray(canvasObjects) ? canvasObjects : []).filter((object) => object && typeof object.id === 'string' && object.id);
@@ -78,8 +80,20 @@ export const buildCanvasOperation = ({ serverObjects, canvasObjects, baseRevisio
     || serverOrder.some((id, index) => id !== order[index]);
 
   if (upserts.length === 0 && deletes.length === 0 && !orderChanged) return null;
-  return { opId, baseRevision, kind, upserts, deletes, order };
+  const operation = { opId, baseRevision, kind, upserts, deletes };
+  if (orderMode === 'auto') {
+    const projected = applyCanvasOperation(storedObjects, operation);
+    const projectedIds = projected.ok ? projected.objects.map((object) => object.id) : null;
+    if (projectedIds && projectedIds.length === order.length && projectedIds.every((id, index) => id === order[index])) {
+      return upserts.length > 0 || deletes.length > 0 ? operation : null;
+    }
+  }
+  return { ...operation, order };
 };
+
+export const exceedsOperationLimits = (op) => (op.upserts || []).length > OPERATION_LIMITS.maxUpserts
+  || (op.deletes || []).length > OPERATION_LIMITS.maxDeletes
+  || (Array.isArray(op.order) && op.order.length > OPERATION_LIMITS.maxOrder);
 
 export const operationByteSize = (payload) => new TextEncoder().encode(JSON.stringify(payload)).length;
 
@@ -254,7 +268,9 @@ export const nextLocalBase = ({ merge, theirs, previousBaseLocal, canvasObjects 
 
 export default {
   OPERATION_BYTE_LIMIT,
+  OPERATION_LIMITS,
   UNSETTABLE_FIELDS,
+  exceedsOperationLimits,
   createOperationId,
   sameObject,
   sameObjectList,
