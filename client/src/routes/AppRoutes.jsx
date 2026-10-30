@@ -7,6 +7,7 @@ import BoardsPage from '../pages/BoardsPage';
 import MainCanvasPage from '../pages/MainCanvasPage';
 import AIAssistPage from '../pages/AIAssistPage';
 import MobileCanvasPage from '../pages/MobileCanvasPage';
+import SettingsPage from '../pages/SettingsPage';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 
 export const AppRoutes = () => {
@@ -53,6 +54,14 @@ export const AppRoutes = () => {
         element={
           <ProtectedRoute>
             <MobileCanvasPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/:categoryId?"
+        element={
+          <ProtectedRoute>
+            <SettingsPage />
           </ProtectedRoute>
         }
       />

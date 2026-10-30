@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
+import { flushCanvasBeforeNavigate, openSettingsFromBoard } from '../features/settings/boardSettingsNavigation';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
 import ContextMenu from '../components/canvas/ContextMenu';
@@ -1141,6 +1142,42 @@ export const MainCanvasPage = () => {
     navigate('/boards');
   }, [boardId, flushViewportSave, navigate]);
 
+  const isOpeningSettingsRef = useRef(false);
+  const handleOpenSettings = useCallback(async () => {
+    if (isOpeningSettingsRef.current) return;
+    isOpeningSettingsRef.current = true;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    const currentJson = latestCanvasDataRef.current ? JSON.stringify(latestCanvasDataRef.current) : null;
+    setSaveStatus('saving');
+    await openSettingsFromBoard({
+      flush: async () => {
+        const result = await flushCanvasBeforeNavigate({
+          controller: boardId ? syncControllerRef.current : null,
+          canvasData: latestCanvasDataRef.current,
+          hasUnsavedLegacyChanges: !isInitialLoadingRef.current && currentJson !== null && currentJson !== lastSavedJsonRef.current,
+          flushViewport: flushViewportSave
+        });
+        if (result.saved) lastSavedJsonRef.current = currentJson;
+        if (result.ok) setSaveStatus('saved');
+        return result;
+      },
+      navigate,
+      from: `/board/${boardId}`,
+      onFailure: (result) => {
+        setSaveStatus('error');
+        addToast(
+          'Changes not saved',
+          result?.code === 'NO_SYNC_CONTROLLER'
+            ? 'This canvas is not saved to a board, so Settings cannot open without losing it.'
+            : 'Your latest changes could not be saved, so you are still on this board. Open Settings again to retry.',
+          'error',
+          'error'
+        );
+      }
+    });
+    isOpeningSettingsRef.current = false;
+  }, [addToast, boardId, flushViewportSave, navigate]);
+
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
       <MessCleanupPreviewModal
@@ -1468,12 +1505,11 @@ export const MainCanvasPage = () => {
         </button>
 
         <button
-          onClick={() => {
-            addToast('Settings', 'Skribe Preferences & Shortcuts', 'settings', 'info');
-          }}
+          onClick={handleOpenSettings}
           className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105 transition-all cursor-pointer relative group"
           data-toolbar-tooltip="Settings"
           title="Settings"
+          aria-label="Settings"
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
         </button>
