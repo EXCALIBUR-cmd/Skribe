@@ -1,13 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { Navigate, NavLink, useParams } from 'react-router-dom';
+import { Navigate, NavLink, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   SETTINGS_CATEGORIES,
   DEFAULT_SETTINGS_CATEGORY_ID,
   getSettingsCategory
 } from '../features/settings/settingsCategories';
+import { getBoardReturnPath } from '../features/settings/boardSettingsNavigation';
 
 export const SettingsPage = () => {
   const { categoryId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnPath = getBoardReturnPath(location.state);
   const category = getSettingsCategory(categoryId);
   const activeLinkRef = useRef(null);
 
@@ -16,11 +20,21 @@ export const SettingsPage = () => {
   }, [categoryId]);
 
   if (!category) {
-    return <Navigate to={`/settings/${DEFAULT_SETTINGS_CATEGORY_ID}`} replace />;
+    return <Navigate to={`/settings/${DEFAULT_SETTINGS_CATEGORY_ID}`} state={location.state} replace />;
   }
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+      {returnPath && (
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="mb-4 -ml-2 h-8 px-2 rounded-[12px] flex items-center gap-1 font-label text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+          <span>Back to board</span>
+        </button>
+      )}
       <header className="mb-6 md:mb-8">
         <h1 className="font-headline text-3xl font-bold text-on-surface">Settings</h1>
         <p className="font-body text-sm text-on-surface-variant mt-1">
@@ -35,6 +49,8 @@ export const SettingsPage = () => {
               <li key={item.id} className="shrink-0">
                 <NavLink
                   to={`/settings/${item.id}`}
+                  state={location.state}
+                  replace
                   ref={item.id === category.id ? activeLinkRef : undefined}
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 h-10 px-3 rounded-[12px] font-label text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
