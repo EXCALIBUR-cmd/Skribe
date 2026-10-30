@@ -57,7 +57,7 @@ Skribe is an infinite whiteboard for teams. Everyone on a board sees the same ca
 
 <br />
 
-Press **Clean up** and Skribe reads the board the way a teammate would. It sends the board's objects and a snapshot of the canvas to Google Gemini, which identifies flows, groups and annotations. Skribe then proposes the smallest local change that makes the board clearer. You see a preview first, and nothing moves until you apply it.
+Press **Clean up** and Skribe reads the board the way a teammate would. It sends the board's objects and a snapshot of the canvas to Groq (`qwen/qwen3.8-27b`), which identifies flows, groups and annotations. Skribe then proposes the smallest local change that makes the board clearer. You see a preview first, and nothing moves until you apply it.
 
 | It improves | It never |
 | --- | --- |
@@ -103,8 +103,8 @@ flowchart LR
   UI <-->|"WebSocket"| RT
   UI -->|"board snapshot or transcript"| AI
   API --> DB[("MongoDB")]
-  AI -->|"layout analysis"| Gemini["Google Gemini"]
-  AI -->|"intent parsing"| Groq["Groq"]
+  AI -->|"layout analysis"| Groq["Groq"]
+  AI -->|"intent parsing"| Groq
 ```
 
 Skribe keeps two kinds of traffic apart. Durable state, meaning accounts, boards and their canvas data, goes through the REST API into MongoDB. Live collaboration travels through one Socket.IO room per board, so cursors and strokes never wait on the database. AI requests run only on the server, so API keys never reach the browser.
@@ -117,7 +117,7 @@ You sign in with email and password or with Google. Sessions are JSON Web Tokens
 | Real time | Socket.IO 4 |
 | Server | Node.js, Express 4, Helmet, Passport with Google OAuth 2.0, JSON Web Tokens |
 | Data | MongoDB with Mongoose 8 |
-| AI | Google Gemini through `@google/genai` for Mess Cleanup, Groq for voice commands |
+| AI | Groq for Mess Cleanup (`qwen/qwen3.8-27b`) and voice commands (`openai/gpt-oss-20b`) |
 | Quality | Node's built-in test runner, oxlint |
 
 ## Run it locally
@@ -149,7 +149,7 @@ Open http://localhost:5173. The API listens on http://localhost:5000.
 | `JWT_SECRET` | Signing session tokens | Yes |
 | `PORT`, `CLIENT_URL`, `NODE_ENV` | API port, allowed client origin, environment | No, defaults are `5000`, `http://localhost:5173` and `development` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | Sign in with Google | Only for Google sign-in |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Mess Cleanup analysis | Only for Mess Cleanup |
+| `GROQ_MESS_CLEANUP_API_KEY`, `MESS_CLEANUP_MODEL` | Mess Cleanup analysis, default model `qwen/qwen3.8-27b` | Only for Mess Cleanup |
 | `GROQ_API_KEY`, `VOICE_COMMAND_MODEL` | Voice command interpretation, default model `openai/gpt-oss-20b` | Only for voice commands |
 
 Everything else works without the AI keys. Mess Cleanup and voice commands report that they are not configured instead of changing the board.

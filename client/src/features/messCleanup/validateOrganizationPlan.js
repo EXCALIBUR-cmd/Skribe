@@ -36,27 +36,24 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
     }
   });
 
-  let rawSections = [];
   let rootTitleObjId = null;
-
-  if (rawPlan?.document && typeof rawPlan.document === 'object') {
-    if (Array.isArray(rawPlan.document.sections)) {
-      rawSections = rawPlan.document.sections;
-    }
-    if (rawPlan.document.titleObjectId && validObjectIds.has(rawPlan.document.titleObjectId)) {
-      rootTitleObjId = String(rawPlan.document.titleObjectId);
-    }
-  } else if (Array.isArray(rawPlan?.sections)) {
-    rawSections = rawPlan.sections;
+  if (rawPlan?.document?.titleObjectId && validObjectIds.has(rawPlan.document.titleObjectId)) {
+    rootTitleObjId = String(rawPlan.document.titleObjectId);
   }
+
+  const rawSections = [rawPlan?.document?.sections, rawPlan?.sections, rawPlan?.groups].find(Array.isArray) || [];
+  const sectionsFromGroups = rawSections === rawPlan?.groups;
 
   const assignedObjectIds = new Set();
   const sanitizedSections = [];
+  const groupTypes = [];
 
   rawSections.forEach((section, index) => {
     if (!section || typeof section !== 'object') return;
 
-    const sectionId = section.id && typeof section.id === 'string' ? section.id : `section_${index + 1}`;
+    const sectionId = typeof section.id === 'string' && section.id && !sanitizedSections.some((existing) => existing.id === section.id)
+      ? section.id
+      : `section_${index + 1}`;
     const secType = VALID_SECTION_TYPES.has(section.type) ? section.type : 'mixed';
     const layoutHint = VALID_LAYOUT_HINTS.has(section.layoutHint) ? section.layoutHint : 'flow';
 
@@ -86,6 +83,7 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
       ? section.children.filter((c) => typeof c === 'string')
       : [];
 
+    groupTypes.push(typeof section.type === 'string' ? section.type : secType);
     sanitizedSections.push({
       id: sectionId,
       type: secType,
@@ -132,6 +130,7 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
 
   sanitizedSections.forEach((sec) => {
     sec.objectIds = sortIds(sec.objectIds);
+    if (sec.titleObjectId && !sec.objectIds.includes(sec.titleObjectId)) sec.titleObjectId = null;
   });
 
   const unassignedObjectIds = [];
@@ -213,6 +212,15 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
 
   const resolvedModel = rawPlan?.source?.model || rawPlan?.model || 'gemini-3.8-flash';
   const resolvedEngine = rawPlan?.source?.engine || 'gemini';
+  const sanitizedGroups = sanitizedSections
+    .map((section, index) => ({
+      id: section.id,
+      type: groupTypes[index],
+      titleObjectId: section.titleObjectId,
+      purpose: section.purpose,
+      objectIds: [...section.objectIds]
+    }))
+    .filter((group) => group.objectIds.length > 0);
 
   return {
     version: 2,
@@ -227,7 +235,7 @@ export const validateOrganizationPlan = (workspaceModel, rawPlan) => {
       model: resolvedModel
     },
     workspaceType,
-    ...(Array.isArray(rawPlan?.groups) ? { groups: rawPlan.groups } : {}),
+    ...(sectionsFromGroups ? { groups: sanitizedGroups } : {}),
     ...(Array.isArray(rawPlan?.readingOrder) ? { readingOrder: rawPlan.readingOrder } : {}),
     document: {
       titleObjectId: rootTitleObjId,

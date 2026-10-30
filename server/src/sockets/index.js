@@ -3,6 +3,10 @@ import config from '../config/env.js';
 import { socketAuthMiddleware } from './socketAuth.js';
 import { registerBoardHandlers, handleSocketDisconnect } from './boardHandlers.js';
 
+let socketServer = null;
+
+export const getSocketServer = () => socketServer;
+
 export const initSocketIO = (httpServer) => {
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -19,6 +23,7 @@ export const initSocketIO = (httpServer) => {
     transports: ['websocket', 'polling']
   });
 
+  socketServer = io;
   io.use(socketAuthMiddleware);
 
   io.on('connection', (socket) => {

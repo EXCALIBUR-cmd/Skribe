@@ -1,5 +1,8 @@
 import boardService from '../services/board.service.js';
-import { success } from '../utils/apiResponse.js';
+import config from '../config/env.js';
+import { error, success } from '../utils/apiResponse.js';
+import { getSocketServer } from '../sockets/index.js';
+import { boardRoomName } from '../sockets/boardHandlers.js';
 
 export class BoardController {
   async create(req, res, next) {
@@ -35,7 +38,7 @@ export class BoardController {
       const boardId = req.params.id;
       const board = await boardService.getBoardById(boardId, userId);
 
-      return success(res, { board }, 'Board retrieved successfully', 200);
+      return success(res, { board, collaboration: { operationsEnabled: config.collabOperationsEnabled } }, 'Board retrieved successfully', 200);
     } catch (err) {
       next(err);
     }
@@ -53,8 +56,15 @@ export class BoardController {
 
       const board = await boardService.updateBoard(boardId, userId, updatePayload);
 
+      if (updatePayload.canvasData !== undefined) {
+        getSocketServer()?.to(boardRoomName(boardId)).emit('board:revision', { boardId, revision: board.canvasRevision, source: 'save' });
+      }
+
       return success(res, { board }, 'Board updated successfully', 200);
     } catch (err) {
+      if (err.code && err.statusCode >= 400 && err.statusCode < 500) {
+        return error(res, err.message, err.statusCode, err.currentRevision === undefined ? { code: err.code } : { code: err.code, currentRevision: err.currentRevision });
+      }
       next(err);
     }
   }

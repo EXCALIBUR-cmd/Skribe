@@ -10,6 +10,8 @@ import {
   parseImageData
 } from '../services/geminiService.js';
 import messCleanupController from '../controllers/messCleanupController.js';
+import config from '../config/env.js';
+import { MESS_CLEANUP_RESPONSE_SCHEMA, analyzeWithGroq, buildGroqMessages, compactWorkspaceModel } from '../services/messCleanupGroqService.js';
 
 const sampleWorkspaceModel = {
   version: 1,
@@ -352,26 +354,27 @@ test('TEST 15: Normal request completion does not trigger abort in controller', 
   };
 
   const mockFetch = async () => new Response(JSON.stringify({
-    id: 'inter_test_ctrl',
-    model: 'gemini-3.8-flash',
-    status: 'completed',
-    output_text: JSON.stringify(validPlanResponse)
+    model: 'qwen/qwen3.8-27b',
+    choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(validPlanResponse) }, finish_reason: 'stop' }]
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
   const originalFetch = globalThis.fetch;
+  const originalKey = config.groqMessCleanupApiKey;
   globalThis.fetch = mockFetch;
+  config.groqMessCleanupApiKey = 'gsk_test_mess_cleanup';
 
   try {
     await messCleanupController.analyze(req, res, () => {});
     assert.equal(res.statusCode, 200);
     assert.equal(res.jsonBody.success, true);
     assert.equal(res.writableEnded, true);
-    assert.equal(res.jsonBody.data?.model, 'gemini-3.8-flash');
+    assert.equal(res.jsonBody.data?.model, 'qwen/qwen3.8-27b');
     if (closeListener) {
       closeListener();
     }
   } finally {
     globalThis.fetch = originalFetch;
+    config.groqMessCleanupApiKey = originalKey;
   }
 });
 
@@ -588,4 +591,227 @@ test('TEST 24: Caller AbortSignal reaches SDK fetch and aborts active outbound o
   }
 
   assert.equal(fetchAttempts, 1);
+});
+
+const GROQ_TEST_KEY = 'gsk_test_mess_cleanup_key';
+
+const groqFetch = (respond) => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return respond(url, init);
+  };
+  fetchImpl.calls = calls;
+  return fetchImpl;
+};
+
+const groqReply = (content, model = 'qwen/qwen3.8-27b') => new Response(JSON.stringify({
+  model,
+  choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }]
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+const hangingGroqFetch = () => groqFetch((url, init) => new Promise((resolve, reject) => {
+  init.signal.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')), { once: true });
+}));
+
+const collectObjectNodes = (node, found = []) => {
+  if (!node || typeof node !== 'object') return found;
+  if (node.properties) found.push(node);
+  Object.values(node.properties || {}).forEach((child) => collectObjectNodes(child, found));
+  if (node.items) collectObjectNodes(node.items, found);
+  return found;
+};
+
+test('GROQ 1: a valid structured plan comes back from exactly one Groq vision request', async () => {
+  const fetchImpl = groqFetch(() => groqReply(JSON.stringify(validPlanResponse)));
+  const plan = await analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl, model: 'qwen/qwen3.8-27b' });
+
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.deepEqual(plan.groups, validPlanResponse.groups);
+  assert.deepEqual(plan.source, { engine: 'groq', model: 'qwen/qwen3.8-27b' });
+
+  const [{ url, init, body }] = fetchImpl.calls;
+  assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(init.method, 'POST');
+  assert.equal(init.headers.Authorization, 'Bearer ' + GROQ_TEST_KEY);
+  assert.ok(init.signal instanceof AbortSignal);
+  assert.equal(body.model, 'qwen/qwen3.8-27b');
+  assert.deepEqual(body.response_format, { type: 'json_schema', json_schema: { name: 'organization_plan', strict: true, schema: MESS_CLEANUP_RESPONSE_SCHEMA } });
+  assert.equal(body.reasoning_effort, 'none');
+  assert.equal(body.reasoning_format, 'hidden');
+  assert.deepEqual(body.messages[0], { role: 'system', content: MESS_CLEANUP_SYSTEM_PROMPT });
+  assert.equal(body.messages[1].content[0].type, 'text');
+  assert.ok(body.messages[1].content[0].text.includes('WorkspaceModel JSON'));
+  assert.equal(body.messages[1].content[1].type, 'image_url');
+  assert.equal(body.messages[1].content[1].image_url.url, sampleScreenshot);
+  assert.equal(init.body.includes(GROQ_TEST_KEY), false);
+});
+
+test('GROQ 2: the response schema is the existing plan schema in strict form', () => {
+  const nodes = collectObjectNodes(MESS_CLEANUP_RESPONSE_SCHEMA);
+  assert.ok(nodes.length >= 5);
+  for (const node of nodes) {
+    assert.deepEqual([...node.required].sort(), Object.keys(node.properties).sort());
+    assert.equal(node.additionalProperties, false);
+  }
+  assert.deepEqual(MESS_CLEANUP_RESPONSE_SCHEMA.properties.groups.items.properties.titleObjectId.type, ['string', 'null']);
+  assert.equal(JSON.stringify(MESS_CLEANUP_RESPONSE_SCHEMA).includes('nullable'), false);
+  assert.equal(GEMINI_ORGANIZATION_PLAN_SCHEMA.properties.groups.items.properties.titleObjectId.nullable, true);
+});
+
+test('GROQ 3: provider failures map to the codes the client fallback understands, once, without leaking the key', async () => {
+  const cases = [
+    [401, 'AUTHENTICATION_FAILED', 401],
+    [403, 'AUTHENTICATION_FAILED', 401],
+    [429, 'RATE_LIMITED', 429],
+    [498, 'SERVICE_UNAVAILABLE', 503],
+    [500, 'SERVICE_UNAVAILABLE', 503],
+    [503, 'SERVICE_UNAVAILABLE', 503],
+    [400, 'INVALID_REQUEST', 400],
+    [413, 'RATE_LIMITED', 429]
+  ];
+  for (const [status, code, statusCode] of cases) {
+    const fetchImpl = groqFetch(() => new Response(JSON.stringify({ error: { message: 'Invalid API Key ' + GROQ_TEST_KEY, type: 'invalid_request_error' } }), { status }));
+    await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl }), (err) => {
+      assert.equal(err.code, code);
+      assert.equal(err.statusCode, statusCode);
+      assert.equal(JSON.stringify(err, Object.getOwnPropertyNames(err)).includes(GROQ_TEST_KEY), false);
+      return true;
+    });
+    assert.equal(fetchImpl.calls.length, 1);
+  }
+  const offline = groqFetch(() => { throw new TypeError('fetch failed'); });
+  await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: offline }), (err) => err.code === 'UPSTREAM_ERROR' && err.statusCode === 502);
+  assert.equal(offline.calls.length, 1);
+});
+
+test('GROQ 4: the deadline aborts the outbound request and reports a timeout', async () => {
+  const fetchImpl = hangingGroqFetch();
+  const started = Date.now();
+  await assert.rejects(
+    analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl, timeoutMs: 50, signal: new AbortController().signal }),
+    (err) => err.code === 'TIMEOUT' && err.statusCode === 504
+  );
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.equal(fetchImpl.calls[0].init.signal.aborted, true);
+});
+
+test('GROQ 5: a client disconnect aborts the outbound request', async () => {
+  const fetchImpl = hangingGroqFetch();
+  const caller = new AbortController();
+  const pending = analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl, timeoutMs: 5000, signal: caller.signal });
+  caller.abort();
+  await assert.rejects(pending, (err) => err.code === 'CLIENT_ABORTED' && err.statusCode === 499);
+  assert.equal(fetchImpl.calls[0].init.signal.aborted, true);
+});
+
+test('GROQ 6: missing configuration or invalid input never reaches the provider', async () => {
+  const fetchImpl = groqFetch(() => groqReply(JSON.stringify(validPlanResponse)));
+  await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: '', fetch: fetchImpl }), (err) => err.code === 'AUTHENTICATION_FAILED' && err.statusCode === 401);
+  await assert.rejects(analyzeWithGroq(null, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl }), (err) => err.code === 'INVALID_WORKSPACE_MODEL');
+  await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, '', { apiKey: GROQ_TEST_KEY, fetch: fetchImpl }), (err) => err.code === 'INVALID_IMAGE');
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl, signal: cancelled.signal }), (err) => err.code === 'CLIENT_ABORTED');
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('GROQ 7: empty, malformed or non-object completions are rejected', async () => {
+  const cases = [
+    [() => groqReply(''), 'EMPTY_COMPLETION'],
+    [() => groqReply('Sure, here is a plan.'), 'MALFORMED_JSON_RESPONSE'],
+    [() => groqReply('[1, 2, 3]'), 'MALFORMED_JSON_RESPONSE'],
+    [() => new Response(JSON.stringify({ model: 'qwen/qwen3.8-27b', choices: [] }), { status: 200 }), 'EMPTY_COMPLETION'],
+    [() => new Response('<html>gateway</html>', { status: 200 }), 'MALFORMED_JSON_RESPONSE']
+  ];
+  for (const [reply, code] of cases) {
+    const fetchImpl = groqFetch(reply);
+    await assert.rejects(analyzeWithGroq(sampleWorkspaceModel, sampleScreenshot, { apiKey: GROQ_TEST_KEY, fetch: fetchImpl }), (err) => err.code === code && err.statusCode === 502);
+  }
+});
+
+test('GROQ 8: the controller rejects an AI plan without groups so the client falls back', async () => {
+  const req = { body: { workspaceModel: sampleWorkspaceModel, image: sampleScreenshot } };
+  const res = {
+    statusCode: 200,
+    jsonBody: null,
+    writableEnded: false,
+    on() {},
+    removeListener() {},
+    status(code) { this.statusCode = code; return this; },
+    json(data) { this.jsonBody = data; this.writableEnded = true; return this; }
+  };
+  const originalFetch = globalThis.fetch;
+  const originalKey = config.groqMessCleanupApiKey;
+  globalThis.fetch = async () => groqReply(JSON.stringify({ version: 1, workspaceType: 'mixed', relationships: [] }));
+  config.groqMessCleanupApiKey = GROQ_TEST_KEY;
+  try {
+    await messCleanupController.analyze(req, res, () => {});
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.groqMessCleanupApiKey = originalKey;
+  }
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.jsonBody.success, false);
+  assert.equal(res.jsonBody.errors.code, 'INVALID_PLAN_SCHEMA');
+});
+
+test('GROQ 9: a real-shaped board is sent as a compact projection that keeps every id and link', () => {
+  const heavy = (id, extra) => ({
+    id,
+    sourceObjectId: id,
+    elementId: 'elem_1',
+    strokeId: null,
+    textLines: null,
+    position: { x: 688.4, y: 108.2 },
+    bounds: { x: 688.4, y: 108.2, width: 160.3, height: 109.6 },
+    size: { width: 160, height: 110 },
+    center: { x: 768, y: 163 },
+    scale: { x: 1, y: 1 },
+    originX: 'center',
+    originY: 'center',
+    fill: '#000000',
+    stroke: '#000000',
+    strokeLineJoin: 'miter',
+    shadow: { color: 'rgba(0, 0, 0, 0.12)', blur: 14, offsetX: 3, offsetY: 6 },
+    visual: { fill: '#000000', stroke: '#000000', strokeWidth: 2, opacity: 1, visible: true },
+    relationshipMetadata: { attachedTextId: null, parentShapeId: null, sourceShapeId: null, targetShapeId: null },
+    vector: { stroke: '#000000', strokeWidth: 2 },
+    ...extra
+  });
+  const longText = 'x'.repeat(400);
+  const board = {
+    version: 1,
+    board: {
+      objects: [
+        heavy('shape_1', { type: 'shape', originalType: 'rect', shapeType: 'rounded_rect', text: null, relationships: [{ type: 'contains_text', targetId: 'text_1' }, { type: 'shared_element', targetId: 'text_1' }] }),
+        heavy('text_1', { type: 'text', originalType: 'textbox', text: longText, fill: '#ffffff', style: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' }, relationships: [{ type: 'contained_by', targetId: 'shape_1' }] }),
+        null,
+        heavy('note_1', { type: 'note', originalType: 'rect', fill: null, metadata: { role: 'shape', isStickyNote: true, noteColor: '#fce7f3' }, strokeId: 'stroke_9', hasExplicitArrow: true })
+      ]
+    }
+  };
+
+  const compact = compactWorkspaceModel(board);
+  assert.deepEqual(compact.objects.map((object) => object.id), ['shape_1', 'text_1', 'note_1']);
+  assert.deepEqual(compact.objects[0].links, { text_1: 'contains_text' });
+  assert.deepEqual(compact.objects[1].links, { shape_1: 'contained_by' });
+  assert.equal(compact.objects[0].shape, 'rounded_rect');
+  assert.deepEqual(compact.objects[0].box, [688, 108, 160, 110]);
+  assert.equal(compact.objects[1].text.length, 160);
+  assert.equal(compact.objects[1].bold, true);
+  assert.equal(compact.objects[1].fontSize, 16);
+  assert.equal(compact.objects[2].color, '#fce7f3');
+  assert.equal(compact.objects[2].strokeId, 'stroke_9');
+  assert.equal(compact.objects[2].arrow, true);
+
+  const sent = JSON.stringify(compact);
+  for (const dropped of ['relationshipMetadata', 'visual', 'shadow', 'center', 'sourceObjectId', 'shared_element']) {
+    assert.equal(sent.includes(dropped), false, dropped);
+  }
+  assert.ok(sent.length * 4 < JSON.stringify(board).length);
+
+  const [, user] = buildGroqMessages(board, sampleScreenshot);
+  assert.ok(user.content[0].text.endsWith(sent));
 });

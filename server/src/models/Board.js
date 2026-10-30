@@ -28,6 +28,27 @@ const boardSchema = new mongoose.Schema(
         objects: []
       })
     },
+    canvasRevision: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    lastOperationRevision: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    recentOperations: {
+      select: false,
+      type: [
+        {
+          _id: false,
+          opId: { type: String, required: true },
+          revision: { type: Number, required: true }
+        }
+      ],
+      default: []
+    },
     viewportStates: {
       type: [mongoose.Schema.Types.Mixed],
       default: []
@@ -58,6 +79,7 @@ const boardSchema = new mongoose.Schema(
         ret.id = ret._id;
         delete ret._id;
         delete ret.__v;
+        delete ret.recentOperations;
         return ret;
       }
     }

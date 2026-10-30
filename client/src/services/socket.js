@@ -84,6 +84,16 @@ export const emit = (event, data) => {
   if (socket && socket.connected) socket.emit(event, data);
 };
 
+export const emitWithAck = (event, data, timeoutMs = 8000) => new Promise((resolve) => {
+  if (!socket || !socket.connected) {
+    resolve({ ok: false, code: 'DISCONNECTED' });
+    return;
+  }
+  socket.timeout(timeoutMs).emit(event, data, (err, response) => {
+    resolve(err ? { ok: false, code: 'ACK_TIMEOUT' } : response || { ok: false, code: 'EMPTY_ACK' });
+  });
+});
+
 export const getSocket = () => socket;
 
 const socketService = {
@@ -94,6 +104,7 @@ const socketService = {
   on,
   off,
   emit,
+  emitWithAck,
   getSocket
 };
 
