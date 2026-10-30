@@ -1,15 +1,17 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useT } from '../../context/PreferencesContext';
 
 export const FloatingNavBar = ({ isWheelOpen = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const t = useT();
 
   const navItems = [
-    { label: 'Home', icon: 'home', path: '/' },
-    { label: 'Boards', icon: 'dashboard', path: '/boards' },
-    { label: 'AI Assist', icon: 'auto_awesome', path: '/ai-assist' },
-    { label: 'Mobile', icon: 'smartphone', path: '/mobile' }
+    { label: t('nav.home'), icon: 'home', path: '/' },
+    { label: t('nav.boards'), icon: 'dashboard', path: '/boards' },
+    { label: t('nav.aiAssist'), icon: 'auto_awesome', path: '/ai-assist' },
+    { label: t('nav.mobile'), icon: 'smartphone', path: '/mobile' }
   ];
 
   return (

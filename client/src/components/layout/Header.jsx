@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useT } from '../../context/PreferencesContext';
 import { Button } from '../ui/Button';
 
 export const Header = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const t = useT();
   const [isHidden, setIsHidden] = useState(false);
 
   const isCanvasRoute = location.pathname === '/canvas' || location.pathname.startsWith('/board/');
@@ -77,13 +79,13 @@ export const Header = () => {
               className="bg-surface-container hover:bg-surface-container-high border-2 border-outline rounded-full px-3.5 py-1.5 font-label text-xs font-bold text-on-surface transition-all cursor-pointer flex items-center gap-1.5"
             >
               <span className="material-symbols-outlined text-base">dashboard</span>
-              <span>Boards</span>
+              <span>{t('nav.boards')}</span>
             </button>
             {!isCanvasRoute && (
               <button
                 onClick={() => navigate('/settings')}
-                title="Settings"
-                aria-label="Settings"
+                title={t('nav.settings')}
+                aria-label={t('nav.settings')}
                 aria-current={location.pathname.startsWith('/settings') ? 'page' : undefined}
                 className={`bg-surface-container hover:bg-surface-container-high border-2 rounded-full p-1.5 transition-all cursor-pointer flex items-center justify-center ${
                   location.pathname.startsWith('/settings') ? 'border-primary text-primary' : 'border-outline text-on-surface'
@@ -97,7 +99,7 @@ export const Header = () => {
               className="bg-error-container/40 text-on-error-container hover:bg-error-container text-xs font-bold px-3 py-1.5 rounded-full border border-error/20 transition-all cursor-pointer flex items-center gap-1"
             >
               <span className="material-symbols-outlined text-base">logout</span>
-              <span className="hidden sm:inline">Logout</span>
+              <span className="hidden sm:inline">{t('nav.logout')}</span>
             </button>
           </div>
         ) : (
@@ -106,13 +108,13 @@ export const Header = () => {
               to="/signin"
               className="px-4 py-2 font-label text-xs font-bold text-primary hover:text-secondary transition-colors"
             >
-              Sign In
+              {t('nav.signIn')}
             </Link>
             <Link
               to="/signup"
               className="bg-primary text-on-primary font-label text-xs font-bold px-4 py-2 rounded-full border-2 border-on-primary-fixed shadow-sm hover:scale-105 transition-all"
             >
-              Sign Up
+              {t('nav.signUp')}
             </Link>
           </div>
         )}
