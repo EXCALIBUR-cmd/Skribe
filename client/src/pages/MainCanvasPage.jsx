@@ -5,6 +5,7 @@ import { flushCanvasBeforeNavigate, openSettingsFromBoard } from '../features/se
 import { usePreferences } from '../context/PreferencesContext';
 import { resolveCanvasBackground } from '../features/settings/preferenceOptions';
 import BoardPreferencesPanel from '../components/canvas/BoardPreferencesPanel';
+import AIAssistantMenu from '../components/canvas/AIAssistantMenu';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
 import ContextMenu from '../components/canvas/ContextMenu';
@@ -721,6 +722,7 @@ export const MainCanvasPage = () => {
   });
 
   const [activeWheel, setActiveWheel] = useState(null);
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [toolbarTooltip, setToolbarTooltip] = useState(null);
   const [messCleanupPreview, setMessCleanupPreview] = useState({
@@ -833,18 +835,7 @@ export const MainCanvasPage = () => {
     }
   };
 
-  const handleToggleAIWheel = (e) => {
-    e.stopPropagation();
-    if (activeWheel === 'ai') {
-      setActiveWheel(null);
-    } else {
-      if (aiBtnRef.current) {
-        const rect = aiBtnRef.current.getBoundingClientRect();
-        setWheelAnchorPos({ x: rect.right + 120, y: rect.top + rect.height / 2 });
-      }
-      setActiveWheel('ai');
-    }
-  };
+  const closeAIAssistant = useCallback(() => setIsAIAssistantOpen(false), []);
 
   const aiWheelItems = useMemo(() => [
     {
@@ -1532,9 +1523,13 @@ export const MainCanvasPage = () => {
 
         <button
           ref={aiBtnRef}
-          onClick={handleToggleAIWheel}
+          onClick={() => setIsAIAssistantOpen((open) => !open)}
+          aria-expanded={isAIAssistantOpen}
+          aria-haspopup="dialog"
+          aria-label={t('toolbar.ai')}
+          data-ai-assistant-toggle
           className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
-            activeWheel === 'ai'
+            isAIAssistantOpen
               ? 'bg-primary text-on-primary shadow-md scale-105 ring-2 ring-primary ring-offset-1 font-bold'
               : 'bg-surface-container-high text-accent hover:bg-primary hover:text-on-primary hover:scale-105'
           }`}
@@ -1622,6 +1617,7 @@ export const MainCanvasPage = () => {
       >
         <button
           ref={fabRef}
+          data-tool-wheel-trigger
           onClick={handleToggleFABWheel}
           className={`w-14 h-14 rounded-full border-2 border-primary sticker-shadow flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-95 group focus:outline-none focus:ring-4 focus:ring-primary/30 ${
             activeWheel === 'tools'
@@ -1670,13 +1666,12 @@ export const MainCanvasPage = () => {
         }}
       />
 
-      <ToolWheel
-        isOpen={activeWheel === 'ai'}
-        onClose={() => setActiveWheel(null)}
-        title="AI Assistant"
-        anchorPos={wheelAnchorPos}
-        activeToolId={null}
-        onSelectTool={() => setActiveWheel(null)}
+      <AIAssistantMenu
+        open={isAIAssistantOpen}
+        onClose={closeAIAssistant}
+        items={aiWheelItems}
+        anchorRef={aiBtnRef}
+        title={t('toolbar.ai')}
       />
     </div>
   );
