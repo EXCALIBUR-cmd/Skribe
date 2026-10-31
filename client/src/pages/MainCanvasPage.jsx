@@ -6,6 +6,8 @@ import { usePreferences } from '../context/PreferencesContext';
 import { resolveCanvasBackground } from '../features/settings/preferenceOptions';
 import BoardPreferencesPanel from '../components/canvas/BoardPreferencesPanel';
 import AIAssistantMenu from '../components/canvas/AIAssistantMenu';
+import AIAssistantPanel from '../components/canvas/AIAssistantPanel';
+import { ASSISTANT_ACTIONS, applyAssistantResult, buildBoardContext } from '../features/aiAssistant/assistantActions';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
 import ContextMenu from '../components/canvas/ContextMenu';
@@ -723,6 +725,7 @@ export const MainCanvasPage = () => {
 
   const [activeWheel, setActiveWheel] = useState(null);
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [activeAIAction, setActiveAIAction] = useState(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [toolbarTooltip, setToolbarTooltip] = useState(null);
   const [messCleanupPreview, setMessCleanupPreview] = useState({
@@ -837,53 +840,22 @@ export const MainCanvasPage = () => {
 
   const closeAIAssistant = useCallback(() => setIsAIAssistantOpen(false), []);
 
-  const aiWheelItems = useMemo(() => [
-    {
-      id: 'brainstorm',
-      label: 'Brainstorm',
-      icon: 'lightbulb',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('brainstorm');
-        addToast('AI Brainstorm', 'Generated sticky note ideas', 'auto_awesome', 'success');
-      }
-    },
-    {
-      id: 'architecture',
-      label: 'Architecture Assist',
-      icon: 'account_tree',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('architecture');
-        addToast('AI Architecture Assist', 'Generated system architecture blocks', 'auto_awesome', 'success');
-      }
-    },
-    {
-      id: 'summarize',
-      label: 'Summarize Canvas',
-      icon: 'description',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('summarize');
-        addToast('AI Summary', 'Summarized whiteboard elements into notes', 'description', 'info');
-      }
-    },
-    {
-      id: 'sticky_gen',
-      label: 'Generate Sticky Notes',
-      icon: 'grid_view',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('sticky_gen');
-        addToast('AI Sticky Generator', 'Created sticky note cluster', 'grid_view', 'success');
-      }
-    },
-    {
-      id: 'analyze_diagram',
-      label: 'Analyze Diagram',
-      icon: 'analytics',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('analyze_diagram');
-        addToast('AI Diagram Insights', 'Analyzed whiteboard structure', 'analytics', 'info');
-      }
+  const aiWheelItems = useMemo(() => ASSISTANT_ACTIONS.map((item) => ({
+    ...item,
+    action: () => setActiveAIAction(item.id)
+  })), []);
+
+  const closeAIAction = useCallback(() => setActiveAIAction(null), []);
+
+  const getAIBoardContext = useCallback(() => buildBoardContext(fabricCanvasRef.current?.getCanvas()?.getObjects() || []), []);
+
+  const handleApplyAIResult = useCallback(async (actionId, payload) => {
+    try {
+      await applyAssistantResult(actionId, payload, fabricCanvasRef.current);
+    } catch {
+      addToast('AI Assistant', 'The result could not be added to the board.', 'error', 'error');
     }
-  ], [addToast]);
+  }, [addToast]);
 
   const skribeFeatureItems = [
     {
@@ -1673,6 +1645,16 @@ export const MainCanvasPage = () => {
         anchorRef={aiBtnRef}
         title={t('toolbar.ai')}
       />
+
+      {activeAIAction && (
+        <AIAssistantPanel
+          key={activeAIAction}
+          actionId={activeAIAction}
+          onClose={closeAIAction}
+          getBoardContext={getAIBoardContext}
+          onApply={handleApplyAIResult}
+        />
+      )}
     </div>
   );
 };
