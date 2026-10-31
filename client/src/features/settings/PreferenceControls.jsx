@@ -1,6 +1,6 @@
 import React, { useCallback, useId, useState } from 'react';
 import { usePreferences } from '../../context/PreferencesContext';
-import { APPEARANCE_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS } from './preferenceOptions';
+import { APPEARANCE_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS, QUICK_DICTATION_INTERVALS } from './preferenceOptions';
 
 const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
 
@@ -102,9 +102,9 @@ export const LandingChoice = () => {
   );
 };
 
-export const ReduceMotionSwitch = ({ labelledBy, describedBy }) => {
+export const PreferenceSwitch = ({ name, labelledBy, describedBy }) => {
   const { preferences, update, errorMessage } = usePreferenceUpdate();
-  const on = preferences.reduceMotion;
+  const on = preferences[name];
   return (
     <div>
       <button
@@ -113,11 +113,33 @@ export const ReduceMotionSwitch = ({ labelledBy, describedBy }) => {
         aria-checked={on}
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
-        onClick={() => update({ reduceMotion: !on })}
+        onClick={() => update({ [name]: !on })}
         className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${on ? 'bg-primary' : 'bg-surface-container-highest border border-outline-variant'} ${focusRing}`}
       >
         <span className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-6 bg-on-primary' : 'translate-x-1 bg-on-surface-variant'}`} />
       </button>
+      {errorMessage}
+    </div>
+  );
+};
+
+export const ReduceMotionSwitch = (props) => <PreferenceSwitch name="reduceMotion" {...props} />;
+
+export const QuickDictationIntervalSelect = ({ id }) => {
+  const { preferences, update, t, errorMessage } = usePreferenceUpdate();
+  return (
+    <div>
+      <select
+        id={id}
+        value={preferences.quickDictationInterval}
+        disabled={!preferences.quickDictation}
+        onChange={(event) => update({ quickDictationInterval: Number(event.target.value) })}
+        className={`min-h-11 rounded-[12px] border border-outline-variant bg-surface px-3 text-sm text-on-surface disabled:opacity-50 cursor-pointer ${focusRing}`}
+      >
+        {QUICK_DICTATION_INTERVALS.map((value) => (
+          <option key={value} value={value}>{t('quickDictation.intervalOption', { ms: value })}</option>
+        ))}
+      </select>
       {errorMessage}
     </div>
   );

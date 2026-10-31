@@ -7,7 +7,13 @@ import {
 } from '../features/settings/settingsCategories';
 import { getBoardReturnPath } from '../features/settings/boardSettingsNavigation';
 import { useT } from '../context/PreferencesContext';
-import { AppearanceChoice, LandingChoice, LanguageSelect, ReduceMotionSwitch } from '../features/settings/PreferenceControls';
+import { AppearanceChoice, LandingChoice, LanguageSelect, PreferenceSwitch, QuickDictationIntervalSelect, ReduceMotionSwitch } from '../features/settings/PreferenceControls';
+import { MicrophoneStatus } from '../features/voice/QuickDictation.jsx';
+
+const SHORTCUTS = [
+  { labelKey: 'shortcuts.quickDictation', keysKey: 'shortcuts.quickDictationKeys' },
+  { labelKey: 'shortcuts.pan', keysKey: 'shortcuts.panKeys' }
+];
 
 const SettingRow = ({ id, title, description, labelFor, children }) => (
   <div className="py-6 first:pt-0 border-b border-outline-variant/60 last:border-b-0">
@@ -40,6 +46,35 @@ const CategoryContent = ({ categoryId, label }) => {
     return (
       <SettingRow id="setting-motion" title={t('motion.title')} description={t('motion.description')}>
         <ReduceMotionSwitch labelledBy="setting-motion-title" describedBy="setting-motion-description" />
+      </SettingRow>
+    );
+  }
+  if (categoryId === 'voice-ai') {
+    return (
+      <>
+        <SettingRow id="setting-quick-dictation" title={t('quickDictation.title')} description={t('quickDictation.description')}>
+          <PreferenceSwitch name="quickDictation" labelledBy="setting-quick-dictation-title" describedBy="setting-quick-dictation-description" />
+        </SettingRow>
+        <SettingRow id="setting-quick-dictation-interval" labelFor="setting-quick-dictation-interval-select" title={t('quickDictation.intervalTitle')} description={t('quickDictation.intervalDescription')}>
+          <QuickDictationIntervalSelect id="setting-quick-dictation-interval-select" />
+        </SettingRow>
+        <SettingRow id="setting-microphone" title={t('quickDictation.micTitle')} description={t('quickDictation.micDescription')}>
+          <MicrophoneStatus />
+        </SettingRow>
+      </>
+    );
+  }
+  if (categoryId === 'tools') {
+    return (
+      <SettingRow id="setting-shortcuts" title={t('shortcuts.title')} description={t('shortcuts.description')}>
+        <dl className="flex flex-col gap-2">
+          {SHORTCUTS.map((shortcut) => (
+            <div key={shortcut.labelKey} className="flex items-center justify-between gap-4 rounded-[12px] bg-surface-container-low px-4 py-3">
+              <dt className="font-body text-sm text-on-surface">{t(shortcut.labelKey)}</dt>
+              <dd className="font-label text-xs font-bold text-on-surface-variant">{t(shortcut.keysKey)}</dd>
+            </div>
+          ))}
+        </dl>
       </SettingRow>
     );
   }

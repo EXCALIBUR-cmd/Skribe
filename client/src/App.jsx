@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { PreferencesProvider } from './context/PreferencesContext';
 import AppLayout from './components/layout/AppLayout';
 import AppRoutes from './routes/AppRoutes';
+import QuickDictation from './features/voice/QuickDictation.jsx';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <AppLayout>
             <AppRoutes />
           </AppLayout>
+          <QuickDictation />
         </PreferencesProvider>
       </AuthProvider>
     </BrowserRouter>
