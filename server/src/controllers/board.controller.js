@@ -59,6 +59,9 @@ export class BoardController {
       if (updatePayload.canvasData !== undefined) {
         getSocketServer()?.to(boardRoomName(boardId)).emit('board:revision', { boardId, revision: board.canvasRevision, source: 'save' });
       }
+      if (updatePayload.canvasBackground !== undefined) {
+        getSocketServer()?.to(boardRoomName(boardId)).emit('board:preferences', { boardId, canvasBackground: board.canvasBackground });
+      }
 
       return success(res, { board }, 'Board updated successfully', 200);
     } catch (err) {

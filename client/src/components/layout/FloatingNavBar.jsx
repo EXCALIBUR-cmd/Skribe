@@ -1,20 +1,22 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useT } from '../../context/PreferencesContext';
 
 export const FloatingNavBar = ({ isWheelOpen = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const t = useT();
 
   const navItems = [
-    { label: 'Home', icon: 'home', path: '/' },
-    { label: 'Boards', icon: 'dashboard', path: '/boards' },
-    { label: 'AI Assist', icon: 'auto_awesome', path: '/ai-assist' },
-    { label: 'Mobile', icon: 'smartphone', path: '/mobile' }
+    { label: t('nav.home'), icon: 'home', path: '/' },
+    { label: t('nav.boards'), icon: 'dashboard', path: '/boards' },
+    { label: t('nav.aiAssist'), icon: 'auto_awesome', path: '/ai-assist' },
+    { label: t('nav.mobile'), icon: 'smartphone', path: '/mobile' }
   ];
 
   return (
     <nav
-      className={`fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full px-6 py-1.5 border-2 border-primary sticker-shadow-dock bg-surface/80 dark:bg-inverse-surface/90 backdrop-blur-lg flex items-center gap-6 z-40 transition-all duration-300 ${
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full px-6 py-1.5 border-2 border-primary sticker-shadow-dock bg-surface/80 backdrop-blur-lg flex items-center gap-6 z-40 transition-all duration-300 ${
         isWheelOpen ? 'opacity-40 blur-xs pointer-events-none' : ''
       }`}
     >

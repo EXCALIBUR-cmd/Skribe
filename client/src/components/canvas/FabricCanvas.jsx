@@ -31,6 +31,9 @@ import {
 import { resolveElementLinks, serializeCanvasObject, isTimestampObject, isTextObject, longestIncreasingIndices } from '../../utils/boardNormalization.js';
 import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
+import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../features/settings/canvasTheme.js';
+
+installThemeRendering(fabric.FabricObject);
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -68,6 +71,7 @@ export const FabricCanvas = forwardRef(({
   onLocalDrawStream,
   onLocalObjectRemoved,
   onLocalHistoryOperation,
+  canvasBackground = null,
   className = ''
 }, ref) => {
   const canvasRef = useRef(null);
@@ -2819,20 +2823,26 @@ export const FabricCanvas = forwardRef(({
       return executeVoiceCommand(command, style);
     },
 
-    triggerAIAction: (actionId) => {
-      if (actionId === 'brainstorm') {
-        generateAIStickyCluster(['Identify key user personas', 'Map onboarding user journey', 'Benchmark competitor flows']);
-      } else if (actionId === 'architecture') {
-        generateAIStickyCluster(['React Frontend Layer', 'REST/GraphQL API Gateway', 'PostgreSQL Data Store']);
-      } else if (actionId === 'summarize') {
-        generateAIStickyCluster(['Summary: 3 Core user features identified', 'Action: Finalize API endpoints']);
-      } else if (actionId === 'sticky_gen') {
-        generateAIStickyCluster(['Feature A: Drag-and-drop', 'Feature B: Realtime Cursor Sync', 'Feature C: Export to PDF']);
-      } else if (actionId === 'analyze_diagram') {
-        generateAIStickyCluster(['Insight: Highly modular component flow', 'Recommendation: Add caching layer']);
-      } else if (actionId === 'generate_flow') {
-        generateAIStickyCluster(['Step 1: User Login', 'Step 2: Dashboard View', 'Step 3: Canvas Interaction']);
-      }
+    addAIStickyNotes: (texts) => {
+      generateAIStickyCluster(Array.isArray(texts) ? texts.filter((text) => typeof text === 'string' && text.trim()) : []);
+    },
+
+    insertDiagramImage: async (image, meta) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas || !image?.dataUrl) return null;
+      const diagram = await fabric.FabricImage.fromURL(image.dataUrl);
+      if (fabricCanvasRef.current !== canvas) return null;
+      const zoom = canvas.getZoom() || 1;
+      const scale = Math.min(1, (canvas.width * 0.6) / zoom / diagram.width, (canvas.height * 0.6) / zoom / diagram.height);
+      const center = getViewportCenterPoint(canvas);
+      diagram.set({ left: center.x, top: center.y, originX: 'center', originY: 'center', scaleX: scale, scaleY: scale, aiMetadata: meta || null });
+      ensureObjectId(diagram);
+      canvas.add(diagram);
+      notifyLocalObjectAdded(diagram);
+      canvas.setActiveObject(diagram);
+      canvas.requestRenderAll();
+      saveState();
+      return diagram;
     },
 
     zoomIn: () => {
@@ -3970,6 +3980,10 @@ export const FabricCanvas = forwardRef(({
   }, []);
 
   useEffect(() => {
+    applyCanvasTheme(fabricCanvasRef.current, canvasBackground);
+  }, [canvasBackground]);
+
+  useEffect(() => {
     updatePanCursorAndSelection();
   }, [activeTool, activeColor]);
 
@@ -3984,7 +3998,15 @@ export const FabricCanvas = forwardRef(({
   }, [activeTool]);
 
   return (
-    <div ref={containerRef} className={`w-full h-full relative overflow-hidden ${className}`}>
+    <div
+      ref={containerRef}
+      className={`w-full h-full relative overflow-hidden ${className}`}
+      style={canvasBackground ? {
+        backgroundColor: canvasBackground,
+        backgroundImage: `radial-gradient(${isDarkSurface(canvasBackground) ? 'rgba(255, 255, 255, 0.08)' : 'rgba(30, 41, 59, 0.1)'} 1px, transparent 1px)`,
+        backgroundSize: '24px 24px'
+      } : undefined}
+    >
       <canvas ref={canvasRef} />
 
       {rotationBadge && (

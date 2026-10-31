@@ -6,6 +6,9 @@ import { CommandPalette } from '../components/ui/CommandPalette';
 import AnimatedModal from '../components/ui/AnimatedModal';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../context/PreferencesContext';
+
+const TAB_LABEL_KEYS = { 'All Boards': 'boards.all', Recent: 'boards.recent', Starred: 'boards.starred' };
 import apiClient from '../api/apiClient';
 
 const BoardCardTitleInput = ({ initialTitle, onSave, onCancel }) => {
@@ -46,6 +49,7 @@ const BoardCardTitleInput = ({ initialTitle, onSave, onCancel }) => {
 export const BoardsPage = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const t = useT();
 
   const [boards, setBoards] = useState([]);
   const [loadingBoards, setLoadingBoards] = useState(true);
@@ -299,7 +303,7 @@ export const BoardsPage = () => {
 
       <nav
         ref={sidebarRef}
-        aria-label="Boards navigation"
+        aria-label={t('boards.navigation')}
         className={`hidden md:flex flex-col py-6 fixed left-0 top-16 h-[calc(100vh-64px)] rounded-r-2xl bg-surface-container-lowest border-r-2 border-outline-variant shadow-md z-40 overflow-hidden ${
           isSidebarCollapsed ? 'w-20' : 'w-64'
         }`}
@@ -318,10 +322,10 @@ export const BoardsPage = () => {
             {!isSidebarCollapsed && (
               <div className="overflow-hidden">
                 <h2 className="font-headline font-bold text-sm text-primary tracking-tight whitespace-nowrap truncate max-w-[140px]">
-                  {user?.name || 'My Workspace'}
+                  {user?.name || t('boards.workspace')}
                 </h2>
                 <p className="font-body text-xs text-on-surface-variant whitespace-nowrap">
-                  {boards.length} active {boards.length === 1 ? 'board' : 'boards'}
+                  {boards.length === 1 ? t('boards.activeCountOne') : t('boards.activeCount', { count: boards.length })}
                 </p>
               </div>
             )}
@@ -331,8 +335,8 @@ export const BoardsPage = () => {
             className={`rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer ${
               isSidebarCollapsed ? 'w-10 h-8 flex items-center justify-center' : 'p-1.5'
             }`}
-            title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-            aria-label={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            title={isSidebarCollapsed ? t('boards.expandSidebar') : t('boards.collapseSidebar')}
+            aria-label={isSidebarCollapsed ? t('boards.expandSidebar') : t('boards.collapseSidebar')}
             aria-expanded={!isSidebarCollapsed}
           >
             <span className="material-symbols-outlined text-xl">
@@ -345,14 +349,14 @@ export const BoardsPage = () => {
           <button
             onClick={handleOpenCreateBoard}
             disabled={isCreatingBoard}
-            title={isSidebarCollapsed ? 'New Board' : undefined}
-            aria-label="New Board"
+            title={isSidebarCollapsed ? t('boards.new') : undefined}
+            aria-label={t('boards.new')}
             className={`bg-primary text-on-primary font-label text-sm font-bold rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-102 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
               isSidebarCollapsed ? 'w-12 h-12' : 'w-full py-3 px-3'
             }`}
           >
             <span className="material-symbols-outlined">add</span>
-            {!isSidebarCollapsed && <span>{isCreatingBoard ? 'Creating...' : 'New Board'}</span>}
+            {!isSidebarCollapsed && <span>{isCreatingBoard ? t('boards.creating') : t('boards.new')}</span>}
           </button>
         </div>
 
@@ -367,8 +371,8 @@ export const BoardsPage = () => {
               <li key={tab.name}>
                 <button
                   onClick={() => setActiveTab(tab.name)}
-                  title={isSidebarCollapsed ? tab.name : undefined}
-                  aria-label={tab.name}
+                  title={isSidebarCollapsed ? t(TAB_LABEL_KEYS[tab.name]) : undefined}
+                  aria-label={t(TAB_LABEL_KEYS[tab.name])}
                   aria-current={isActive ? 'page' : undefined}
                   className={`flex items-center rounded-xl font-label text-sm font-bold transition-all cursor-pointer relative overflow-hidden ${
                     isSidebarCollapsed ? 'w-12 h-12 justify-center' : 'w-full gap-3 py-3 px-3'
@@ -387,7 +391,7 @@ export const BoardsPage = () => {
                     {tab.icon}
                   </span>
                   {!isSidebarCollapsed && (
-                    <span className="whitespace-nowrap transition-opacity duration-200">{tab.name}</span>
+                    <span className="whitespace-nowrap transition-opacity duration-200">{t(TAB_LABEL_KEYS[tab.name])}</span>
                   )}
                 </button>
               </li>
@@ -398,15 +402,15 @@ export const BoardsPage = () => {
         <div className={`pt-2 shrink-0 ${isSidebarCollapsed ? 'flex flex-col items-center gap-2' : 'px-3 space-y-2'}`}>
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
-            title={isSidebarCollapsed ? 'Quick Search (⌘K)' : undefined}
-            aria-label="Quick Search"
+            title={isSidebarCollapsed ? `${t('boards.quickSearch')} (⌘K)` : undefined}
+            aria-label={t('boards.quickSearch')}
             className={`bg-surface-container-high text-on-surface-variant hover:text-primary rounded-xl border border-outline-variant/60 flex items-center text-xs font-label font-semibold cursor-pointer transition-colors ${
               isSidebarCollapsed ? 'w-12 h-12 justify-center' : 'w-full p-2.5 justify-between'
             }`}
           >
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-base">search</span>
-              {!isSidebarCollapsed && <span>Quick Search</span>}
+              {!isSidebarCollapsed && <span>{t('boards.quickSearch')}</span>}
             </div>
             {!isSidebarCollapsed && (
               <kbd className="bg-surface-container text-on-surface-variant px-1.5 py-0.5 rounded border border-outline-variant text-[10px]">
@@ -420,11 +424,11 @@ export const BoardsPage = () => {
             className={`bg-error-container/40 text-on-error-container hover:bg-error-container hover:text-on-error-container rounded-xl border border-error/20 flex items-center justify-center gap-2 text-xs font-label font-bold cursor-pointer transition-colors ${
               isSidebarCollapsed ? 'w-12 h-12' : 'w-full p-2.5'
             }`}
-            title="Log Out"
-            aria-label="Log Out"
+            title={t('boards.logOut')}
+            aria-label={t('boards.logOut')}
           >
             <span className="material-symbols-outlined text-base">logout</span>
-            {!isSidebarCollapsed && <span>Log Out</span>}
+            {!isSidebarCollapsed && <span>{t('boards.logOut')}</span>}
           </button>
         </div>
       </nav>
@@ -437,17 +441,17 @@ export const BoardsPage = () => {
                 <span className="material-symbols-outlined text-4xl text-secondary rotate-12" style={{ fontVariationSettings: "'FILL' 1" }}>
                   draw
                 </span>
-                {activeTab}
+                {t(TAB_LABEL_KEYS[activeTab] || 'boards.all')}
               </h1>
               <p className="font-body text-base text-on-surface-variant mt-1">
-                Pick up right where you left off. Welcome back, <strong className="text-primary">{user?.name || 'Creator'}</strong>.
+                {t('boards.welcome')} <strong className="text-primary">{user?.name || 'Creator'}</strong>.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
               <input
                 type="text"
-                placeholder="Search boards..."
+                placeholder={t('boards.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="bg-surface-container-low border-2 border-outline-variant rounded-full px-4 py-2 text-xs text-on-surface font-body outline-none focus:border-primary transition-colors w-48 md:w-64"
@@ -458,7 +462,7 @@ export const BoardsPage = () => {
                 className="bg-primary text-on-primary border-2 border-on-primary-fixed rounded-full px-4 py-2 font-label text-sm font-bold shadow-sm hover:scale-105 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-lg">add</span>
-                <span>New Board</span>
+                <span>{t('boards.new')}</span>
               </button>
             </div>
           </div>
@@ -466,7 +470,7 @@ export const BoardsPage = () => {
           {loadingBoards && (
             <div className="py-20 flex flex-col items-center justify-center">
               <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-              <span className="text-sm font-bold text-on-surface-variant">Loading your whiteboards...</span>
+              <span className="text-sm font-bold text-on-surface-variant">{t('boards.loading')}</span>
             </div>
           )}
 
@@ -482,7 +486,7 @@ export const BoardsPage = () => {
           {!loadingBoards && filteredBoards.length === 0 && (
             <div className="py-20 px-4 text-center border-2 border-dashed border-outline-variant/60 rounded-3xl bg-surface-container-lowest/50 flex flex-col items-center justify-center">
               <span className="material-symbols-outlined text-6xl text-primary mb-3">dashboard_customize</span>
-              <h3 className="font-headline text-xl font-bold text-on-surface">No whiteboards found</h3>
+              <h3 className="font-headline text-xl font-bold text-on-surface">{t('boards.empty')}</h3>
               <p className="font-body text-sm text-on-surface-variant mt-1 max-w-sm">
                 Create your first whiteboard to start brainstorming, sketching, and making a mess.
               </p>
@@ -491,7 +495,7 @@ export const BoardsPage = () => {
                 className="mt-6 bg-primary text-on-primary font-label text-sm font-bold py-3 px-6 rounded-full border-2 border-on-primary-fixed shadow-md hover:scale-105 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
               >
                 <span className="material-symbols-outlined">add</span>
-                <span>Create First Board</span>
+                <span>{t('boards.createFirst')}</span>
               </button>
             </div>
           )}

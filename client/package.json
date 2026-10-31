@@ -28,7 +28,8 @@
     "test:connector-collision-integrity": "node --test src/features/messCleanup/connectorCollisionIntegrity.test.js",
     "test:voice-dictation": "node --test src/features/voice/voiceDictation.test.js",
     "test:voice-commands": "node --test src/features/voice/voiceCommands.test.js",
-    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js",
+    "test:ai-assistant": "node --test src/features/aiAssistant/assistantActions.test.js",
+    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js src/features/settings/canvasTheme.test.js src/features/settings/landing.test.js src/features/i18n/translate.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -39,6 +40,7 @@
     "clsx": "^2.1.1",
     "fabric": "^7.4.0",
     "lucide-react": "^1.28.0",
+    "mermaid": "^12.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",

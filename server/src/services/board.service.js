@@ -2,7 +2,7 @@ import boardRepository from '../repositories/board.repository.js';
 import userRepository from '../repositories/user.repository.js';
 import config from '../config/env.js';
 
-const UPDATABLE_BOARD_FIELDS = Object.freeze(['title', 'canvasData', 'isArchived', 'thumbnail']);
+const UPDATABLE_BOARD_FIELDS = Object.freeze(['title', 'canvasData', 'isArchived', 'thumbnail', 'canvasBackground']);
 
 export class BoardService {
   _isOwner(board, userId) {
@@ -80,12 +80,23 @@ export class BoardService {
     const updatedBoard = await boardRepository.updateBoard(boardId, {
       lastOpenedAt: new Date()
     });
+    await userRepository.updateUser(userId, { lastOpenedBoard: board._id }).catch((err) => {
+      console.error('[BoardService] Failed to record last opened board:', err.message);
+    });
 
     const boardJson = (updatedBoard || board).toJSON();
     boardJson.viewportStates = (boardJson.viewportStates || []).filter(
       (state) => String(state.userId) === String(userId)
     );
     return boardJson;
+  }
+
+  async resolveLandingPath(user) {
+    const boardsPath = '/boards';
+    if (user?.preferences?.landingPage !== 'lastBoard' || !user.lastOpenedBoard) return boardsPath;
+    const board = await boardRepository.findBoardAccess(user.lastOpenedBoard);
+    if (!board || (!this._isOwner(board, user.id) && !this._isMember(board, user.id))) return boardsPath;
+    return `/board/${board._id}`;
   }
 
   async saveViewport(boardId, userId, viewport) {

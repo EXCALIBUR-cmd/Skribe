@@ -2,6 +2,12 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallba
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { flushCanvasBeforeNavigate, openSettingsFromBoard } from '../features/settings/boardSettingsNavigation';
+import { usePreferences } from '../context/PreferencesContext';
+import { resolveCanvasBackground } from '../features/settings/preferenceOptions';
+import BoardPreferencesPanel from '../components/canvas/BoardPreferencesPanel';
+import AIAssistantMenu from '../components/canvas/AIAssistantMenu';
+import AIAssistantPanel from '../components/canvas/AIAssistantPanel';
+import { ASSISTANT_ACTIONS, applyAssistantResult, buildBoardContext } from '../features/aiAssistant/assistantActions';
 import FabricCanvas from '../components/canvas/FabricCanvas';
 import PropertiesSidebar from '../components/properties/PropertiesSidebar';
 import ContextMenu from '../components/canvas/ContextMenu';
@@ -69,6 +75,9 @@ const createPendingOperationJournal = (boardId) => {
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
   const { user } = useAuth();
+  const { resolvedTheme, t } = usePreferences();
+  const [canvasBackground, setCanvasBackground] = useState('default');
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const navigate = useNavigate();
 
   const [boardTitle, setBoardTitle] = useState('Untitled Board');
@@ -286,6 +295,7 @@ export const MainCanvasPage = () => {
         if (res.success && res.data?.board) {
           setCurrentBoard(res.data.board);
           setBoardTitle(res.data.board.title || 'Untitled Board');
+          setCanvasBackground(res.data.board.canvasBackground || 'default');
           const canvasData = res.data.board.canvasData;
           const userViewportState = res.data.board.viewportStates?.find(
             (s) => String(s.userId) === String(user?._id || user?.id)
@@ -714,6 +724,8 @@ export const MainCanvasPage = () => {
   });
 
   const [activeWheel, setActiveWheel] = useState(null);
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [activeAIAction, setActiveAIAction] = useState(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [toolbarTooltip, setToolbarTooltip] = useState(null);
   const [messCleanupPreview, setMessCleanupPreview] = useState({
@@ -826,66 +838,24 @@ export const MainCanvasPage = () => {
     }
   };
 
-  const handleToggleAIWheel = (e) => {
-    e.stopPropagation();
-    if (activeWheel === 'ai') {
-      setActiveWheel(null);
-    } else {
-      if (aiBtnRef.current) {
-        const rect = aiBtnRef.current.getBoundingClientRect();
-        setWheelAnchorPos({ x: rect.right + 120, y: rect.top + rect.height / 2 });
-      }
-      setActiveWheel('ai');
-    }
-  };
+  const closeAIAssistant = useCallback(() => setIsAIAssistantOpen(false), []);
 
-  const aiWheelItems = useMemo(() => [
-    {
-      id: 'brainstorm',
-      label: 'Brainstorm',
-      icon: 'lightbulb',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('brainstorm');
-        addToast('AI Brainstorm', 'Generated sticky note ideas', 'auto_awesome', 'success');
-      }
-    },
-    {
-      id: 'architecture',
-      label: 'Architecture Assist',
-      icon: 'account_tree',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('architecture');
-        addToast('AI Architecture Assist', 'Generated system architecture blocks', 'auto_awesome', 'success');
-      }
-    },
-    {
-      id: 'summarize',
-      label: 'Summarize Canvas',
-      icon: 'description',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('summarize');
-        addToast('AI Summary', 'Summarized whiteboard elements into notes', 'description', 'info');
-      }
-    },
-    {
-      id: 'sticky_gen',
-      label: 'Generate Sticky Notes',
-      icon: 'grid_view',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('sticky_gen');
-        addToast('AI Sticky Generator', 'Created sticky note cluster', 'grid_view', 'success');
-      }
-    },
-    {
-      id: 'analyze_diagram',
-      label: 'Analyze Diagram',
-      icon: 'analytics',
-      action: () => {
-        fabricCanvasRef.current?.triggerAIAction('analyze_diagram');
-        addToast('AI Diagram Insights', 'Analyzed whiteboard structure', 'analytics', 'info');
-      }
+  const aiWheelItems = useMemo(() => ASSISTANT_ACTIONS.map((item) => ({
+    ...item,
+    action: () => setActiveAIAction(item.id)
+  })), []);
+
+  const closeAIAction = useCallback(() => setActiveAIAction(null), []);
+
+  const getAIBoardContext = useCallback(() => buildBoardContext(fabricCanvasRef.current?.getCanvas()?.getObjects() || []), []);
+
+  const handleApplyAIResult = useCallback(async (actionId, payload) => {
+    try {
+      await applyAssistantResult(actionId, payload, fabricCanvasRef.current);
+    } catch {
+      addToast('AI Assistant', 'The result could not be added to the board.', 'error', 'error');
     }
-  ], [addToast]);
+  }, [addToast]);
 
   const skribeFeatureItems = [
     {
@@ -1178,6 +1148,30 @@ export const MainCanvasPage = () => {
     isOpeningSettingsRef.current = false;
   }, [addToast, boardId, flushViewportSave, navigate]);
 
+  const closePreferences = useCallback(() => setIsPreferencesOpen(false), []);
+
+  const handleCanvasBackgroundChange = useCallback(async (key) => {
+    const previous = canvasBackground;
+    if (!boardId || key === previous) return;
+    setCanvasBackground(key);
+    try {
+      const res = await apiClient.patch(`/boards/${boardId}`, { canvasBackground: key });
+      if (!res?.success) throw new Error('Background was not saved');
+    } catch {
+      setCanvasBackground((current) => (current === key ? previous : current));
+      addToast(t('preferences.backgroundFailedTitle'), t('preferences.backgroundFailed'), 'error', 'error');
+    }
+  }, [addToast, boardId, canvasBackground, t]);
+
+  useEffect(() => {
+    if (!boardId) return undefined;
+    const handleBoardPreferences = (payload) => {
+      if (payload?.boardId === boardId && typeof payload.canvasBackground === 'string') setCanvasBackground(payload.canvasBackground);
+    };
+    socketService.on('board:preferences', handleBoardPreferences);
+    return () => socketService.off('board:preferences', handleBoardPreferences);
+  }, [boardId]);
+
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
       <MessCleanupPreviewModal
@@ -1206,7 +1200,7 @@ export const MainCanvasPage = () => {
         <button
           onClick={handleBackToBoards}
           className="flex items-center justify-center w-7 h-7 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors cursor-pointer shrink-0"
-          title="Back to All Boards"
+          title={t('workspace.back')}
         >
           <span className="material-symbols-outlined text-lg">arrow_back</span>
         </button>
@@ -1220,19 +1214,19 @@ export const MainCanvasPage = () => {
         {saveStatus === 'saving' && (
           <div className="flex items-center gap-1.5 text-primary text-[11px] font-bold font-mono shrink-0">
             <div className="w-2 h-2 rounded-full bg-primary animate-ping" />
-            <span>Saving...</span>
+            <span>{t('workspace.saving')}</span>
           </div>
         )}
         {saveStatus === 'saved' && (
           <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold font-mono shrink-0">
             <span className="material-symbols-outlined text-sm font-bold">check_circle</span>
-            <span>Saved</span>
+            <span>{t('workspace.saved')}</span>
           </div>
         )}
         {saveStatus === 'error' && (
           <div className="flex items-center gap-1 text-error text-[11px] font-bold font-mono shrink-0">
             <span className="material-symbols-outlined text-sm font-bold">error</span>
-            <span>Save failed</span>
+            <span>{t('workspace.saveFailed')}</span>
           </div>
         )}
 
@@ -1271,12 +1265,20 @@ export const MainCanvasPage = () => {
         <button
           onClick={() => setIsShareModalOpen(true)}
           className="flex items-center gap-1 px-2.5 py-1 bg-surface-container-high hover:bg-primary-container text-on-surface hover:text-primary rounded-full text-xs font-label font-bold border border-outline-variant transition-colors ml-1 cursor-pointer shrink-0"
-          title="Share Board"
+          title={t('workspace.shareBoard')}
         >
           <span className="material-symbols-outlined text-base">share</span>
-          <span className="hidden sm:inline">Share</span>
+          <span className="hidden sm:inline">{t('workspace.share')}</span>
         </button>
       </div>
+
+      <BoardPreferencesPanel
+        open={isPreferencesOpen}
+        onClose={closePreferences}
+        canvasBackground={canvasBackground}
+        onCanvasBackgroundChange={handleCanvasBackgroundChange}
+        onOpenSettings={handleOpenSettings}
+      />
 
       <ShareBoardModal
         isOpen={isShareModalOpen}
@@ -1370,6 +1372,7 @@ export const MainCanvasPage = () => {
         onLocalDrawStream={handleLocalDrawStream}
         onLocalObjectRemoved={handleLocalObjectRemoved}
         onLocalHistoryOperation={handleLocalHistoryOperation}
+        canvasBackground={resolveCanvasBackground(canvasBackground, resolvedTheme)}
         className="absolute inset-0 z-0"
       />
 
@@ -1392,16 +1395,16 @@ export const MainCanvasPage = () => {
           <button
             onClick={() => setIsToolbarCollapsed(false)}
             className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
-            data-toolbar-tooltip="Expand toolbar"
-            aria-label="Expand toolbar"
-            title="Expand toolbar"
+            data-toolbar-tooltip={t('toolbar.expand')}
+            aria-label={t('toolbar.expand')}
+            title={t('toolbar.expand')}
           >
             <span className="material-symbols-outlined text-xl">chevron_right</span>
           </button>
         ) : (
           <div className="flex items-center gap-1 sm:gap-1.5 min-w-max">
             <div className="px-1 text-[8px] font-black uppercase tracking-wider text-on-surface-variant/70" aria-hidden="true">
-              Core
+              {t('toolbar.core')}
             </div>
 
         <button
@@ -1415,8 +1418,8 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="Select (V)"
-          title="Select Tool (V)"
+          data-toolbar-tooltip={t('toolbar.select')}
+          title={t('toolbar.select')}
         >
           <span className="material-symbols-outlined text-[20px]">near_me</span>
         </button>
@@ -1432,8 +1435,8 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="Pan (H)"
-          title="Pan Canvas (H)"
+          data-toolbar-tooltip={t('toolbar.pan')}
+          title={t('toolbar.pan')}
         >
           <span className="material-symbols-outlined text-[20px]">pan_tool</span>
         </button>
@@ -1449,8 +1452,8 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="Draw"
-          title="Pen / Draw Tool"
+          data-toolbar-tooltip={t('toolbar.draw')}
+          title={t('toolbar.draw')}
         >
           <span className="material-symbols-outlined text-[20px]">edit</span>
         </button>
@@ -1465,8 +1468,8 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="Smart Eraser (E)"
-          title="Smart Eraser Tool (E)"
+          data-toolbar-tooltip={t('toolbar.eraser')}
+          title={t('toolbar.eraser')}
         >
           <span className="material-symbols-outlined text-[20px]">auto_fix_high</span>
         </button>
@@ -1482,8 +1485,8 @@ export const MainCanvasPage = () => {
               ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
               : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="Laser Pointer (L)"
-          title="Laser Pointer Tool (L)"
+          data-toolbar-tooltip={t('toolbar.laser')}
+          title={t('toolbar.laser')}
         >
           <span className="material-symbols-outlined text-[20px]">flare</span>
         </button>
@@ -1492,24 +1495,31 @@ export const MainCanvasPage = () => {
 
         <button
           ref={aiBtnRef}
-          onClick={handleToggleAIWheel}
+          onClick={() => setIsAIAssistantOpen((open) => !open)}
+          aria-expanded={isAIAssistantOpen}
+          aria-haspopup="dialog"
+          aria-label={t('toolbar.ai')}
+          data-ai-assistant-toggle
           className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
-            activeWheel === 'ai'
+            isAIAssistantOpen
               ? 'bg-primary text-on-primary shadow-md scale-105 ring-2 ring-primary ring-offset-1 font-bold'
               : 'bg-surface-container-high text-accent hover:bg-primary hover:text-on-primary hover:scale-105'
           }`}
-          data-toolbar-tooltip="AI Assistant"
-          title="AI Assistant Wheel"
+          data-toolbar-tooltip={t('toolbar.ai')}
+          title={t('toolbar.ai')}
         >
           <span className="material-symbols-outlined text-[20px]">psychology</span>
         </button>
 
         <button
-          onClick={handleOpenSettings}
+          onClick={() => setIsPreferencesOpen((open) => !open)}
+          aria-expanded={isPreferencesOpen}
+          aria-haspopup="dialog"
+          data-preferences-toggle
           className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105 transition-all cursor-pointer relative group"
-          data-toolbar-tooltip="Settings"
-          title="Settings"
-          aria-label="Settings"
+          data-toolbar-tooltip={t('toolbar.preferences')}
+          title={t('toolbar.preferences')}
+          aria-label={t('toolbar.preferences')}
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
         </button>
@@ -1547,9 +1557,9 @@ export const MainCanvasPage = () => {
             <button
               onClick={() => setIsToolbarCollapsed(true)}
               className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
-              data-toolbar-tooltip="Collapse toolbar"
-              aria-label="Collapse toolbar"
-              title="Collapse toolbar"
+              data-toolbar-tooltip={t('toolbar.collapse')}
+              aria-label={t('toolbar.collapse')}
+              title={t('toolbar.collapse')}
             >
               <span className="material-symbols-outlined text-xl">chevron_left</span>
             </button>
@@ -1579,6 +1589,7 @@ export const MainCanvasPage = () => {
       >
         <button
           ref={fabRef}
+          data-tool-wheel-trigger
           onClick={handleToggleFABWheel}
           className={`w-14 h-14 rounded-full border-2 border-primary sticker-shadow flex items-center justify-center transition-all duration-200 cursor-pointer active:scale-95 group focus:outline-none focus:ring-4 focus:ring-primary/30 ${
             activeWheel === 'tools'
@@ -1627,14 +1638,23 @@ export const MainCanvasPage = () => {
         }}
       />
 
-      <ToolWheel
-        isOpen={activeWheel === 'ai'}
-        onClose={() => setActiveWheel(null)}
-        title="AI Assistant"
-        anchorPos={wheelAnchorPos}
-        activeToolId={null}
-        onSelectTool={() => setActiveWheel(null)}
+      <AIAssistantMenu
+        open={isAIAssistantOpen}
+        onClose={closeAIAssistant}
+        items={aiWheelItems}
+        anchorRef={aiBtnRef}
+        title={t('toolbar.ai')}
       />
+
+      {activeAIAction && (
+        <AIAssistantPanel
+          key={activeAIAction}
+          actionId={activeAIAction}
+          onClose={closeAIAction}
+          getBoardContext={getAIBoardContext}
+          onApply={handleApplyAIResult}
+        />
+      )}
     </div>
   );
 };
