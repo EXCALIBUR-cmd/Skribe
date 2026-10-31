@@ -3,11 +3,16 @@ import { useAuth } from '../../context/AuthContext';
 import { usePreferences } from '../../context/PreferencesContext';
 import { WebSpeechAdapter } from './speechRecognitionAdapter';
 import {
+  canExecutePreview,
   createDoubleTapDetector,
+  describeCommandParts,
   insertIntoField,
   isInsertableField,
-  nextQuickDictationState
+  nextQuickDictationState,
+  toCommandPreview
 } from './quickDictationLogic';
+import { confirmVoiceCommandProposal, describeVoiceCommand, looksLikeVoiceCommand, requestVoiceCommandInterpretation, resolveVoiceCommand } from './voiceCommands';
+import { getDictationCanvas } from './dictationCanvasBridge';
 
 const MAX_RECORDING_SECONDS = 120;
 const TRANSCRIBE_TIMEOUT_MS = 8000;
@@ -32,9 +37,15 @@ export const QuickDictation = () => {
   const prefsRef = useRef(preferences);
   const sessionRef = useRef(null);
   const reviewRef = useRef(null);
-  const lastFieldRef = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const checkRef = useRef(null);
+  const transcriptRef = useRef('');
 
   prefsRef.current = preferences;
+  transcriptRef.current = transcript;
 
   const dispatch = useCallback((event) => {
     const next = nextQuickDictationState(stateRef.current, event);
@@ -162,9 +173,6 @@ export const QuickDictation = () => {
       else startRef.current();
     };
     const handlePointer = () => detector.pointer();
-    const handleFocusIn = (event) => {
-      if (isInsertableField(event.target)) lastFieldRef.current = event.target;
-    };
     const stopWhenAway = () => {
       detector.reset();
       if (stateRef.current === 'recording' && sessionRef.current?.adapter.isListening) stopRef.current();
@@ -176,14 +184,12 @@ export const QuickDictation = () => {
     window.addEventListener('keyup', handleKeyUp, true);
     window.addEventListener('pointerdown', handlePointer, true);
     window.addEventListener('blur', stopWhenAway);
-    document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('pointerdown', handlePointer, true);
       window.removeEventListener('blur', stopWhenAway);
-      document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('visibilitychange', handleVisibility);
       cancelRef.current();
     };
@@ -201,14 +207,76 @@ export const QuickDictation = () => {
     return () => clearTimeout(timer);
   }, [state, dispatch]);
 
+  const checkCommand = useCallback(async (value) => {
+    checkRef.current?.abort();
+    const text = String(value || '').trim();
+    const boardId = getDictationCanvas()?.boardId || null;
+    setActionError(null);
+    if (!looksLikeVoiceCommand(text)) {
+      setPreview(toCommandPreview(null, text, boardId));
+      return;
+    }
+    const controller = new AbortController();
+    checkRef.current = controller;
+    setPreview({ kind: 'checking', text });
+    const resolved = await resolveVoiceCommand(text, {
+      interpret: (instruction, options) => requestVoiceCommandInterpretation(instruction, { signal: options?.signal }),
+      signal: controller.signal
+    });
+    if (controller.signal.aborted) return;
+    setPreview({ ...toCommandPreview(resolved, text, boardId), note: resolved.status === 'error' ? resolved.message : null });
+  }, []);
+
   useEffect(() => {
-    if (state === 'review') reviewRef.current?.focus({ preventScroll: true });
-  }, [state]);
+    if (state !== 'review') return undefined;
+    reviewRef.current?.focus({ preventScroll: true });
+    checkCommand(transcriptRef.current);
+    return () => checkRef.current?.abort();
+  }, [state, checkCommand]);
 
   const closeReview = useCallback(() => {
+    checkRef.current?.abort();
+    setPreview(null);
+    setActionError(null);
     setTranscript('');
     dispatch('close');
   }, [dispatch]);
+
+  const insertOnCanvas = () => {
+    const text = transcript.trim();
+    if (busyRef.current || !text) return;
+    const canvas = getDictationCanvas();
+    if (!canvas) {
+      setActionError(t('quickDictation.noBoard'));
+      return;
+    }
+    busyRef.current = true;
+    let result = null;
+    try {
+      result = canvas.insertText(text);
+    } catch {
+      result = null;
+    }
+    busyRef.current = false;
+    if (result?.success) closeReview();
+    else setActionError(t('quickDictation.insertFailed'));
+  };
+
+  const executeCommand = async () => {
+    if (busyRef.current) return;
+    const canvas = getDictationCanvas();
+    if (!canExecutePreview(preview, transcript, canvas?.boardId)) {
+      setActionError(t('quickDictation.commandStale'));
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    const result = await confirmVoiceCommandProposal(preview.command, canvas.executeCommand);
+    busyRef.current = false;
+    setBusy(false);
+    if (result.status === 'executed') closeReview();
+    else setActionError(result.message);
+  };
 
   const copyTranscript = async () => {
     try {
@@ -219,17 +287,18 @@ export const QuickDictation = () => {
     }
   };
 
-  const insertLater = () => {
-    const field = lastFieldRef.current;
-    if (isInsertableField(field) && insertIntoField(field, transcript)) closeReview();
-  };
-
   if (!user || state === 'idle') return null;
 
   const wrapper = 'fixed left-1/2 -translate-x-1/2 bottom-40 z-50 max-w-[calc(100vw-32px)] pointer-events-auto';
 
   if (state === 'review') {
-    const canInsert = isInsertableField(lastFieldRef.current);
+    const canvasHandle = getDictationCanvas();
+    const isEmpty = !transcript.trim();
+    const hasCommand = Boolean(preview?.command) && ['command', 'clarify'].includes(preview?.kind);
+    const isStale = hasCommand && preview.text !== transcript.trim();
+    const offerCommand = hasCommand && !isStale;
+    const secondary = `${capsuleButton} bg-surface-container-high text-on-surface hover:bg-surface-container-highest disabled:opacity-50 disabled:cursor-not-allowed`;
+    const primary = `${capsuleButton} bg-primary text-on-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed`;
     return (
       <div
         role="dialog"
@@ -256,18 +325,67 @@ export const QuickDictation = () => {
           aria-label={t('quickDictation.reviewTitle')}
           className="mt-3 w-full resize-y rounded-[12px] border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:outline-2 focus:outline-primary"
         />
+        {preview?.kind === 'checking' && (
+          <p role="status" className="mt-3 flex items-center gap-2 text-xs text-on-surface-variant">
+            <span className="material-symbols-outlined text-[16px] animate-spin" aria-hidden="true">progress_activity</span>
+            {t('quickDictation.checkingCommand')}
+          </p>
+        )}
+        {(hasCommand || preview?.kind === 'clarify') && (
+          <section data-quick-dictation-command aria-labelledby="quick-dictation-command-title" className="mt-3 rounded-[12px] border border-outline-variant bg-surface-container-low p-3">
+            <h3 id="quick-dictation-command-title" className="flex items-center gap-2 font-label text-xs font-bold uppercase tracking-wider text-on-surface-variant">
+              <span className="material-symbols-outlined text-[16px] text-primary" aria-hidden="true">bolt</span>
+              {preview.kind === 'clarify' ? t('quickDictation.clarifyTitle') : t('quickDictation.commandTitle')}
+            </h3>
+            {preview.kind === 'clarify' && preview.message && <p className="mt-1 text-xs text-on-surface">{preview.message}</p>}
+            {preview.command && (
+              <>
+                <p className="mt-2 font-label text-sm font-bold text-on-surface">{t(`quickDictation.action.${preview.command.action}`)}</p>
+                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                  {describeCommandParts(preview.command).map(([key, value]) => (
+                    <React.Fragment key={key}>
+                      <dt className="text-on-surface-variant">{t(`quickDictation.part.${key}`)}</dt>
+                      <dd className="min-w-0 break-words text-on-surface">{value}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+                <p className="mt-2 text-xs text-on-surface-variant">{t('quickDictation.commandEffect', { description: describeVoiceCommand(preview.command) })}</p>
+              </>
+            )}
+            {isStale && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="text-xs text-on-surface">{t('quickDictation.commandStale')}</p>
+                <button type="button" onClick={() => checkCommand(transcript)} className={secondary}>{t('quickDictation.checkAgain')}</button>
+              </div>
+            )}
+          </section>
+        )}
+        {preview?.note && <p className="mt-3 text-xs text-on-surface-variant">{t('quickDictation.commandCheckFailed', { message: preview.note })}</p>}
+        {actionError && <p role="alert" className="mt-3 rounded-[12px] bg-error-container px-3 py-2 text-xs text-on-error-container">{actionError}</p>}
+        {!canvasHandle && <p className="mt-3 text-xs text-on-surface-variant">{t('quickDictation.noBoard')}</p>}
         <div className="mt-3 flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={copyTranscript} className={`${capsuleButton} bg-surface-container-high text-on-surface hover:bg-surface-container-highest`}>
+          {offerCommand ? (
+            <>
+              <button type="button" data-action="execute-command" onClick={executeCommand} disabled={busy || !canvasHandle} className={primary}>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">bolt</span>
+                {preview.kind === 'clarify' ? t('quickDictation.useSuggestion') : t('quickDictation.executeCommand')}
+              </button>
+              <button type="button" data-action="insert-text" onClick={insertOnCanvas} disabled={busy || isEmpty || !canvasHandle} className={secondary}>
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">title</span>
+                {t('quickDictation.insertAsText')}
+              </button>
+            </>
+          ) : (
+            <button type="button" data-action="insert-text" onClick={insertOnCanvas} disabled={busy || isEmpty || !canvasHandle} className={primary}>
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">add_box</span>
+              {t('quickDictation.insertOnCanvas')}
+            </button>
+          )}
+          <button type="button" onClick={copyTranscript} disabled={isEmpty} className={secondary}>
             <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{copied ? 'check' : 'content_copy'}</span>
             {copied ? t('quickDictation.copied') : t('quickDictation.copy')}
           </button>
-          {canInsert && (
-            <button type="button" onClick={insertLater} className={`${capsuleButton} bg-surface-container-high text-on-surface hover:bg-surface-container-highest`}>
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">input</span>
-              {t('quickDictation.insert')}
-            </button>
-          )}
-          <button type="button" onClick={closeReview} className={`${capsuleButton} bg-primary text-on-primary hover:bg-primary/90`}>
+          <button type="button" onClick={closeReview} className={secondary}>
             {t('quickDictation.close')}
           </button>
         </div>

@@ -31,6 +31,7 @@ import { auditCleanupPipeline, computeGeometryDiagnostics } from '../features/me
 import MessCleanupPreviewModal from '../features/messCleanup/MessCleanupPreviewModal.jsx';
 import VoiceDictationModal from '../features/voice/VoiceDictationModal.jsx';
 import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterpretation, resolveVoiceCommandStyle } from '../features/voice/voiceCommands.js';
+import { registerDictationCanvas } from '../features/voice/dictationCanvasBridge.js';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 import { createBoardSyncController } from '../features/collab/boardSyncController.js';
 
@@ -910,6 +911,15 @@ export const MainCanvasPage = () => {
     const result = await confirmVoiceCommandProposal(proposal, executeVoiceCommandOnCanvas);
     return reportVoiceCommandResult(result);
   }, [executeVoiceCommandOnCanvas, reportVoiceCommandResult]);
+
+  useEffect(() => {
+    if (!boardId) return undefined;
+    return registerDictationCanvas({
+      boardId,
+      insertText: handleInsertDictatedText,
+      executeCommand: executeVoiceCommandOnCanvas
+    });
+  }, [boardId, handleInsertDictatedText, executeVoiceCommandOnCanvas]);
 
   const handleSkribeFeatureClick = async (feature) => {
     if (feature.id === 'voice-dictation') {

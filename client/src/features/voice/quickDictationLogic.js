@@ -114,3 +114,29 @@ export const createDoubleTapDetector = ({ getInterval, isBlocked = isBlockedTarg
     }
   };
 };
+
+export const toCommandPreview = (resolved, transcript, boardId) => {
+  const text = String(transcript || '').trim();
+  if (resolved?.status === 'execute' && resolved.command) return { kind: 'command', command: resolved.command, text, boardId };
+  if (resolved?.status === 'clarify') return { kind: 'clarify', command: resolved.proposal || null, message: resolved.message || '', text, boardId };
+  return { kind: 'text', command: null, text, boardId };
+};
+
+export const canExecutePreview = (preview, transcript, activeBoardId) => Boolean(
+  preview?.command
+  && ['command', 'clarify'].includes(preview.kind)
+  && preview.text === String(transcript || '').trim()
+  && preview.boardId
+  && preview.boardId === activeBoardId
+);
+
+export const describeCommandParts = (command) => {
+  if (!command) return [];
+  const parts = [];
+  if (command.shapeType) parts.push(['shape', command.shapeType.replace(/_/g, ' ')]);
+  if (command.color) parts.push(['color', command.color]);
+  if (command.textColor) parts.push(['textColor', command.textColor]);
+  const content = command.text || command.label;
+  if (content) parts.push(['text', content]);
+  return parts;
+};
