@@ -6,8 +6,13 @@ import {
   isBlockedTarget,
   isInsertableField,
   mergeTranscript,
-  nextQuickDictationState
+  nextQuickDictationState,
+  toCommandPreview,
+  canExecutePreview,
+  describeCommandParts
 } from './quickDictationLogic.js';
+import { looksLikeVoiceCommand, resolveVoiceCommand, runVoiceCommand } from './voiceCommands.js';
+import { getDictationCanvas, registerDictationCanvas } from './dictationCanvasBridge.js';
 
 const body = { tagName: 'BODY' };
 const space = (extra = {}) => ({ code: 'Space', key: ' ', target: body, ...extra });
@@ -159,4 +164,60 @@ test('insertion targets only connected, editable text fields and fires an input 
   }
   assert.equal(isInsertableField({ tagName: 'TEXTAREA', isConnected: true, getAttribute: (name) => (name === 'data-fabric' ? 'textarea' : null) }), false);
   assert.equal(isInsertableField({ tagName: 'DIV', isContentEditable: true, isConnected: true }), false);
+});
+
+test('only transcripts that open with a creation verb are checked as commands', () => {
+  for (const text of ['Create a yellow note.', 'draw a rectangle', 'Add a heading', 'please make a circle', 'Could you add a sticky note that says ship it']) {
+    assert.equal(looksLikeVoiceCommand(text), true, text);
+  }
+  for (const text of ['I need to prepare the presentation tomorrow.', 'This section explains the project architecture.', 'We should add more tests', 'Creative ideas for launch', '', '   ', 'create '.repeat(80)]) {
+    assert.equal(looksLikeVoiceCommand(text), false, text);
+  }
+});
+
+test('resolving a command never executes it, while runVoiceCommand still does', async () => {
+  const command = { action: 'create_sticky_note', text: 'Ship it', color: 'yellow', textColor: null };
+  const interpret = async () => ({ result: { status: 'execute', command } });
+  let executions = 0;
+  const execute = async () => { executions += 1; return { success: true, objectId: 'x' }; };
+  const resolved = await resolveVoiceCommand('Create a yellow note that says ship it', { interpret });
+  assert.equal(resolved.status, 'execute');
+  assert.equal(resolved.command.action, 'create_sticky_note');
+  assert.equal(executions, 0);
+  assert.equal((await runVoiceCommand('Create a yellow note that says ship it', { interpret, execute })).status, 'executed');
+  assert.equal(executions, 1);
+});
+
+test('previews map resolved results to command, clarification or plain text', () => {
+  const command = { action: 'create_shape', shapeType: 'rounded_rectangle', color: 'blue', label: 'Start' };
+  assert.deepEqual(toCommandPreview({ status: 'execute', command }, ' Draw a box ', 'b1'), { kind: 'command', command, text: 'Draw a box', boardId: 'b1' });
+  assert.deepEqual(toCommandPreview({ status: 'clarify', message: 'What should it say?', proposal: null }, 'Create a note', 'b1'), { kind: 'clarify', command: null, message: 'What should it say?', text: 'Create a note', boardId: 'b1' });
+  for (const resolved of [{ status: 'rejected', code: 'UNSUPPORTED' }, { status: 'error', code: 'NETWORK_ERROR' }, null]) {
+    assert.equal(toCommandPreview(resolved, 'Create a heading', 'b1').kind, 'text');
+  }
+  assert.deepEqual(describeCommandParts(command), [['shape', 'rounded rectangle'], ['color', 'blue'], ['text', 'Start']]);
+  assert.deepEqual(describeCommandParts({ action: 'create_sticky_note', text: 'Ship', color: 'yellow', textColor: 'black' }), [['color', 'yellow'], ['textColor', 'black'], ['text', 'Ship']]);
+  assert.deepEqual(describeCommandParts(null), []);
+});
+
+test('a preview executes only for the same text on the same active board', () => {
+  const preview = toCommandPreview({ status: 'execute', command: { action: 'create_shape', shapeType: 'circle' } }, 'Create a circle', 'b1');
+  assert.equal(canExecutePreview(preview, ' Create a circle ', 'b1'), true);
+  assert.equal(canExecutePreview(preview, 'Create a square', 'b1'), false);
+  assert.equal(canExecutePreview(preview, 'Create a circle', 'b2'), false);
+  assert.equal(canExecutePreview(preview, 'Create a circle', undefined), false);
+  assert.equal(canExecutePreview({ ...preview, boardId: null }, 'Create a circle', null), false);
+  assert.equal(canExecutePreview(toCommandPreview(null, 'Create a circle', 'b1'), 'Create a circle', 'b1'), false);
+  assert.equal(canExecutePreview(toCommandPreview({ status: 'clarify', message: 'm', proposal: null }, 'Create a note', 'b1'), 'Create a note', 'b1'), false);
+});
+
+test('the canvas bridge exposes only the most recently registered board', () => {
+  const first = { boardId: 'b1' };
+  const second = { boardId: 'b2' };
+  const releaseFirst = registerDictationCanvas(first);
+  const releaseSecond = registerDictationCanvas(second);
+  releaseFirst();
+  assert.equal(getDictationCanvas(), second);
+  releaseSecond();
+  assert.equal(getDictationCanvas(), null);
 });
