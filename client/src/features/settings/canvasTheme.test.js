@@ -3,8 +3,8 @@ import test from 'node:test';
 import * as fabric from 'fabric';
 import { adaptColor, applyCanvasTheme, contrastRatio, installThemeRendering, isDarkSurface, parseColor } from './canvasTheme.js';
 import { CANVAS_BACKGROUNDS, resolveAppearance, resolveCanvasBackground, normalizePreferences, DEFAULT_PREFERENCES } from './preferenceOptions.js';
-import { APPEARANCES, CANVAS_BACKGROUNDS as SERVER_BACKGROUNDS, LANDING_PAGES, LANGUAGES } from '../../../../server/src/constants/preferences.js';
-import { APPEARANCE_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS } from './preferenceOptions.js';
+import { APPEARANCES, CANVAS_BACKGROUNDS as SERVER_BACKGROUNDS, DEFAULT_PREFERENCES as SERVER_DEFAULTS, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS as SERVER_INTERVALS } from '../../../../server/src/constants/preferences.js';
+import { APPEARANCE_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS, QUICK_DICTATION_INTERVALS } from './preferenceOptions.js';
 
 const drawn = [];
 const context = new Proxy({}, {
@@ -169,6 +169,8 @@ test('client preference options mirror the server validation lists', () => {
   assert.deepEqual(LANGUAGE_OPTIONS.map((o) => o.value), [...LANGUAGES]);
   assert.deepEqual(LANDING_OPTIONS.map((o) => o.value), [...LANDING_PAGES]);
   assert.deepEqual(CANVAS_BACKGROUNDS.map((o) => o.key), [...SERVER_BACKGROUNDS]);
+  assert.deepEqual([...QUICK_DICTATION_INTERVALS], [...SERVER_INTERVALS]);
+  assert.deepEqual({ ...DEFAULT_PREFERENCES }, { ...SERVER_DEFAULTS });
 });
 
 test('appearance resolution keeps System as a choice and follows the OS', () => {
@@ -184,5 +186,6 @@ test('appearance resolution keeps System as a choice and follows the OS', () => 
 test('stored preference values are sanitised before use', () => {
   assert.deepEqual(normalizePreferences(null), DEFAULT_PREFERENCES);
   assert.deepEqual(normalizePreferences({ appearance: 'sepia', language: 'fr', landingPage: 'x', reduceMotion: 'yes' }), DEFAULT_PREFERENCES);
-  assert.deepEqual(normalizePreferences({ appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true }), { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true });
+  assert.deepEqual(normalizePreferences({ appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 }), { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 });
+  assert.deepEqual(normalizePreferences({ quickDictation: 'yes', quickDictationInterval: 250 }), DEFAULT_PREFERENCES);
 });

@@ -75,9 +75,9 @@ test('a legacy user document without preferences reads back the defaults', needs
 test('preferences update persists and only affects the authenticated user', needsMongo, async () => {
   const alice = await createUser();
   const bob = await createUser();
-  const res = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true } });
+  const res = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 } });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data.preferences, { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true });
+  assert.deepEqual(res.body.data.preferences, { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 });
 
   const aliceStored = await User.findById(alice.user._id).lean();
   const bobStored = await User.findById(bob.user._id).lean();
@@ -85,7 +85,7 @@ test('preferences update persists and only affects the authenticated user', need
   assert.equal(bobStored.preferences?.appearance ?? DEFAULT_PREFERENCES.appearance, 'system');
 
   const partial = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { appearance: 'light' } });
-  assert.deepEqual(partial.body.data.preferences, { appearance: 'light', language: 'hi', landingPage: 'lastBoard', reduceMotion: true });
+  assert.deepEqual(partial.body.data.preferences, { appearance: 'light', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 });
 });
 
 test('a client-supplied user id in the payload cannot redirect the update to another user', needsMongo, async () => {
@@ -103,6 +103,9 @@ test('invalid preference payloads are rejected without changing anything', needs
     { language: 'fr' },
     { landingPage: '/admin' },
     { reduceMotion: 'yes' },
+    { quickDictation: 'on' },
+    { quickDictationInterval: 250 },
+    { quickDictationInterval: '300' },
     { unknown: true },
     {},
     ['appearance']

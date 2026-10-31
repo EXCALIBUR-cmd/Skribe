@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { APPEARANCES, DEFAULT_PREFERENCES, LANDING_PAGES, LANGUAGES } from '../constants/preferences.js';
+import { APPEARANCES, DEFAULT_PREFERENCES, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS } from '../constants/preferences.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -47,7 +47,9 @@ const userSchema = new mongoose.Schema(
       appearance: { type: String, enum: APPEARANCES, default: DEFAULT_PREFERENCES.appearance },
       language: { type: String, enum: LANGUAGES, default: DEFAULT_PREFERENCES.language },
       landingPage: { type: String, enum: LANDING_PAGES, default: DEFAULT_PREFERENCES.landingPage },
-      reduceMotion: { type: Boolean, default: DEFAULT_PREFERENCES.reduceMotion }
+      reduceMotion: { type: Boolean, default: DEFAULT_PREFERENCES.reduceMotion },
+      quickDictation: { type: Boolean, default: DEFAULT_PREFERENCES.quickDictation },
+      quickDictationInterval: { type: Number, enum: QUICK_DICTATION_INTERVALS, default: DEFAULT_PREFERENCES.quickDictationInterval }
     },
     lastOpenedBoard: {
       type: mongoose.Schema.Types.ObjectId,
