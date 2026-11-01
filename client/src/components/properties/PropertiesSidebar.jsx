@@ -4,6 +4,7 @@ import LaserInspector from './LaserInspector';
 import PenInspector from './PenInspector';
 import { isLowContrast, getBestReadableTextColor, getContrastRatio } from '../../utils/contrastUtils';
 import { getRegisteredSectionsForObject, PROPERTY_SECTIONS } from './PropertyRegistry';
+import { TEXT_ELEMENT_KINDS } from '../../features/textElements/textElements.js';
 
 export const PropertiesSidebar = ({
   activeTool,
@@ -54,6 +55,9 @@ export const PropertiesSidebar = ({
     fontFamily = 'Quicksand',
     fontWeight = 'normal',
     textAlign = 'left',
+    lineHeight = 1.16,
+    textBackground = null,
+    textKind = null,
     hasText = false,
     contrastResolved = false,
     isStickyNote,
@@ -78,10 +82,10 @@ export const PropertiesSidebar = ({
     }
   }, [editingContext, selectedProps?.id]);
 
-  const effectiveBg = noteColor || (typeof fill === 'string' && fill !== 'transparent' ? fill : '#ffffff');
+  const effectiveBg = textBackground || noteColor || (typeof fill === 'string' && fill !== 'transparent' ? fill : '#ffffff');
   const effectiveText = textColor || '#1e293b';
   const currentRatio = getContrastRatio(effectiveBg, effectiveText);
-  const hasContrastIssue = hasText && !contrastResolved && isLowContrast(effectiveBg, effectiveText);
+  const hasContrastIssue = hasText && !contrastResolved && !(textKind && !textBackground) && isLowContrast(effectiveBg, effectiveText);
 
   const handleFixContrast = (e) => {
     e.stopPropagation();
@@ -124,7 +128,7 @@ export const PropertiesSidebar = ({
                   ? 'Straight Line'
                   : isConnector
                   ? 'Connector'
-                  : type || 'Workspace Control'}
+                  : TEXT_ELEMENT_KINDS[textKind]?.label || type || 'Workspace Control'}
               </span>
               <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
                 {isLaserMode ? 'Presentation Mode' : editingContext === 'text' ? 'Text Editing Mode' : 'Control Center'}
@@ -293,69 +297,122 @@ export const PropertiesSidebar = ({
                               />
                             )}
 
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Font:</span>
-                                <select
-                                  value={fontFamily}
-                                  onChange={(e) => onApplyProperty('fontFamily', e.target.value)}
-                                  className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
-                                >
-                                  <option value="Quicksand">Quicksand</option>
-                                  <option value="Nunito Sans">Nunito Sans</option>
-                                  <option value="Inter">Inter</option>
-                                  <option value="Roboto">Roboto</option>
-                                  <option value="Space Grotesk">Space Grotesk</option>
-                                </select>
-                              </div>
+                            {sec.hasBackground && (
+                              <UniversalColorPicker
+                                label="Background"
+                                color={textBackground || '#ffffff'}
+                                onChange={(val) => onApplyProperty('textBackground', val)}
+                              />
+                            )}
 
-                              <div>
-                                <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Size:</span>
-                                <select
-                                  value={fontSize}
-                                  onChange={(e) => onApplyProperty('fontSize', Number(e.target.value))}
-                                  className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
-                                >
-                                  <option value={12}>12px</option>
-                                  <option value={14}>14px</option>
-                                  <option value={16}>16px</option>
-                                  <option value={20}>20px</option>
-                                  <option value={24}>24px</option>
-                                  <option value={32}>32px</option>
-                                </select>
-                              </div>
-                            </div>
+                            {(sec.hasFontFamily || sec.hasFontSize) && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {sec.hasFontFamily && (
+                                  <div>
+                                    <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Font:</span>
+                                    <select
+                                      value={fontFamily}
+                                      onChange={(e) => onApplyProperty('fontFamily', e.target.value)}
+                                      className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
+                                    >
+                                      <option value="Quicksand">Quicksand</option>
+                                      <option value="Nunito Sans">Nunito Sans</option>
+                                      <option value="Inter">Inter</option>
+                                      <option value="Roboto">Roboto</option>
+                                      <option value="Space Grotesk">Space Grotesk</option>
+                                    </select>
+                                  </div>
+                                )}
 
-                            <div className="flex items-center justify-between pt-1">
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => onApplyProperty('fontWeight', fontWeight === 'bold' ? 'normal' : 'bold')}
-                                  className={`p-1.5 rounded-lg border cursor-pointer transition-all ${
-                                    fontWeight === 'bold'
-                                      ? 'bg-primary text-on-primary border-primary shadow-xs font-black'
-                                      : 'border-outline-variant text-on-surface-variant hover:bg-surface-container-high'
-                                  }`}
-                                  title="Toggle Bold"
-                                >
-                                  <span className="material-symbols-outlined text-base">format_bold</span>
-                                </button>
+                                {sec.hasFontSize && (
+                                  <div>
+                                    <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Size:</span>
+                                    <select
+                                      value={fontSize}
+                                      onChange={(e) => onApplyProperty('fontSize', Number(e.target.value))}
+                                      className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
+                                    >
+                                      {(sec.fontSizes ? [...new Set([...sec.fontSizes, fontSize])].sort((a, b) => a - b) : [12, 14, 16, 20, 24, 32]).map((size) => (
+                                        <option key={size} value={size}>{size}px</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
                               </div>
+                            )}
 
-                              <div className="flex items-center gap-0.5 border border-outline-variant rounded-lg p-0.5">
-                                {['left', 'center', 'right'].map((align) => (
-                                  <button
-                                    key={align}
-                                    onClick={() => onApplyProperty('textAlign', align)}
-                                    className={`p-1 rounded cursor-pointer transition-colors ${
-                                      textAlign === align ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-high'
-                                    }`}
-                                    title={`Align ${align}`}
-                                  >
-                                    <span className="material-symbols-outlined text-sm">format_align_{align}</span>
-                                  </button>
-                                ))}
+                            {(sec.fontWeights || sec.hasLineHeight) && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {sec.fontWeights && (
+                                  <div>
+                                    <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Weight:</span>
+                                    <select
+                                      value={String(fontWeight)}
+                                      onChange={(e) => onApplyProperty('fontWeight', e.target.value)}
+                                      className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
+                                    >
+                                      {sec.fontWeights.map(([value, label]) => (
+                                        <option key={value} value={value}>{label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+
+                                {sec.hasLineHeight && (
+                                  <div>
+                                    <span className="text-on-surface-variant font-bold text-[11px] block mb-1">Line spacing:</span>
+                                    <select
+                                      value={lineHeight}
+                                      onChange={(e) => onApplyProperty('lineHeight', Number(e.target.value))}
+                                      className="w-full bg-surface-container-high border border-outline-variant rounded-lg px-2 py-1 text-xs text-on-surface outline-none cursor-pointer hover:border-primary font-bold"
+                                    >
+                                      {[...new Set([...sec.lineHeights, lineHeight])].sort((a, b) => a - b).map((value) => (
+                                        <option key={value} value={value}>{value}×</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
                               </div>
-                            </div>
+                            )}
+
+                            {(sec.hasBold || sec.hasTextAlign) && (
+                              <div className="flex items-center justify-between pt-1">
+                                {sec.hasBold ? (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => onApplyProperty('fontWeight', fontWeight === 'bold' ? 'normal' : 'bold')}
+                                      className={`p-1.5 rounded-lg border cursor-pointer transition-all ${
+                                        fontWeight === 'bold'
+                                          ? 'bg-primary text-on-primary border-primary shadow-xs font-black'
+                                          : 'border-outline-variant text-on-surface-variant hover:bg-surface-container-high'
+                                      }`}
+                                      title="Toggle Bold"
+                                    >
+                                      <span className="material-symbols-outlined text-base">format_bold</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span />
+                                )}
+
+                                {sec.hasTextAlign && (
+                                  <div className="flex items-center gap-0.5 border border-outline-variant rounded-lg p-0.5">
+                                    {['left', 'center', 'right'].map((align) => (
+                                      <button
+                                        key={align}
+                                        onClick={() => onApplyProperty('textAlign', align)}
+                                        className={`p-1 rounded cursor-pointer transition-colors ${
+                                          textAlign === align ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-high'
+                                        }`}
+                                        title={`Align ${align}`}
+                                      >
+                                        <span className="material-symbols-outlined text-sm">format_align_{align}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
 

@@ -8,6 +8,51 @@ export const PROPERTY_SECTIONS = {
   ACTIONS: 'actions'
 };
 
+const LEGACY_TYPOGRAPHY = {
+  hasTextColor: true,
+  hasFontFamily: true,
+  hasFontSize: true,
+  hasFontWeight: true,
+  hasBold: true,
+  hasTextAlign: true
+};
+
+const WEIGHTS = [['600', 'Semibold'], ['700', 'Bold'], ['800', 'Extra bold']];
+
+const TEXT_KIND_TYPOGRAPHY = {
+  heading: {
+    hasTextColor: true,
+    hasFontFamily: true,
+    hasFontSize: true,
+    fontSizes: [28, 32, 40, 48, 56, 64, 72],
+    hasFontWeight: true,
+    fontWeights: WEIGHTS,
+    hasTextAlign: true
+  },
+  body: {
+    hasTextColor: true,
+    hasFontFamily: true,
+    hasFontSize: true,
+    fontSizes: [14, 16, 18, 20, 24],
+    hasLineHeight: true,
+    lineHeights: [1.3, 1.5, 1.7, 2],
+    hasTextAlign: true
+  },
+  code: {
+    hasTextColor: true,
+    hasBackground: true,
+    hasFontSize: true,
+    fontSizes: [12, 13, 14, 16, 18]
+  },
+  label: {
+    hasTextColor: true,
+    hasBackground: true,
+    hasFontWeight: true,
+    fontWeights: WEIGHTS,
+    hasTextAlign: true
+  }
+};
+
 export const getRegisteredSectionsForObject = (selectedProps) => {
   if (!selectedProps || !selectedProps.hasSelection) return [];
 
@@ -57,11 +102,7 @@ export const getRegisteredSectionsForObject = (selectedProps) => {
       id: PROPERTY_SECTIONS.TYPOGRAPHY,
       title: 'Typography',
       icon: 'match_case',
-      hasTextColor: true,
-      hasFontFamily: true,
-      hasFontSize: true,
-      hasFontWeight: true,
-      hasTextAlign: true
+      ...(TEXT_KIND_TYPOGRAPHY[selectedProps.textKind] || LEGACY_TYPOGRAPHY)
     });
   }
 
