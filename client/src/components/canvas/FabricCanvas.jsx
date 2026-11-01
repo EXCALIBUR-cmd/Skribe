@@ -32,8 +32,10 @@ import { resolveElementLinks, serializeCanvasObject, isTimestampObject, isTextOb
 import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
 import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../features/settings/canvasTheme.js';
+import { createTextElement, getTextKind, installTextElementRendering } from '../../features/textElements/textElements.js';
 
 installThemeRendering(fabric.FabricObject);
+installTextElementRendering(fabric);
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -1854,6 +1856,22 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
   };
 
+  const addTextElement = (kind) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const { x, y } = getNextViewportPosition(canvas);
+    const text = createTextElement(fabric, kind, { left: x, top: y, fill: activeColor && activeColor !== '#000000' ? activeColor : null });
+    if (!text) return;
+
+    ensureObjectId(text);
+    canvas.add(text);
+    notifyLocalObjectAdded(text);
+    canvas.setActiveObject(text);
+    canvas.requestRenderAll();
+    saveState();
+    if (onToolComplete) onToolComplete();
+  };
+
   const insertDictatedText = (textString, options = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) {
@@ -2237,6 +2255,7 @@ export const FabricCanvas = forwardRef(({
 
     activeObj.clone().then((cloned) => {
       canvas.discardActiveObject();
+      if (getTextKind(activeObj)) cloned.metadata = { ...activeObj.metadata };
       ensureObjectId(cloned);
       cloned.set({
         left: activeObj.left + 20,
@@ -2364,6 +2383,9 @@ export const FabricCanvas = forwardRef(({
       props.fontFamily = activeObj.fontFamily || 'Nunito Sans';
       props.fontWeight = activeObj.fontWeight || 'bold';
       props.textAlign = activeObj.textAlign || 'left';
+      props.textKind = getTextKind(activeObj);
+      props.lineHeight = activeObj.lineHeight;
+      props.textBackground = activeObj.backgroundColor || null;
     }
 
     const isTextTarget = !!(activeObj.parentShapeId || activeObj.isEditing || activeObj.type === 'textbox' || activeObj.type === 'i-text');
@@ -2812,7 +2834,10 @@ export const FabricCanvas = forwardRef(({
       else if (type === 'hexagon') addHexagon();
       else if (type === 'line') addLine();
       else if (type === 'arrow' || type === 'connector') addConnector(options.connectorType || 'straight', options);
-      else if (type === 'text') addText();
+      else if (type === 'text') {
+        if (options.textKind) addTextElement(options.textKind);
+        else addText();
+      }
     },
 
     insertDictatedText: (textString, options = {}) => {
@@ -2965,6 +2990,8 @@ export const FabricCanvas = forwardRef(({
           if (propName === 'fontFamily') textObj.set('fontFamily', value);
           if (propName === 'fontWeight') textObj.set('fontWeight', value);
           if (propName === 'textAlign') textObj.set('textAlign', value);
+          if (propName === 'lineHeight') textObj.set('lineHeight', value);
+          if (propName === 'textBackground') textObj.set('backgroundColor', value);
         }
 
         if (propName === 'strokeDashArray' && shapeObj) {

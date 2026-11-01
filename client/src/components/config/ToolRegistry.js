@@ -46,10 +46,10 @@ export const TOOL_REGISTRY = {
   text: {
     categoryLabel: 'Text',
     items: [
-      { id: 'text_heading', label: 'Heading', icon: 'format_size', toolType: 'text' },
-      { id: 'text_body', label: 'Body Text', icon: 'notes', toolType: 'text' },
-      { id: 'text_code', label: 'Code Block', icon: 'code', toolType: 'text' },
-      { id: 'text_label', label: 'Small Label', icon: 'label', toolType: 'text' }
+      { id: 'text_heading', label: 'Heading', description: 'Section title', icon: 'format_h1', toolType: 'text', textKind: 'heading' },
+      { id: 'text_body', label: 'Body Text', description: 'Paragraphs and notes', icon: 'notes', toolType: 'text', textKind: 'body' },
+      { id: 'text_code', label: 'Code Block', description: 'Monospace snippet', icon: 'code_blocks', toolType: 'text', textKind: 'code' },
+      { id: 'text_label', label: 'Small Label', description: 'Tag or status', icon: 'sell', toolType: 'text', textKind: 'label' }
     ]
   }
 };

@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { getMenuItemsForCategory, getCategoryLabel } from '../config/ToolRegistry';
 
+const TEXT_KIND_PREVIEW = {
+  heading: 'text-sm font-black tracking-tight leading-tight',
+  body: 'font-normal',
+  code: 'font-mono font-medium px-1.5 rounded-md bg-surface-container-high group-hover/flyout:bg-on-primary/15',
+  label: 'text-[9px] font-black uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-md border border-outline-variant group-hover/flyout:border-on-primary/60'
+};
+
 export const FloatingToolPanel = React.memo(({
   isOpen,
   activeCategory,
@@ -110,7 +117,14 @@ export const FloatingToolPanel = React.memo(({
                   style={{ backgroundColor: subItem.colorDot }}
                 />
               )}
-              <span>{subItem.label}</span>
+              {subItem.description ? (
+                <span className="flex flex-col items-start gap-0.5 min-w-0">
+                  <span className={TEXT_KIND_PREVIEW[subItem.textKind] || ''}>{subItem.label}</span>
+                  <span className="text-[10px] font-semibold text-on-surface-variant group-hover/flyout:text-on-primary/80">{subItem.description}</span>
+                </span>
+              ) : (
+                <span>{subItem.label}</span>
+              )}
             </div>
             {subItem.badge && (
               <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent text-on-accent font-black">
