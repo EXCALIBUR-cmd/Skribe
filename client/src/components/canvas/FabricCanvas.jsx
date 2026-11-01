@@ -33,9 +33,12 @@ import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/c
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
 import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../features/settings/canvasTheme.js';
 import { createTextElement, getTextKind, installTextElementRendering } from '../../features/textElements/textElements.js';
+import { getInitialImageScale, installImageAssetLoading } from '../../features/imageAssets/imageAssets.js';
+import ImageUploadDialog from '../../features/imageAssets/ImageUploadDialog.jsx';
 
 installThemeRendering(fabric.FabricObject);
 installTextElementRendering(fabric);
+installImageAssetLoading(fabric);
 
 const logChecklistMutation = ({ functionName, lineNo, reason, prevItems, nextItems }) => {
   const stack = new Error().stack;
@@ -81,6 +84,7 @@ export const FabricCanvas = forwardRef(({
   const containerRef = useRef(null);
   const [isPanning, setIsPanning] = useState(false);
   const [rotationBadge, setRotationBadge] = useState(null);
+  const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
   const zoomAnimationRef = useRef(null);
   const newObjectOffsetRef = useRef(0);
@@ -1872,6 +1876,25 @@ export const FabricCanvas = forwardRef(({
     if (onToolComplete) onToolComplete();
   };
 
+  const addUploadedImage = async (asset) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) throw new Error('Canvas is not ready');
+    const image = await fabric.FabricImage.fromURL(asset.url, { crossOrigin: 'anonymous' });
+    if (fabricCanvasRef.current !== canvas) throw new Error('Canvas changed during upload');
+    const zoom = canvas.getZoom() || 1;
+    const scale = getInitialImageScale(image.width, image.height, canvas.getWidth() / zoom, canvas.getHeight() / zoom);
+    const { x, y } = getNextViewportPosition(canvas);
+    image.set({ left: x, top: y, scaleX: scale, scaleY: scale, metadata: { assetId: asset.assetId } });
+
+    ensureObjectId(image);
+    canvas.add(image);
+    notifyLocalObjectAdded(image);
+    canvas.setActiveObject(image);
+    canvas.requestRenderAll();
+    saveState();
+    return image;
+  };
+
   const insertDictatedText = (textString, options = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) {
@@ -2255,7 +2278,7 @@ export const FabricCanvas = forwardRef(({
 
     activeObj.clone().then((cloned) => {
       canvas.discardActiveObject();
-      if (getTextKind(activeObj)) cloned.metadata = { ...activeObj.metadata };
+      if (getTextKind(activeObj) || activeObj.metadata?.assetId) cloned.metadata = { ...activeObj.metadata };
       ensureObjectId(cloned);
       cloned.set({
         left: activeObj.left + 20,
@@ -2838,6 +2861,7 @@ export const FabricCanvas = forwardRef(({
         if (options.textKind) addTextElement(options.textKind);
         else addText();
       }
+      else if (type === 'upload') setIsImageUploadOpen(true);
     },
 
     insertDictatedText: (textString, options = {}) => {
@@ -4047,6 +4071,7 @@ export const FabricCanvas = forwardRef(({
           {rotationBadge.angle}°
         </div>
       )}
+      <ImageUploadDialog isOpen={isImageUploadOpen} onClose={() => setIsImageUploadOpen(false)} onUploaded={addUploadedImage} />
     </div>
   );
 });
