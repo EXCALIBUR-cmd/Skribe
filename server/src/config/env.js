@@ -26,6 +26,9 @@ export const config = {
   groqAiAssistantApiKey: process.env.GROQ_AI_ASSISTANT_API_KEY || '',
   aiAssistantModel: process.env.AI_ASSISTANT_MODEL || 'openai/gpt-oss-20b',
   collabOperationsEnabled: process.env.COLLAB_OPERATIONS_ENABLED === 'true',
+  imageKitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY || '',
+  imageKitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY || '',
+  imageKitUrlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || '',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 };

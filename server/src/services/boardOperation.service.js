@@ -1,5 +1,6 @@
 import boardRepository from '../repositories/board.repository.js';
 import boardService from './board.service.js';
+import { syncBoardReferences } from './asset.service.js';
 
 export const OPERATION_KINDS = Object.freeze(['apply', 'undo', 'redo', 'edit']);
 
@@ -163,7 +164,10 @@ export const commitCanvasOperation = async ({ boardId, userId, op }) => {
   if (!applied.ok) return { status: 'conflict', code: applied.code, currentRevision };
 
   const committed = await boardRepository.commitCanvasOperation(boardId, { baseRevision: op.baseRevision, opId: op.opId, canvasData: applied.canvasData });
-  if (committed) return { status: 'committed', revision: committed.canvasRevision };
+  if (committed) {
+    void syncBoardReferences(boardId, applied.canvasData);
+    return { status: 'committed', revision: committed.canvasRevision };
+  }
 
   const latest = await boardRepository.findBoardRevisionState(boardId);
   if (!latest) return { status: 'not_found' };

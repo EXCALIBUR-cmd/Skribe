@@ -3,6 +3,7 @@ import config from '../config/env.js';
 import { error, success } from '../utils/apiResponse.js';
 import { getSocketServer } from '../sockets/index.js';
 import { boardRoomName } from '../sockets/boardHandlers.js';
+import { syncBoardReferences } from '../services/asset.service.js';
 
 export class BoardController {
   async create(req, res, next) {
@@ -10,6 +11,7 @@ export class BoardController {
       const userId = req.user.id;
       const { title, canvasData, thumbnail } = req.body || {};
       const board = await boardService.createBoard(userId, { title, canvasData, thumbnail });
+      if (canvasData) void syncBoardReferences(board.id, canvasData);
 
       return success(res, { board }, 'Board created successfully', 201);
     } catch (err) {
@@ -57,6 +59,7 @@ export class BoardController {
       const board = await boardService.updateBoard(boardId, userId, updatePayload);
 
       if (updatePayload.canvasData !== undefined) {
+        void syncBoardReferences(boardId, updatePayload.canvasData);
         getSocketServer()?.to(boardRoomName(boardId)).emit('board:revision', { boardId, revision: board.canvasRevision, source: 'save' });
       }
       if (updatePayload.canvasBackground !== undefined) {

@@ -3,11 +3,14 @@ import app from './app.js';
 import config from './config/env.js';
 import { connectDB, disconnectDB } from './config/db.js';
 import { initSocketIO } from './sockets/index.js';
+import { startAssetCleanupSchedule } from './services/asset.service.js';
 
 const startServer = async () => {
   try {
 
     await connectDB();
+
+    startAssetCleanupSchedule();
 
     const httpServer = createServer(app);
 
