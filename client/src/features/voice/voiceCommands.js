@@ -206,7 +206,7 @@ const executeOnce = async (command, execute) => {
   };
 };
 
-export const runVoiceCommand = async (transcript, { interpret, execute, signal } = {}) => {
+export const resolveVoiceCommand = async (transcript, { interpret, signal } = {}) => {
   const instruction = typeof transcript === 'string' ? transcript.trim() : '';
   if (!instruction) {
     return { status: 'rejected', code: 'EMPTY_TRANSCRIPT', message: 'Say or type an instruction first.' };
@@ -267,7 +267,19 @@ export const runVoiceCommand = async (transcript, { interpret, execute, signal }
     return { status: 'rejected', code: validation.code, message: `${validation.message} No changes were made.` };
   }
 
-  return executeOnce(validation.command, execute);
+  return { status: 'execute', command: validation.command };
+};
+
+export const runVoiceCommand = async (transcript, { interpret, execute, signal } = {}) => {
+  const resolved = await resolveVoiceCommand(transcript, { interpret, signal });
+  return resolved.status === 'execute' ? executeOnce(resolved.command, execute) : resolved;
+};
+
+const COMMAND_OPENING = /^(please\s+)?(can you\s+|could you\s+)?(create|add|draw|make|insert|put|place|write|new)\b/i;
+
+export const looksLikeVoiceCommand = (transcript) => {
+  const text = typeof transcript === 'string' ? transcript.trim() : '';
+  return Boolean(text) && text.length <= VOICE_COMMAND_LIMITS.transcript && COMMAND_OPENING.test(text);
 };
 
 export const confirmVoiceCommandProposal = async (proposal, execute) => {
@@ -285,6 +297,8 @@ export default {
   validateVoiceCommand,
   describeVoiceCommand,
   requestVoiceCommandInterpretation,
+  resolveVoiceCommand,
   runVoiceCommand,
+  looksLikeVoiceCommand,
   confirmVoiceCommandProposal
 };

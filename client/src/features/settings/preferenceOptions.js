@@ -2,8 +2,12 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   appearance: 'system',
   language: 'en',
   landingPage: 'boards',
-  reduceMotion: false
+  reduceMotion: false,
+  quickDictation: true,
+  quickDictationInterval: 300
 });
+
+export const QUICK_DICTATION_INTERVALS = Object.freeze([200, 300, 400, 500]);
 
 export const APPEARANCE_OPTIONS = Object.freeze([
   { value: 'light', icon: 'light_mode', labelKey: 'appearance.light' },
@@ -50,6 +54,8 @@ export const normalizePreferences = (value) => {
     appearance: APPEARANCE_OPTIONS.some((option) => option.value === source.appearance) ? source.appearance : DEFAULT_PREFERENCES.appearance,
     language: LANGUAGE_OPTIONS.some((option) => option.value === source.language) ? source.language : DEFAULT_PREFERENCES.language,
     landingPage: LANDING_OPTIONS.some((option) => option.value === source.landingPage) ? source.landingPage : DEFAULT_PREFERENCES.landingPage,
-    reduceMotion: typeof source.reduceMotion === 'boolean' ? source.reduceMotion : DEFAULT_PREFERENCES.reduceMotion
+    reduceMotion: typeof source.reduceMotion === 'boolean' ? source.reduceMotion : DEFAULT_PREFERENCES.reduceMotion,
+    quickDictation: typeof source.quickDictation === 'boolean' ? source.quickDictation : DEFAULT_PREFERENCES.quickDictation,
+    quickDictationInterval: QUICK_DICTATION_INTERVALS.includes(source.quickDictationInterval) ? source.quickDictationInterval : DEFAULT_PREFERENCES.quickDictationInterval
   };
 };
