@@ -4,7 +4,7 @@ import { translate, missingKeys } from './translate.js';
 import en from './en.js';
 import hi from './hi.js';
 import { SETTINGS_CATEGORIES } from '../settings/settingsCategories.js';
-import { APPEARANCE_OPTIONS, CANVAS_BACKGROUNDS, LANDING_OPTIONS } from '../settings/preferenceOptions.js';
+import { APPEARANCE_OPTIONS, BOARD_OPEN_VIEW_OPTIONS, CANVAS_BACKGROUNDS, LANDING_OPTIONS, ZOOM_FOCUS_OPTIONS } from '../settings/preferenceOptions.js';
 
 test('Hindi covers every English key, so the selector never offers a half-empty language', () => {
   assert.deepEqual(missingKeys('hi'), []);
@@ -24,6 +24,7 @@ test('every option label referenced by the UI exists in the dictionaries', () =>
     ...SETTINGS_CATEGORIES.flatMap((category) => [`settings.category.${category.id}.label`, `settings.category.${category.id}.description`]),
     ...APPEARANCE_OPTIONS.map((option) => option.labelKey),
     ...LANDING_OPTIONS.flatMap((option) => [option.labelKey, option.descriptionKey]),
+    ...[...ZOOM_FOCUS_OPTIONS, ...BOARD_OPEN_VIEW_OPTIONS].flatMap((option) => [option.labelKey, option.descriptionKey]),
     ...CANVAS_BACKGROUNDS.map((background) => background.labelKey)
   ];
   for (const key of keys) {

@@ -7,7 +7,8 @@ import {
 } from '../features/settings/settingsCategories';
 import { getBoardReturnPath } from '../features/settings/boardSettingsNavigation';
 import { useT } from '../context/PreferencesContext';
-import { AppearanceChoice, LandingChoice, LanguageSelect, PreferenceSwitch, QuickDictationIntervalSelect, ReduceMotionSwitch } from '../features/settings/PreferenceControls';
+import { AppearanceChoice, LandingChoice, LanguageSelect, PreferenceChoice, PreferenceSwitch, QuickDictationIntervalSelect, ReduceMotionSwitch } from '../features/settings/PreferenceControls';
+import { BOARD_OPEN_VIEW_OPTIONS, ZOOM_FOCUS_OPTIONS } from '../features/settings/preferenceOptions';
 import { MicrophoneStatus } from '../features/voice/QuickDictation.jsx';
 
 const SHORTCUTS = [
@@ -15,14 +16,21 @@ const SHORTCUTS = [
   { labelKey: 'shortcuts.pan', keysKey: 'shortcuts.panKeys' }
 ];
 
-const SettingRow = ({ id, title, description, labelFor, children }) => (
+const SettingRow = ({ id, title, description, labelFor, heading: Heading = 'h3', children }) => (
   <div className="py-6 first:pt-0 border-b border-outline-variant/60 last:border-b-0">
-    <h3 id={`${id}-title`} className="font-label text-base font-bold text-on-surface">
+    <Heading id={`${id}-title`} className="font-label text-base font-bold text-on-surface">
       {labelFor ? <label htmlFor={labelFor}>{title}</label> : title}
-    </h3>
+    </Heading>
     <p id={`${id}-description`} className="font-body text-sm text-on-surface-variant mt-1 mb-4">{description}</p>
     {children}
   </div>
+);
+
+const SettingSection = ({ id, title, children }) => (
+  <section aria-labelledby={id} className="mb-8 last:mb-0">
+    <h3 id={id} className="font-label text-xs font-bold uppercase tracking-wider text-on-surface-variant">{title}</h3>
+    {children}
+  </section>
 );
 
 const CategoryContent = ({ categoryId, label }) => {
@@ -39,6 +47,28 @@ const CategoryContent = ({ categoryId, label }) => {
         <SettingRow id="setting-landing" title={t('landing.title')} description={t('landing.description')}>
           <LandingChoice />
         </SettingRow>
+      </>
+    );
+  }
+  if (categoryId === 'canvas') {
+    return (
+      <>
+        <SettingSection id="setting-section-grid" title={t('canvasPrefs.gridSection')}>
+          <SettingRow id="setting-show-grid" heading="h4" title={t('canvasPrefs.showGrid')} description={t('canvasPrefs.showGridDescription')}>
+            <PreferenceSwitch name="showGrid" labelledBy="setting-show-grid-title" describedBy="setting-show-grid-description" />
+          </SettingRow>
+          <SettingRow id="setting-snap-grid" heading="h4" title={t('canvasPrefs.snapToGrid')} description={t('canvasPrefs.snapToGridDescription')}>
+            <PreferenceSwitch name="snapToGrid" labelledBy="setting-snap-grid-title" describedBy="setting-snap-grid-description" />
+          </SettingRow>
+        </SettingSection>
+        <SettingSection id="setting-section-navigation" title={t('canvasPrefs.navigationSection')}>
+          <SettingRow id="setting-zoom-focus" heading="h4" title={t('canvasPrefs.zoomFocus')} description={t('canvasPrefs.zoomFocusDescription')}>
+            <PreferenceChoice name="zoomFocus" options={ZOOM_FOCUS_OPTIONS} labelKey="canvasPrefs.zoomFocus" />
+          </SettingRow>
+          <SettingRow id="setting-board-open-view" heading="h4" title={t('canvasPrefs.boardOpenView')} description={t('canvasPrefs.boardOpenViewDescription')}>
+            <PreferenceChoice name="boardOpenView" options={BOARD_OPEN_VIEW_OPTIONS} labelKey="canvasPrefs.boardOpenView" />
+          </SettingRow>
+        </SettingSection>
       </>
     );
   }

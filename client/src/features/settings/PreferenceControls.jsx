@@ -71,24 +71,24 @@ export const LanguageSelect = ({ id }) => {
   );
 };
 
-export const LandingChoice = () => {
+export const PreferenceChoice = ({ name: preferenceName, options, labelKey }) => {
   const { preferences, update, t, errorMessage } = usePreferenceUpdate();
   const name = useId();
   return (
     <div>
-      <div role="radiogroup" aria-label={t('landing.title')} className="grid gap-2 max-w-md">
-        {LANDING_OPTIONS.map((option) => (
+      <div role="radiogroup" aria-label={t(labelKey)} className="grid gap-2 max-w-md">
+        {options.map((option) => (
           <label key={option.value} className="relative cursor-pointer">
             <input
               type="radio"
               name={name}
               value={option.value}
-              checked={preferences.landingPage === option.value}
-              onChange={() => update({ landingPage: option.value })}
+              checked={preferences[preferenceName] === option.value}
+              onChange={() => update({ [preferenceName]: option.value })}
               className="peer sr-only"
             />
             <span className="flex items-start gap-3 p-3 rounded-[12px] border border-outline-variant/70 bg-surface transition-colors hover:bg-surface-container-low peer-checked:border-primary peer-checked:bg-surface-container-low peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary">
-              <span className={`mt-0.5 w-4 h-4 shrink-0 rounded-full border-2 ${preferences.landingPage === option.value ? 'border-primary bg-primary shadow-[inset_0_0_0_3px_var(--color-surface)]' : 'border-outline'}`} aria-hidden="true" />
+              <span className={`mt-0.5 w-4 h-4 shrink-0 rounded-full border-2 ${preferences[preferenceName] === option.value ? 'border-primary bg-primary shadow-[inset_0_0_0_3px_var(--color-surface)]' : 'border-outline'}`} aria-hidden="true" />
               <span>
                 <span className="block font-label text-sm font-bold text-on-surface">{t(option.labelKey)}</span>
                 <span className="block font-body text-xs text-on-surface-variant mt-0.5">{t(option.descriptionKey)}</span>
@@ -102,7 +102,9 @@ export const LandingChoice = () => {
   );
 };
 
-export const PreferenceSwitch = ({ name, labelledBy, describedBy }) => {
+export const LandingChoice = () => <PreferenceChoice name="landingPage" options={LANDING_OPTIONS} labelKey="landing.title" />;
+
+export const PreferenceSwitch =({ name, labelledBy, describedBy }) => {
   const { preferences, update, errorMessage } = usePreferenceUpdate();
   const on = preferences[name];
   return (
@@ -116,7 +118,7 @@ export const PreferenceSwitch = ({ name, labelledBy, describedBy }) => {
         onClick={() => update({ [name]: !on })}
         className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${on ? 'bg-primary' : 'bg-surface-container-highest border border-outline-variant'} ${focusRing}`}
       >
-        <span className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-6 bg-on-primary' : 'translate-x-1 bg-on-surface-variant'}`} />
+        <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-6 bg-on-primary' : 'translate-x-1 bg-on-surface-variant'}`} />
       </button>
       {errorMessage}
     </div>
