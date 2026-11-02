@@ -72,6 +72,28 @@ const CategoryContent = ({ categoryId, label }) => {
       </>
     );
   }
+  if (categoryId === 'collaboration') {
+    return (
+      <>
+        <SettingSection id="setting-section-presence" title={t('collabPrefs.presenceSection')}>
+          <SettingRow id="setting-collab-cursors" heading="h4" title={t('collabPrefs.cursors')} description={t('collabPrefs.cursorsDescription')}>
+            <PreferenceSwitch name="showCollaboratorCursors" labelledBy="setting-collab-cursors-title" describedBy="setting-collab-cursors-description" />
+          </SettingRow>
+          <SettingRow id="setting-collab-names" heading="h4" title={t('collabPrefs.names')} description={t('collabPrefs.namesDescription')}>
+            <PreferenceSwitch name="showCollaboratorNames" labelledBy="setting-collab-names-title" describedBy="setting-collab-names-description" />
+          </SettingRow>
+          <SettingRow id="setting-collab-online" heading="h4" title={t('collabPrefs.online')} description={t('collabPrefs.onlineDescription')}>
+            <PreferenceSwitch name="showOnlineCollaborators" labelledBy="setting-collab-online-title" describedBy="setting-collab-online-description" />
+          </SettingRow>
+        </SettingSection>
+        <SettingSection id="setting-section-collab-notifications" title={t('collabPrefs.notificationsSection')}>
+          <SettingRow id="setting-collab-notices" heading="h4" title={t('collabPrefs.notices')} description={t('collabPrefs.noticesDescription')}>
+            <PreferenceSwitch name="collaboratorNotifications" labelledBy="setting-collab-notices-title" describedBy="setting-collab-notices-description" />
+          </SettingRow>
+        </SettingSection>
+      </>
+    );
+  }
   if (categoryId === 'accessibility') {
     return (
       <SettingRow id="setting-motion" title={t('motion.title')} description={t('motion.description')}>
