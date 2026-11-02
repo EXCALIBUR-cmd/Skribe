@@ -20,6 +20,9 @@ import { createPresenceNotices } from '../features/collab/presenceNotices';
 import CollaborativeSelectionsOverlay from '../components/ui/CollaborativeSelectionsOverlay';
 import UndoRedoFloating from '../components/ui/UndoRedoFloating';
 import apiClient from '../api/apiClient';
+import SidekickPanel from '../components/sidekick/SidekickPanel';
+import { executeSidekickPlan } from '../features/sidekick/sidekickPlan';
+import { renderMermaid } from '../features/aiAssistant/mermaidRenderer';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
@@ -753,6 +756,7 @@ export const MainCanvasPage = () => {
 
   const [activeWheel, setActiveWheel] = useState(null);
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [isSidekickOpen, setIsSidekickOpen] = useState(() => new URLSearchParams(window.location.search).get('sidekick') === '1');
   const [activeAIAction, setActiveAIAction] = useState(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [toolbarTooltip, setToolbarTooltip] = useState(null);
@@ -884,6 +888,41 @@ export const MainCanvasPage = () => {
       addToast('AI Assistant', 'The result could not be added to the board.', 'error', 'error');
     }
   }, [addToast]);
+
+  const getSidekickSnapshot = useCallback(() => {
+    const canvas = fabricCanvasRef.current?.getCanvas?.();
+    const objects = canvas?.getObjects?.() || [];
+    const active = canvas?.getActiveObjects?.() || [];
+    const selectedIds = active.map((object) => object.id).filter(Boolean);
+    const selected = new Set(selectedIds);
+    return {
+      selectedIds,
+      selectionCount: active.length,
+      objectCount: objects.filter((object) => object.id && !object.parentShapeId && object.metadata?.role !== 'timestamp').length,
+      objectIds: objects.map((object) => object.id).filter(Boolean),
+      scopeObjects: selectedIds.length ? objects.filter((object) => selected.has(object.id) || selected.has(object.parentShapeId)) : objects
+    };
+  }, []);
+
+  const flushBoardForSidekick = useCallback(async () => {
+    const currentJson = latestCanvasDataRef.current ? JSON.stringify(latestCanvasDataRef.current) : null;
+    const result = await flushCanvasBeforeNavigate({
+      controller: boardId ? syncControllerRef.current : null,
+      canvasData: latestCanvasDataRef.current,
+      hasUnsavedLegacyChanges: !isInitialLoadingRef.current && currentJson !== null && currentJson !== lastSavedJsonRef.current,
+      flushViewport: flushViewportSave
+    });
+    if (result.saved) lastSavedJsonRef.current = currentJson;
+    return result;
+  }, [boardId, flushViewportSave]);
+
+  const prepareSidekickDiagram = useCallback(async (prompt) => {
+    const res = await apiClient.post('/ai-assistant/generate', { action: 'diagram', prompt, board: getAIBoardContext() });
+    const data = res?.data?.result;
+    if (!data?.source) throw new Error('Diagram Studio returned no diagram');
+    const image = await renderMermaid(data.source);
+    return { image, meta: { kind: 'mermaid', title: data.title, diagramType: data.diagramType, source: data.source } };
+  }, [getAIBoardContext]);
 
   const skribeFeatureItems = [
     {
@@ -1041,6 +1080,18 @@ export const MainCanvasPage = () => {
         error: errorMessage
       });
     }
+  };
+
+  const applySidekickProposal = async (proposal) => {
+    const result = await executeSidekickPlan(proposal, {
+      canvasApi: fabricCanvasRef.current,
+      insertDiagram: (prepared) => fabricCanvasRef.current?.insertDiagramImage(prepared.image, prepared.meta),
+      openMessCleanup: () => handleSkribeFeatureClick({ id: 'mess-cleanup' })
+    });
+    const canvas = fabricCanvasRef.current?.getCanvas?.();
+    canvas?.discardActiveObject();
+    canvas?.requestRenderAll();
+    return result;
   };
 
   const handleCancelMessCleanupPreview = () => {
@@ -1690,6 +1741,30 @@ export const MainCanvasPage = () => {
           onClose={closeAIAction}
           getBoardContext={getAIBoardContext}
           onApply={handleApplyAIResult}
+        />
+      )}
+
+      {boardId && !isSidekickOpen && (
+        <button
+          type="button"
+          onClick={() => setIsSidekickOpen(true)}
+          aria-label={t('sidekick.open')}
+          className="fixed right-6 bottom-6 z-30 flex h-12 items-center gap-2 rounded-full border-2 border-secondary bg-surface px-4 font-label text-sm font-bold text-on-surface sticker-shadow hover:bg-secondary-container cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }} aria-hidden="true">auto_awesome</span>
+          <span className="hidden sm:inline">{t('sidekick.open')}</span>
+        </button>
+      )}
+
+      {boardId && isSidekickOpen && (
+        <SidekickPanel
+          key={boardId}
+          boardId={boardId}
+          onClose={() => setIsSidekickOpen(false)}
+          getSnapshot={getSidekickSnapshot}
+          flushBoard={flushBoardForSidekick}
+          prepareDiagram={prepareSidekickDiagram}
+          applyProposal={applySidekickProposal}
         />
       )}
     </div>

@@ -1,9 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AIPanelWrapper from '../components/ui/AIPanelWrapper';
+import apiClient from '../api/apiClient';
+import { useT } from '../context/PreferencesContext';
 
 export const AIAssistPage = () => {
   const [sketchToShape, setSketchToShape] = useState(true);
-  const [promptInput, setPromptInput] = useState('');
+  const [boards, setBoards] = useState(null);
+  const navigate = useNavigate();
+  const t = useT();
+
+  useEffect(() => {
+    let active = true;
+    apiClient.get('/boards')
+      .then((res) => { if (active) setBoards(Array.isArray(res?.data?.boards) ? res.data.boards : []); })
+      .catch(() => { if (active) setBoards([]); });
+    return () => { active = false; };
+  }, []);
 
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-surface-bright flex">
@@ -79,55 +92,38 @@ export const AIAssistPage = () => {
           <hr className="stagger-item border-t-2 border-surface-container" />
 
           <div className="stagger-item flex flex-col gap-3">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="material-symbols-outlined text-tertiary">lightbulb</span>
-              <span className="font-label text-sm font-bold text-on-surface">Smart Suggestions</span>
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-tertiary" aria-hidden="true">dashboard</span>
+              <h2 className="font-label text-sm font-bold text-on-surface">{t('sidekick.launcherTitle')}</h2>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="aspect-square bg-surface-container hover:bg-primary-container/20 rounded-lg border-2 border-transparent hover:border-primary cursor-pointer flex flex-col items-center justify-center gap-1 transition-all group p-2 text-center">
-                <span className="material-symbols-outlined text-3xl text-on-surface-variant group-hover:text-primary transition-colors">
-                  group_add
-                </span>
-                <span className="font-label text-[10px] font-bold">User Persona</span>
+            <p className="font-body text-xs text-on-surface-variant">{t('sidekick.launcherBody')}</p>
+            {boards === null && <p role="status" className="font-body text-xs text-on-surface-variant">{t('sidekick.launcherLoading')}</p>}
+            {boards?.length === 0 && (
+              <div className="flex flex-col items-start gap-2">
+                <p className="font-body text-xs text-on-surface-variant">{t('sidekick.launcherEmpty')}</p>
+                <button type="button" onClick={() => navigate('/boards')} className="rounded-[10px] bg-primary px-3 py-2 font-label text-xs font-bold text-on-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                  {t('sidekick.launcherNew')}
+                </button>
               </div>
-              <div className="aspect-square bg-surface-container hover:bg-secondary-container/40 rounded-lg border-2 border-transparent hover:border-secondary cursor-pointer flex flex-col items-center justify-center gap-1 transition-all group p-2 text-center">
-                <span className="material-symbols-outlined text-3xl text-on-surface-variant group-hover:text-secondary transition-colors">
-                  account_tree
-                </span>
-                <span className="font-label text-[10px] font-bold">Flowchart</span>
-              </div>
-              <div className="aspect-square bg-surface-container hover:bg-tertiary-container/30 rounded-lg border-2 border-transparent hover:border-tertiary cursor-pointer flex flex-col items-center justify-center gap-1 transition-all group p-2 text-center">
-                <span className="material-symbols-outlined text-3xl text-on-surface-variant group-hover:text-tertiary transition-colors">
-                  view_kanban
-                </span>
-                <span className="font-label text-[10px] font-bold">Kanban</span>
-              </div>
-            </div>
-          </div>
-
-          <hr className="stagger-item border-t-2 border-surface-container" />
-
-          <button className="stagger-item w-full bg-primary text-on-primary font-label text-sm font-bold py-4 rounded-xl shadow-md hover:scale-102 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
-            <span className="material-symbols-outlined">grid_view</span>
-            Auto-Layout Canvas
-          </button>
-
-          <div className="stagger-item mt-auto p-2 bg-surface-container-lowest border-t-2 border-surface-container rounded-xl">
-            <div className="relative flex items-center bg-surface-container rounded-full border-2 border-transparent focus-within:border-primary transition-colors pr-2">
-              <span className="material-symbols-outlined text-on-surface-variant ml-3 mr-2">chat</span>
-              <input
-                type="text"
-                value={promptInput}
-                onChange={(e) => setPromptInput(e.target.value)}
-                placeholder="Ask AI to draw..."
-                className="bg-transparent border-none outline-none text-on-surface w-full font-body text-xs py-2.5 placeholder:text-on-surface-variant"
-              />
-              <button className="w-7 h-7 rounded-full bg-primary text-on-primary flex items-center justify-center hover:bg-on-primary-container transition-colors cursor-pointer">
-                <span className="material-symbols-outlined text-xs" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  arrow_upward
-                </span>
-              </button>
-            </div>
+            )}
+            {boards?.length > 0 && (
+              <ul className="flex flex-col gap-1.5">
+                {boards.slice(0, 8).map((board) => (
+                  <li key={board.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/board/${board.id}?sidekick=1`)}
+                      aria-label={t('sidekick.launcherOpen', { title: board.title || 'Untitled Board' })}
+                      className="flex w-full items-center gap-2 rounded-[10px] bg-surface-container px-3 py-2 text-left hover:bg-secondary-container/40 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-secondary" aria-hidden="true">auto_awesome</span>
+                      <span className="min-w-0 flex-1 truncate font-label text-xs font-bold text-on-surface">{board.title || 'Untitled Board'}</span>
+                      <span className="material-symbols-outlined text-[18px] text-on-surface-variant" aria-hidden="true">arrow_forward</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </AIPanelWrapper>
       </div>
