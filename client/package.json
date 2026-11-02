@@ -33,7 +33,7 @@
     "test:text-elements": "node --test src/features/textElements/textElements.test.js",
     "test:image-assets": "node --test src/features/imageAssets/imageAssets.test.js",
     "test:icon-gallery": "node --test src/features/iconGallery/iconGallery.test.js",
-    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js src/features/settings/canvasTheme.test.js src/features/settings/landing.test.js src/features/i18n/translate.test.js",
+    "test:settings": "node --test src/features/settings/settingsCategories.test.js src/features/settings/boardSettingsNavigation.test.js src/features/settings/canvasTheme.test.js src/features/settings/canvasGrid.test.js src/features/settings/landing.test.js src/features/i18n/translate.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

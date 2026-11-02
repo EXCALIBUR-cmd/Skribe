@@ -76,7 +76,9 @@ const createPendingOperationJournal = (boardId) => {
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
   const { user } = useAuth();
-  const { resolvedTheme, t } = usePreferences();
+  const { resolvedTheme, t, preferences } = usePreferences();
+  const boardOpenViewRef = useRef(preferences.boardOpenView);
+  boardOpenViewRef.current = preferences.boardOpenView;
   const [canvasBackground, setCanvasBackground] = useState('default');
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const navigate = useNavigate();
@@ -390,12 +392,16 @@ export const MainCanvasPage = () => {
               console.log('[BOARD LOAD DEBUG] Loading', initialJson?.objects?.length ?? 0, 'objects into Fabric');
               fabricCanvasRef.current.loadFromJSON(initialJson, () => {
                 if (isMounted) {
-                  if (isValidViewport(savedViewport)) {
+                  const openView = boardOpenViewRef.current;
+                  if (openView === 'remember' && isValidViewport(savedViewport)) {
                     fabricCanvasRef.current.setViewport(savedViewport);
                   }
-                  if (!fabricCanvasRef.current.hasVisibleObjects?.()) {
+                  if (openView !== 'remember' || !fabricCanvasRef.current.hasVisibleObjects?.()) {
                     console.log('[BOARD LOAD DEBUG] Restored viewport has no visible objects. Auto-fitting content...');
                     fabricCanvasRef.current.fitToContent?.();
+                  }
+                  if (openView === 'actual') {
+                    fabricCanvasRef.current.zoomToActualSize?.();
                   }
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);

@@ -38,7 +38,8 @@ import { getInitialImageScale, installImageAssetLoading } from '../../features/i
 import ImageUploadDialog from '../../features/imageAssets/ImageUploadDialog.jsx';
 import { applyIconStyle, createIconObject, getIconSelectionProps, isLucideIcon, prepareIconObject, setIconSize } from '../../features/iconGallery/iconObjects.js';
 import AnimatedModal from '../ui/AnimatedModal';
-import { useT } from '../../context/PreferencesContext';
+import { usePreferences, useT } from '../../context/PreferencesContext';
+import { getGridBackground, snapPoint } from '../../features/settings/canvasGrid.js';
 
 const IconGalleryNotice = ({ isOpen, onClose, messageKey }) => {
   const t = useT();
@@ -98,6 +99,10 @@ export const FabricCanvas = forwardRef(({
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
   const containerRef = useRef(null);
+  const { preferences } = usePreferences();
+  const canvasPrefsRef = useRef(preferences);
+  canvasPrefsRef.current = preferences;
+  const gridKeyRef = useRef('');
   const [isPanning, setIsPanning] = useState(false);
   const [rotationBadge, setRotationBadge] = useState(null);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
@@ -1289,6 +1294,27 @@ export const FabricCanvas = forwardRef(({
     };
   };
 
+  const placeAt = (point) => (canvasPrefsRef.current.snapToGrid ? snapPoint(point || getNextViewportPosition(fabricCanvasRef.current)) : point);
+
+  const syncGridBackground = () => {
+    const canvas = fabricCanvasRef.current;
+    const container = containerRef.current;
+    if (!canvas?.viewportTransform || !container) return;
+    const key = canvas.viewportTransform.join(',');
+    if (key === gridKeyRef.current) return;
+    gridKeyRef.current = key;
+    Object.assign(container.style, getGridBackground(canvas.viewportTransform));
+  };
+
+  const snapMovingObject = (target) => {
+    if (!canvasPrefsRef.current.snapToGrid || !target || target.isEditing) return;
+    const center = target.getCenterPoint();
+    const snapped = snapPoint(center);
+    if (snapped.x === center.x && snapped.y === center.y) return;
+    target.setPositionByOrigin(new fabric.Point(snapped.x, snapped.y), 'center', 'center');
+    target.setCoords();
+  };
+
   const createLinkedElement = (shape, textObj, left, top, angle = 0, timestampObj = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return null;
@@ -1881,7 +1907,7 @@ export const FabricCanvas = forwardRef(({
   const addTextElement = (kind) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    const { x, y } = getNextViewportPosition(canvas);
+    const { x, y } = placeAt(getNextViewportPosition(canvas));
     const text = createTextElement(fabric, kind, { left: x, top: y, fill: activeColor && activeColor !== '#000000' ? activeColor : null });
     if (!text) return;
 
@@ -1901,7 +1927,7 @@ export const FabricCanvas = forwardRef(({
     if (fabricCanvasRef.current !== canvas) throw new Error('Canvas changed during upload');
     const zoom = canvas.getZoom() || 1;
     const scale = getInitialImageScale(image.width, image.height, canvas.getWidth() / zoom, canvas.getHeight() / zoom);
-    const { x, y } = getNextViewportPosition(canvas);
+    const { x, y } = placeAt(getNextViewportPosition(canvas));
     image.set({ left: x, top: y, scaleX: scale, scaleY: scale, metadata: { assetId: asset.assetId } });
 
     ensureObjectId(image);
@@ -1916,7 +1942,7 @@ export const FabricCanvas = forwardRef(({
   const addLucideIcon = async ({ markup, icon, color, strokeWidth, size }) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) throw new Error('Canvas is not ready');
-    const { x, y } = getNextViewportPosition(canvas);
+    const { x, y } = placeAt(getNextViewportPosition(canvas));
     const group = await createIconObject(fabric, markup, { icon, color, strokeWidth, size, left: x, top: y });
     if (fabricCanvasRef.current !== canvas) throw new Error('Canvas changed while adding the icon');
 
@@ -2881,22 +2907,22 @@ export const FabricCanvas = forwardRef(({
 
     addShape: (type, options = {}) => {
       if (type === 'sticky' || options.id === 'sticky_yellow' || options.id === 'sticky_pink' || options.id === 'sticky_blue' || options.id === 'sticky_green') {
-        addSticky(null, 'New Sticky Note', options.colorDot);
+        addSticky(placeAt(null), 'New Sticky Note', options.colorDot);
       } else if (type === 'checklist' || options.id === 'sticky_checklist') {
-        addChecklist();
+        addChecklist(placeAt(null));
       } else if (type === 'callout' || options.id === 'sticky_callout') {
-        addCallout();
-      } else if (type === 'rect') addRect();
-      else if (type === 'rounded_rect') addRoundedRect();
-      else if (type === 'circle') addCircle();
-      else if (type === 'triangle') addTriangle();
-      else if (type === 'diamond') addDiamond();
-      else if (type === 'hexagon') addHexagon();
-      else if (type === 'line') addLine();
+        addCallout(placeAt(null));
+      } else if (type === 'rect') addRect(placeAt(null));
+      else if (type === 'rounded_rect') addRoundedRect(placeAt(null));
+      else if (type === 'circle') addCircle(placeAt(null));
+      else if (type === 'triangle') addTriangle(placeAt(null));
+      else if (type === 'diamond') addDiamond(placeAt(null));
+      else if (type === 'hexagon') addHexagon(placeAt(null));
+      else if (type === 'line') addLine(placeAt(null));
       else if (type === 'arrow' || type === 'connector') addConnector(options.connectorType || 'straight', options);
       else if (type === 'text') {
         if (options.textKind) addTextElement(options.textKind);
-        else addText();
+        else addText(placeAt(null));
       }
       else if (type === 'upload') setIsImageUploadOpen(true);
       else if (type === 'icons') setIsIconGalleryOpen(true);
@@ -2931,6 +2957,8 @@ export const FabricCanvas = forwardRef(({
       saveState();
       return diagram;
     },
+
+    zoomToActualSize: () => applyZoom(1, null, false),
 
     zoomIn: () => {
       const canvas = fabricCanvasRef.current;
@@ -3626,7 +3654,7 @@ export const FabricCanvas = forwardRef(({
       if (e.ctrlKey || e.metaKey) {
         let zoom = canvas.getZoom();
         zoom *= 0.999 ** e.deltaY;
-        const mousePoint = new fabric.Point(e.offsetX, e.offsetY);
+        const mousePoint = canvasPrefsRef.current.zoomFocus === 'center' ? null : new fabric.Point(e.offsetX, e.offsetY);
         applyZoom(zoom, mousePoint, false);
       } else {
         const vpt = canvas.viewportTransform;
@@ -3754,7 +3782,7 @@ export const FabricCanvas = forwardRef(({
         const vpt = canvas.viewportTransform;
         const invVpt = fabric.util.invertTransform(vpt);
         const clickPoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        const scenePoint = fabric.util.transformPoint(clickPoint, invVpt);
+        const scenePoint = placeAt(fabric.util.transformPoint(clickPoint, invVpt));
 
         if (tool === 'rect') addRect(scenePoint);
         if (tool === 'circle') addCircle(scenePoint);
@@ -4006,7 +4034,9 @@ export const FabricCanvas = forwardRef(({
       });
     };
 
+    canvas.on('after:render', syncGridBackground);
     canvas.on('object:moving', (opt) => {
+      snapMovingObject(opt.target);
       handleObjectMoving(opt);
       handleObjectTransformLive(opt);
     });
@@ -4086,13 +4116,13 @@ export const FabricCanvas = forwardRef(({
   }, [activeTool, activeColor]);
 
   useEffect(() => {
-    if (activeTool === 'rect') addRect();
-    if (activeTool === 'circle') addCircle();
-    if (activeTool === 'sticky') addSticky();
-    if (activeTool === 'checklist') addChecklist();
-    if (activeTool === 'callout') addCallout();
-    if (activeTool === 'text') addText();
-    if (activeTool === 'line') addLine();
+    if (activeTool === 'rect') addRect(placeAt(null));
+    if (activeTool === 'circle') addCircle(placeAt(null));
+    if (activeTool === 'sticky') addSticky(placeAt(null));
+    if (activeTool === 'checklist') addChecklist(placeAt(null));
+    if (activeTool === 'callout') addCallout(placeAt(null));
+    if (activeTool === 'text') addText(placeAt(null));
+    if (activeTool === 'line') addLine(placeAt(null));
   }, [activeTool]);
 
   return (
@@ -4101,8 +4131,7 @@ export const FabricCanvas = forwardRef(({
       className={`w-full h-full relative overflow-hidden ${className}`}
       style={canvasBackground ? {
         backgroundColor: canvasBackground,
-        backgroundImage: `radial-gradient(${isDarkSurface(canvasBackground) ? 'rgba(255, 255, 255, 0.08)' : 'rgba(30, 41, 59, 0.1)'} 1px, transparent 1px)`,
-        backgroundSize: '24px 24px'
+        backgroundImage: preferences.showGrid ? `radial-gradient(${isDarkSurface(canvasBackground) ? 'rgba(255, 255, 255, 0.08)' : 'rgba(30, 41, 59, 0.1)'} 1px, transparent 1px)` : 'none'
       } : undefined}
     >
       <canvas ref={canvasRef} />
