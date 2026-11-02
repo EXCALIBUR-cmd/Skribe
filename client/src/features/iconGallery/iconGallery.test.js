@@ -253,6 +253,7 @@ test('the Image menu opens the gallery, icons get their own property section and
   const item = TOOL_REGISTRY.image.items.find((entry) => entry.id === 'icons_gallery');
   assert.equal(item.toolType, 'icons');
   assert.ok(TOOL_REGISTRY.image.items.some((entry) => entry.id === 'upload_image' && entry.actionType === 'upload'));
+  assert.deepEqual(TOOL_REGISTRY.image.items.map((entry) => entry.id), ['upload_image', 'icons_gallery']);
   const iconSections = getRegisteredSectionsForObject({ hasSelection: true, type: 'group', isLucideIcon: true }).map((section) => section.id);
   assert.ok(iconSections.includes('icon'));
   assert.equal(iconSections.includes('appearance'), false);
