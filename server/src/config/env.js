@@ -25,6 +25,8 @@ export const config = {
   messCleanupModel: process.env.MESS_CLEANUP_MODEL || 'qwen/qwen3.8-27b',
   groqAiAssistantApiKey: process.env.GROQ_AI_ASSISTANT_API_KEY || '',
   aiAssistantModel: process.env.AI_ASSISTANT_MODEL || 'openai/gpt-oss-20b',
+  groqAiSidekickApiKey: process.env.GROQ_AI_SIDEKICK_API_KEY || '',
+  aiSidekickModel: process.env.AI_SIDEKICK_MODEL || 'openai/gpt-oss-20b',
   collabOperationsEnabled: process.env.COLLAB_OPERATIONS_ENABLED === 'true',
   imageKitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY || '',
   imageKitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY || '',
