@@ -5,6 +5,8 @@ import PenInspector from './PenInspector';
 import { isLowContrast, getBestReadableTextColor, getContrastRatio } from '../../utils/contrastUtils';
 import { getRegisteredSectionsForObject, PROPERTY_SECTIONS } from './PropertyRegistry';
 import { TEXT_ELEMENT_KINDS } from '../../features/textElements/textElements.js';
+import { ICON_SIZES, ICON_STROKES } from '../../features/iconGallery/iconObjects.js';
+import { useT } from '../../context/PreferencesContext';
 
 export const PropertiesSidebar = ({
   activeTool,
@@ -25,6 +27,7 @@ export const PropertiesSidebar = ({
   onSidebarExpandChange,
   className = ''
 }) => {
+  const t = useT();
   const [isManualCollapsed, setIsManualCollapsed] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({});
   const typographySectionRef = useRef(null);
@@ -128,7 +131,7 @@ export const PropertiesSidebar = ({
                   ? 'Straight Line'
                   : isConnector
                   ? 'Connector'
-                  : TEXT_ELEMENT_KINDS[textKind]?.label || type || 'Workspace Control'}
+                  : TEXT_ELEMENT_KINDS[textKind]?.label || selectedProps?.iconName || type || 'Workspace Control'}
               </span>
               <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
                 {isLaserMode ? 'Presentation Mode' : editingContext === 'text' ? 'Text Editing Mode' : 'Control Center'}
@@ -212,7 +215,7 @@ export const PropertiesSidebar = ({
                     >
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-primary text-base">{sec.icon}</span>
-                        <span className="font-label font-bold text-xs text-on-surface">{sec.title}</span>
+                        <span className="font-label font-bold text-xs text-on-surface">{sec.titleKey ? t(sec.titleKey) : sec.title}</span>
                         {isTypoTarget && (
                           <span className="px-1.5 py-0.5 bg-primary text-on-primary text-[9px] font-bold rounded-full uppercase tracking-wide">
                             Active
@@ -284,6 +287,55 @@ export const PropertiesSidebar = ({
                                 </div>
                               </div>
                             )}
+                          </div>
+                        )}
+
+                        {sec.id === PROPERTY_SECTIONS.ICON && (
+                          <div className="space-y-3">
+                            <UniversalColorPicker
+                              label={t('icons.colour')}
+                              color={selectedProps.iconColor || '#1e293b'}
+                              onChange={(val) => onApplyProperty('iconColor', val)}
+                            />
+                            <div className="flex items-center justify-between gap-2" role="group" aria-label={t('icons.stroke')}>
+                              <span className="text-on-surface-variant font-bold">{t('icons.stroke')}:</span>
+                              <div className="flex items-center gap-1">
+                                {ICON_STROKES.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    onClick={() => onApplyProperty('iconStrokeWidth', option.value)}
+                                    aria-pressed={selectedProps.iconStrokeWidth === option.value}
+                                    className={`px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer transition-all ${
+                                      selectedProps.iconStrokeWidth === option.value
+                                        ? 'bg-primary text-on-primary border-primary font-bold shadow-xs'
+                                        : 'border-outline-variant text-on-surface-variant hover:bg-surface-container-high'
+                                    }`}
+                                  >
+                                    {t(`icons.stroke.${option.id}`)}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between gap-2" role="group" aria-label={t('icons.size')}>
+                              <span className="text-on-surface-variant font-bold">{t('icons.size')}: <span className="font-mono">{selectedProps.iconSize}px</span></span>
+                              <div className="flex items-center gap-1">
+                                {ICON_SIZES.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    onClick={() => onApplyProperty('iconSize', option.size)}
+                                    aria-pressed={selectedProps.iconSize === option.size}
+                                    aria-label={`${t(`icons.size.${option.id}`)}, ${option.size} px`}
+                                    className={`px-2 py-1 rounded-lg border text-[11px] font-mono cursor-pointer transition-all ${
+                                      selectedProps.iconSize === option.size
+                                        ? 'bg-primary text-on-primary border-primary font-bold shadow-xs'
+                                        : 'border-outline-variant text-on-surface-variant hover:bg-surface-container-high'
+                                    }`}
+                                  >
+                                    {option.size}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                           </div>
                         )}
 

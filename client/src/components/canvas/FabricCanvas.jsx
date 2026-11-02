@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import * as fabric from 'fabric';
 import anime from 'animejs';
 import { isReducedMotion } from '../../animations/config';
@@ -35,6 +36,21 @@ import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../fe
 import { createTextElement, getTextKind, installTextElementRendering } from '../../features/textElements/textElements.js';
 import { getInitialImageScale, installImageAssetLoading } from '../../features/imageAssets/imageAssets.js';
 import ImageUploadDialog from '../../features/imageAssets/ImageUploadDialog.jsx';
+import { applyIconStyle, createIconObject, getIconSelectionProps, isLucideIcon, prepareIconObject, setIconSize } from '../../features/iconGallery/iconObjects.js';
+import AnimatedModal from '../ui/AnimatedModal';
+import { useT } from '../../context/PreferencesContext';
+
+const IconGalleryNotice = ({ isOpen, onClose, messageKey }) => {
+  const t = useT();
+  return (
+    <AnimatedModal isOpen={isOpen} onClose={onClose} title={t('icons.title')}>
+      <p role={messageKey === 'icons.loadFailed' ? 'alert' : 'status'} className="text-sm text-on-surface-variant">{t(messageKey)}</p>
+    </AnimatedModal>
+  );
+};
+
+const IconGalleryDialog = lazy(() => import('../../features/iconGallery/IconGalleryDialog.jsx')
+  .catch(() => ({ default: (props) => <IconGalleryNotice {...props} messageKey="icons.loadFailed" /> })));
 
 installThemeRendering(fabric.FabricObject);
 installTextElementRendering(fabric);
@@ -85,6 +101,7 @@ export const FabricCanvas = forwardRef(({
   const [isPanning, setIsPanning] = useState(false);
   const [rotationBadge, setRotationBadge] = useState(null);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
+  const [isIconGalleryOpen, setIsIconGalleryOpen] = useState(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
   const zoomAnimationRef = useRef(null);
   const newObjectOffsetRef = useRef(0);
@@ -339,6 +356,7 @@ export const FabricCanvas = forwardRef(({
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const newObj = enlivened[0];
         hydrateSkribeFabricObject(existingObj, objectData);
+        if (isLucideIcon(existingObj)) applyIconStyle(existingObj, { color: existingObj.metadata.color, strokeWidth: existingObj.metadata.strokeWidth });
 
         const propsToCopy = [
           'left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle',
@@ -1069,7 +1087,7 @@ export const FabricCanvas = forwardRef(({
   const isEligibleContainerShape = (obj) => {
     if (!obj) return false;
     if (obj.isTemporaryDrawPath || obj.isVectorStroke || obj.isStraightLine || obj.isConnector || obj.skribeLine) return false;
-    if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text' || obj.type === 'path' || obj.type === 'line') return false;
+    if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text' || obj.type === 'path' || obj.type === 'line' || isLucideIcon(obj)) return false;
     if (obj.isStickyNote || obj.isChecklistNote || obj.isCalloutNote) return true;
     return ['rect', 'circle', 'triangle', 'diamond', 'polygon', 'group'].includes(obj.type) || Boolean(obj.elementId);
   };
@@ -1895,6 +1913,23 @@ export const FabricCanvas = forwardRef(({
     return image;
   };
 
+  const addLucideIcon = async ({ markup, icon, color, strokeWidth, size }) => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) throw new Error('Canvas is not ready');
+    const { x, y } = getNextViewportPosition(canvas);
+    const group = await createIconObject(fabric, markup, { icon, color, strokeWidth, size, left: x, top: y });
+    if (fabricCanvasRef.current !== canvas) throw new Error('Canvas changed while adding the icon');
+
+    ensureObjectId(group);
+    canvas.add(group);
+    notifyLocalObjectAdded(group);
+    canvas.setActiveObject(group);
+    canvas.requestRenderAll();
+    saveState();
+    if (onToolComplete) onToolComplete();
+    return group;
+  };
+
   const insertDictatedText = (textString, options = {}) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) {
@@ -2278,7 +2313,8 @@ export const FabricCanvas = forwardRef(({
 
     activeObj.clone().then((cloned) => {
       canvas.discardActiveObject();
-      if (getTextKind(activeObj) || activeObj.metadata?.assetId) cloned.metadata = { ...activeObj.metadata };
+      if (getTextKind(activeObj) || activeObj.metadata?.assetId || isLucideIcon(activeObj)) cloned.metadata = { ...activeObj.metadata };
+      prepareIconObject(cloned);
       ensureObjectId(cloned);
       cloned.set({
         left: activeObj.left + 20,
@@ -2389,7 +2425,8 @@ export const FabricCanvas = forwardRef(({
       isVectorStroke: !!(targetShape.isVectorStroke || activeObj.isVectorStroke),
       isStraightLine: !!(targetShape.isSkribeLine || targetShape.isStraightLine || targetShape.type === 'line' || targetShape.isCurved || activeObj.isStraightLine),
       connectorType: targetShape.connectorType || 'straight',
-      contrastResolved
+      contrastResolved,
+      ...(isLucideIcon(targetShape) ? getIconSelectionProps(targetShape) : {})
     };
 
     if (textChild) {
@@ -2862,6 +2899,7 @@ export const FabricCanvas = forwardRef(({
         else addText();
       }
       else if (type === 'upload') setIsImageUploadOpen(true);
+      else if (type === 'icons') setIsIconGalleryOpen(true);
     },
 
     insertDictatedText: (textString, options = {}) => {
@@ -2933,6 +2971,15 @@ export const FabricCanvas = forwardRef(({
           : null;
 
         if (!shapeObj) shapeObj = obj;
+
+        if (isLucideIcon(shapeObj)) {
+          const changed = propName === 'iconColor' ? applyIconStyle(shapeObj, { color: value })
+            : propName === 'iconStrokeWidth' ? applyIconStyle(shapeObj, { strokeWidth: Number(value) })
+            : propName === 'iconSize' ? setIconSize(shapeObj, Number(value))
+            : false;
+          if (changed) notifyLocalObjectModified(shapeObj);
+          if (propName.startsWith('icon')) return;
+        }
 
         if (propName === 'autoFixContrast' && textObj) {
           textObj.set('fill', value);
@@ -4072,6 +4119,12 @@ export const FabricCanvas = forwardRef(({
         </div>
       )}
       <ImageUploadDialog isOpen={isImageUploadOpen} onClose={() => setIsImageUploadOpen(false)} onUploaded={addUploadedImage} />
+      {isIconGalleryOpen && createPortal(
+        <Suspense fallback={<IconGalleryNotice isOpen onClose={() => setIsIconGalleryOpen(false)} messageKey="icons.loading" />}>
+          <IconGalleryDialog isOpen onClose={() => setIsIconGalleryOpen(false)} onInsert={addLucideIcon} canvasBackground={canvasBackground} />
+        </Suspense>,
+        document.body
+      )}
     </div>
   );
 });

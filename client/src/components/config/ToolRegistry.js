@@ -27,7 +27,7 @@ export const TOOL_REGISTRY = {
     categoryLabel: 'Image / Assets',
     items: [
       { id: 'upload_image', label: 'Upload Image', icon: 'upload_file', actionType: 'upload' },
-      { id: 'icons_gallery', label: 'Icons Gallery', icon: 'grid_view', actionType: 'gallery' },
+      { id: 'icons_gallery', label: 'Icons Gallery', icon: 'grid_view', actionType: 'gallery', toolType: 'icons' },
       { id: 'stickers', label: 'Stickers Pack', icon: 'sentiment_satisfied', actionType: 'stickers' },
       { id: 'templates', label: 'Templates', icon: 'dashboard', actionType: 'templates' }
     ]

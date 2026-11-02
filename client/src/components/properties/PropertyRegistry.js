@@ -5,6 +5,7 @@ export const PROPERTY_SECTIONS = {
   STROKE: 'stroke',
   LAYOUT: 'layout',
   EFFECTS: 'effects',
+  ICON: 'icon',
   ACTIONS: 'actions'
 };
 
@@ -103,6 +104,15 @@ export const getRegisteredSectionsForObject = (selectedProps) => {
       title: 'Typography',
       icon: 'match_case',
       ...(TEXT_KIND_TYPOGRAPHY[selectedProps.textKind] || LEGACY_TYPOGRAPHY)
+    });
+  }
+
+  if (selectedProps.isLucideIcon) {
+    sections.push({
+      id: PROPERTY_SECTIONS.ICON,
+      title: 'Icon',
+      titleKey: 'icons.sectionTitle',
+      icon: 'interests'
     });
   }
 
