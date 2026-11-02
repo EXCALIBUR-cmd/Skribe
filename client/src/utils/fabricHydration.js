@@ -1,6 +1,7 @@
 
 import { SkribeLine, attachSkribeLineControls, syncSkribeLineToFabric } from './SkribeLine.js';
 import { isConnectorPath, detectConnectorTypeFromPath } from '../features/messCleanup/cleanupTypes.js';
+import { prepareIconObject } from '../features/iconGallery/iconObjects.js';
 
 export const SKRIBE_SERIALIZABLE_PROPERTIES = Object.freeze([
   'id',
@@ -151,7 +152,7 @@ export const hydrateSkribeFabricObject = (fabricObj, persistedData) => {
   if (persistedData.system !== undefined) fabricObj.system = persistedData.system;
   if (persistedData.padding !== undefined) fabricObj.padding = persistedData.padding;
 
-  return fabricObj;
+  return prepareIconObject(fabricObj);
 };
 
 export const hydrateCanvasObjects = (canvas, jsonPayload) => {
