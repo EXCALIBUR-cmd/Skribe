@@ -192,4 +192,6 @@ test('stored preference values are sanitised before use', () => {
   assert.deepEqual(normalizePreferences({ quickDictation: 'yes', quickDictationInterval: 250 }), DEFAULT_PREFERENCES);
   assert.deepEqual(normalizePreferences({ showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'actual' }), { ...DEFAULT_PREFERENCES, showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'actual' });
   assert.deepEqual(normalizePreferences({ showGrid: 'no', snapToGrid: 1, zoomFocus: 'cursor', boardOpenView: 'last' }), DEFAULT_PREFERENCES);
+  assert.deepEqual(normalizePreferences({ showCollaboratorCursors: false, showCollaboratorNames: false, showOnlineCollaborators: false, collaboratorNotifications: false }), { ...DEFAULT_PREFERENCES, showCollaboratorCursors: false, showCollaboratorNames: false, showOnlineCollaborators: false, collaboratorNotifications: false });
+  assert.deepEqual(normalizePreferences({ showCollaboratorCursors: 'no', showCollaboratorNames: 1, showOnlineCollaborators: null, collaboratorNotifications: 'off' }), DEFAULT_PREFERENCES);
 });

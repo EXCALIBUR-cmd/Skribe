@@ -28,7 +28,11 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   showGrid: true,
   snapToGrid: false,
   zoomFocus: 'pointer',
-  boardOpenView: 'remember'
+  boardOpenView: 'remember',
+  showCollaboratorCursors: true,
+  showCollaboratorNames: true,
+  showOnlineCollaborators: true,
+  collaboratorNotifications: true
 });
 
 export const PREFERENCE_RULES = Object.freeze({
@@ -41,5 +45,9 @@ export const PREFERENCE_RULES = Object.freeze({
   showGrid: (value) => typeof value === 'boolean',
   snapToGrid: (value) => typeof value === 'boolean',
   zoomFocus: (value) => ZOOM_FOCUS_MODES.includes(value),
-  boardOpenView: (value) => BOARD_OPEN_VIEWS.includes(value)
+  boardOpenView: (value) => BOARD_OPEN_VIEWS.includes(value),
+  showCollaboratorCursors: (value) => typeof value === 'boolean',
+  showCollaboratorNames: (value) => typeof value === 'boolean',
+  showOnlineCollaborators: (value) => typeof value === 'boolean',
+  collaboratorNotifications: (value) => typeof value === 'boolean'
 });

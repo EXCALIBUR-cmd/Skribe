@@ -75,7 +75,7 @@ test('a legacy user document without preferences reads back the defaults', needs
 test('preferences update persists and only affects the authenticated user', needsMongo, async () => {
   const alice = await createUser();
   const bob = await createUser();
-  const changed = { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400, showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'fit' };
+  const changed = { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400, showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'fit', showCollaboratorCursors: false, showCollaboratorNames: false, showOnlineCollaborators: false, collaboratorNotifications: false };
   const res = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: changed });
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.data.preferences, changed);
@@ -115,6 +115,10 @@ test('invalid preference payloads are rejected without changing anything', needs
     { zoomFocus: 'cursor' },
     { boardOpenView: 'last' },
     { boardOpenView: null },
+    { showCollaboratorCursors: 'off' },
+    { showCollaboratorNames: 0 },
+    { showOnlineCollaborators: null },
+    { collaboratorNotifications: 'false' },
     { unknown: true },
     {},
     ['appearance']

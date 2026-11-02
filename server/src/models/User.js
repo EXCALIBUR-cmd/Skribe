@@ -53,7 +53,11 @@ const userSchema = new mongoose.Schema(
       showGrid: { type: Boolean, default: DEFAULT_PREFERENCES.showGrid },
       snapToGrid: { type: Boolean, default: DEFAULT_PREFERENCES.snapToGrid },
       zoomFocus: { type: String, enum: ZOOM_FOCUS_MODES, default: DEFAULT_PREFERENCES.zoomFocus },
-      boardOpenView: { type: String, enum: BOARD_OPEN_VIEWS, default: DEFAULT_PREFERENCES.boardOpenView }
+      boardOpenView: { type: String, enum: BOARD_OPEN_VIEWS, default: DEFAULT_PREFERENCES.boardOpenView },
+      showCollaboratorCursors: { type: Boolean, default: DEFAULT_PREFERENCES.showCollaboratorCursors },
+      showCollaboratorNames: { type: Boolean, default: DEFAULT_PREFERENCES.showCollaboratorNames },
+      showOnlineCollaborators: { type: Boolean, default: DEFAULT_PREFERENCES.showOnlineCollaborators },
+      collaboratorNotifications: { type: Boolean, default: DEFAULT_PREFERENCES.collaboratorNotifications }
     },
     lastOpenedBoard: {
       type: mongoose.Schema.Types.ObjectId,

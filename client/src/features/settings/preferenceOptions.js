@@ -8,7 +8,11 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   showGrid: true,
   snapToGrid: false,
   zoomFocus: 'pointer',
-  boardOpenView: 'remember'
+  boardOpenView: 'remember',
+  showCollaboratorCursors: true,
+  showCollaboratorNames: true,
+  showOnlineCollaborators: true,
+  collaboratorNotifications: true
 });
 
 export const QUICK_DICTATION_INTERVALS = Object.freeze([200, 300, 400, 500]);
@@ -75,6 +79,10 @@ export const normalizePreferences = (value) => {
     showGrid: typeof source.showGrid === 'boolean' ? source.showGrid : DEFAULT_PREFERENCES.showGrid,
     snapToGrid: typeof source.snapToGrid === 'boolean' ? source.snapToGrid : DEFAULT_PREFERENCES.snapToGrid,
     zoomFocus: ZOOM_FOCUS_OPTIONS.some((option) => option.value === source.zoomFocus) ? source.zoomFocus : DEFAULT_PREFERENCES.zoomFocus,
-    boardOpenView: BOARD_OPEN_VIEW_OPTIONS.some((option) => option.value === source.boardOpenView) ? source.boardOpenView : DEFAULT_PREFERENCES.boardOpenView
+    boardOpenView: BOARD_OPEN_VIEW_OPTIONS.some((option) => option.value === source.boardOpenView) ? source.boardOpenView : DEFAULT_PREFERENCES.boardOpenView,
+    showCollaboratorCursors: typeof source.showCollaboratorCursors === 'boolean' ? source.showCollaboratorCursors : DEFAULT_PREFERENCES.showCollaboratorCursors,
+    showCollaboratorNames: typeof source.showCollaboratorNames === 'boolean' ? source.showCollaboratorNames : DEFAULT_PREFERENCES.showCollaboratorNames,
+    showOnlineCollaborators: typeof source.showOnlineCollaborators === 'boolean' ? source.showOnlineCollaborators : DEFAULT_PREFERENCES.showOnlineCollaborators,
+    collaboratorNotifications: typeof source.collaboratorNotifications === 'boolean' ? source.collaboratorNotifications : DEFAULT_PREFERENCES.collaboratorNotifications
   };
 };
