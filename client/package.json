@@ -30,6 +30,7 @@
     "test:voice-commands": "node --test src/features/voice/voiceCommands.test.js",
     "test:quick-dictation": "node --test src/features/voice/quickDictationLogic.test.js",
     "test:ai-assistant": "node --test src/features/aiAssistant/assistantActions.test.js",
+    "test:sidekick": "node --test src/features/sidekick/sidekick.test.js",
     "test:text-elements": "node --test src/features/textElements/textElements.test.js",
     "test:image-assets": "node --test src/features/imageAssets/imageAssets.test.js",
     "test:icon-gallery": "node --test src/features/iconGallery/iconGallery.test.js",

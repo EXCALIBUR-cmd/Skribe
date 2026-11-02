@@ -2940,6 +2940,48 @@ export const FabricCanvas = forwardRef(({
       generateAIStickyCluster(Array.isArray(texts) ? texts.filter((text) => typeof text === 'string' && text.trim()) : []);
     },
 
+    placeSidekickItems: (items = []) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas || !Array.isArray(items)) return { success: false, created: [] };
+      const sizes = { sticky: [180, 180], header: [160, 110], text: [320, 40] };
+      const extent = items.reduce((box, item) => {
+        const [w, h] = sizes[item?.kind] || [180, 180];
+        const dx = Number(item?.dx) || 0;
+        const dy = Number(item?.dy) || 0;
+        return { minX: Math.min(box.minX, dx - w / 2), maxX: Math.max(box.maxX, dx + w / 2), minY: Math.min(box.minY, dy - h / 2), maxY: Math.max(box.maxY, dy + h / 2) };
+      }, { minX: 0, maxX: 0, minY: 0, maxY: 0 });
+      let center = getViewportCenterPoint(canvas);
+      const existing = canvas.getObjects().filter((obj) => !isTemporaryObject(obj)).map((obj) => obj.getBoundingRect());
+      const margin = 40;
+      const overlaps = existing.some((b) => b.left < center.x + extent.maxX + margin && b.left + b.width > center.x + extent.minX - margin && b.top < center.y + extent.maxY + margin && b.top + b.height > center.y + extent.minY - margin);
+      if (overlaps && existing.length) {
+        const contentRight = Math.max(...existing.map((b) => b.left + b.width));
+        center = { x: contentRight + 120 - extent.minX, y: center.y };
+        const zoom = canvas.getZoom() || 1;
+        const vpt = canvas.viewportTransform.slice();
+        vpt[4] = canvas.getWidth() / 2 - center.x * zoom;
+        vpt[5] = canvas.getHeight() / 2 - center.y * zoom;
+        canvas.setViewportTransform(vpt);
+        notifyViewportChange();
+      }
+      const created = [];
+      items.forEach((item) => {
+        if (!item || typeof item.text !== 'string' || !item.text.trim()) return;
+        const position = { x: center.x + (Number(item.dx) || 0), y: center.y + (Number(item.dy) || 0) };
+        if (item.kind === 'sticky') {
+          const result = addSticky(position, item.text.trim(), item.color || '#fff3a0');
+          if (result?.shape) created.push(result.shape.id);
+        } else if (item.kind === 'header') {
+          const result = addRoundedRect(position, item.text.trim(), {});
+          if (result?.shape) created.push(result.shape.id);
+        } else if (item.kind === 'text') {
+          const result = insertDictatedText(item.text.trim(), { position, source: 'sidekick' });
+          if (result?.success) created.push(result.objectId);
+        }
+      });
+      return { success: created.length > 0, created };
+    },
+
     insertDiagramImage: async (image, meta) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas || !image?.dataUrl) return null;
