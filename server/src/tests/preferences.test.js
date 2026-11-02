@@ -75,9 +75,10 @@ test('a legacy user document without preferences reads back the defaults', needs
 test('preferences update persists and only affects the authenticated user', needsMongo, async () => {
   const alice = await createUser();
   const bob = await createUser();
-  const res = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 } });
+  const changed = { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400, showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'fit' };
+  const res = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: changed });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data.preferences, { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 });
+  assert.deepEqual(res.body.data.preferences, changed);
 
   const aliceStored = await User.findById(alice.user._id).lean();
   const bobStored = await User.findById(bob.user._id).lean();
@@ -85,7 +86,10 @@ test('preferences update persists and only affects the authenticated user', need
   assert.equal(bobStored.preferences?.appearance ?? DEFAULT_PREFERENCES.appearance, 'system');
 
   const partial = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { appearance: 'light' } });
-  assert.deepEqual(partial.body.data.preferences, { appearance: 'light', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 400 });
+  assert.deepEqual(partial.body.data.preferences, { ...changed, appearance: 'light' });
+
+  const canvasOnly = await call('/auth/me/preferences', { method: 'PATCH', token: alice.token, body: { boardOpenView: 'actual' } });
+  assert.deepEqual(canvasOnly.body.data.preferences, { ...changed, appearance: 'light', boardOpenView: 'actual' });
 });
 
 test('a client-supplied user id in the payload cannot redirect the update to another user', needsMongo, async () => {
@@ -106,6 +110,11 @@ test('invalid preference payloads are rejected without changing anything', needs
     { quickDictation: 'on' },
     { quickDictationInterval: 250 },
     { quickDictationInterval: '300' },
+    { showGrid: 'true' },
+    { snapToGrid: 1 },
+    { zoomFocus: 'cursor' },
+    { boardOpenView: 'last' },
+    { boardOpenView: null },
     { unknown: true },
     {},
     ['appearance']

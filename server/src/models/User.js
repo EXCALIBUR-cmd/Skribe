@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { APPEARANCES, DEFAULT_PREFERENCES, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS } from '../constants/preferences.js';
+import { APPEARANCES, BOARD_OPEN_VIEWS, DEFAULT_PREFERENCES, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS, ZOOM_FOCUS_MODES } from '../constants/preferences.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -49,7 +49,11 @@ const userSchema = new mongoose.Schema(
       landingPage: { type: String, enum: LANDING_PAGES, default: DEFAULT_PREFERENCES.landingPage },
       reduceMotion: { type: Boolean, default: DEFAULT_PREFERENCES.reduceMotion },
       quickDictation: { type: Boolean, default: DEFAULT_PREFERENCES.quickDictation },
-      quickDictationInterval: { type: Number, enum: QUICK_DICTATION_INTERVALS, default: DEFAULT_PREFERENCES.quickDictationInterval }
+      quickDictationInterval: { type: Number, enum: QUICK_DICTATION_INTERVALS, default: DEFAULT_PREFERENCES.quickDictationInterval },
+      showGrid: { type: Boolean, default: DEFAULT_PREFERENCES.showGrid },
+      snapToGrid: { type: Boolean, default: DEFAULT_PREFERENCES.snapToGrid },
+      zoomFocus: { type: String, enum: ZOOM_FOCUS_MODES, default: DEFAULT_PREFERENCES.zoomFocus },
+      boardOpenView: { type: String, enum: BOARD_OPEN_VIEWS, default: DEFAULT_PREFERENCES.boardOpenView }
     },
     lastOpenedBoard: {
       type: mongoose.Schema.Types.ObjectId,

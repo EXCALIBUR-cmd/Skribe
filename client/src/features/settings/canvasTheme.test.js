@@ -3,8 +3,8 @@ import test from 'node:test';
 import * as fabric from 'fabric';
 import { adaptColor, applyCanvasTheme, contrastRatio, installThemeRendering, isDarkSurface, parseColor } from './canvasTheme.js';
 import { CANVAS_BACKGROUNDS, resolveAppearance, resolveCanvasBackground, normalizePreferences, DEFAULT_PREFERENCES } from './preferenceOptions.js';
-import { APPEARANCES, CANVAS_BACKGROUNDS as SERVER_BACKGROUNDS, DEFAULT_PREFERENCES as SERVER_DEFAULTS, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS as SERVER_INTERVALS } from '../../../../server/src/constants/preferences.js';
-import { APPEARANCE_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS, QUICK_DICTATION_INTERVALS } from './preferenceOptions.js';
+import { APPEARANCES, BOARD_OPEN_VIEWS, CANVAS_BACKGROUNDS as SERVER_BACKGROUNDS, DEFAULT_PREFERENCES as SERVER_DEFAULTS, LANDING_PAGES, LANGUAGES, QUICK_DICTATION_INTERVALS as SERVER_INTERVALS, ZOOM_FOCUS_MODES } from '../../../../server/src/constants/preferences.js';
+import { APPEARANCE_OPTIONS, BOARD_OPEN_VIEW_OPTIONS, LANDING_OPTIONS, LANGUAGE_OPTIONS, QUICK_DICTATION_INTERVALS, ZOOM_FOCUS_OPTIONS } from './preferenceOptions.js';
 
 const drawn = [];
 const context = new Proxy({}, {
@@ -170,6 +170,8 @@ test('client preference options mirror the server validation lists', () => {
   assert.deepEqual(LANDING_OPTIONS.map((o) => o.value), [...LANDING_PAGES]);
   assert.deepEqual(CANVAS_BACKGROUNDS.map((o) => o.key), [...SERVER_BACKGROUNDS]);
   assert.deepEqual([...QUICK_DICTATION_INTERVALS], [...SERVER_INTERVALS]);
+  assert.deepEqual(ZOOM_FOCUS_OPTIONS.map((o) => o.value), [...ZOOM_FOCUS_MODES]);
+  assert.deepEqual(BOARD_OPEN_VIEW_OPTIONS.map((o) => o.value), [...BOARD_OPEN_VIEWS]);
   assert.deepEqual({ ...DEFAULT_PREFERENCES }, { ...SERVER_DEFAULTS });
 });
 
@@ -186,6 +188,8 @@ test('appearance resolution keeps System as a choice and follows the OS', () => 
 test('stored preference values are sanitised before use', () => {
   assert.deepEqual(normalizePreferences(null), DEFAULT_PREFERENCES);
   assert.deepEqual(normalizePreferences({ appearance: 'sepia', language: 'fr', landingPage: 'x', reduceMotion: 'yes' }), DEFAULT_PREFERENCES);
-  assert.deepEqual(normalizePreferences({ appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 }), { appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 });
+  assert.deepEqual(normalizePreferences({ appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 }), { ...DEFAULT_PREFERENCES, appearance: 'dark', language: 'hi', landingPage: 'lastBoard', reduceMotion: true, quickDictation: false, quickDictationInterval: 500 });
   assert.deepEqual(normalizePreferences({ quickDictation: 'yes', quickDictationInterval: 250 }), DEFAULT_PREFERENCES);
+  assert.deepEqual(normalizePreferences({ showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'actual' }), { ...DEFAULT_PREFERENCES, showGrid: false, snapToGrid: true, zoomFocus: 'center', boardOpenView: 'actual' });
+  assert.deepEqual(normalizePreferences({ showGrid: 'no', snapToGrid: 1, zoomFocus: 'cursor', boardOpenView: 'last' }), DEFAULT_PREFERENCES);
 });

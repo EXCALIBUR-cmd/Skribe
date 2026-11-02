@@ -15,6 +15,8 @@ export const CANVAS_BACKGROUNDS = Object.freeze([
 ]);
 
 export const QUICK_DICTATION_INTERVALS = Object.freeze([200, 300, 400, 500]);
+export const ZOOM_FOCUS_MODES = Object.freeze(['pointer', 'center']);
+export const BOARD_OPEN_VIEWS = Object.freeze(['remember', 'fit', 'actual']);
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   appearance: 'system',
@@ -22,7 +24,11 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   landingPage: 'boards',
   reduceMotion: false,
   quickDictation: true,
-  quickDictationInterval: 300
+  quickDictationInterval: 300,
+  showGrid: true,
+  snapToGrid: false,
+  zoomFocus: 'pointer',
+  boardOpenView: 'remember'
 });
 
 export const PREFERENCE_RULES = Object.freeze({
@@ -31,5 +37,9 @@ export const PREFERENCE_RULES = Object.freeze({
   landingPage: (value) => LANDING_PAGES.includes(value),
   reduceMotion: (value) => typeof value === 'boolean',
   quickDictation: (value) => typeof value === 'boolean',
-  quickDictationInterval: (value) => QUICK_DICTATION_INTERVALS.includes(value)
+  quickDictationInterval: (value) => QUICK_DICTATION_INTERVALS.includes(value),
+  showGrid: (value) => typeof value === 'boolean',
+  snapToGrid: (value) => typeof value === 'boolean',
+  zoomFocus: (value) => ZOOM_FOCUS_MODES.includes(value),
+  boardOpenView: (value) => BOARD_OPEN_VIEWS.includes(value)
 });

@@ -4,10 +4,25 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   landingPage: 'boards',
   reduceMotion: false,
   quickDictation: true,
-  quickDictationInterval: 300
+  quickDictationInterval: 300,
+  showGrid: true,
+  snapToGrid: false,
+  zoomFocus: 'pointer',
+  boardOpenView: 'remember'
 });
 
 export const QUICK_DICTATION_INTERVALS = Object.freeze([200, 300, 400, 500]);
+
+export const ZOOM_FOCUS_OPTIONS = Object.freeze([
+  { value: 'pointer', labelKey: 'canvasPrefs.zoomPointer', descriptionKey: 'canvasPrefs.zoomPointerDescription' },
+  { value: 'center', labelKey: 'canvasPrefs.zoomCenter', descriptionKey: 'canvasPrefs.zoomCenterDescription' }
+]);
+
+export const BOARD_OPEN_VIEW_OPTIONS = Object.freeze([
+  { value: 'remember', labelKey: 'canvasPrefs.openRemember', descriptionKey: 'canvasPrefs.openRememberDescription' },
+  { value: 'fit', labelKey: 'canvasPrefs.openFit', descriptionKey: 'canvasPrefs.openFitDescription' },
+  { value: 'actual', labelKey: 'canvasPrefs.openActual', descriptionKey: 'canvasPrefs.openActualDescription' }
+]);
 
 export const APPEARANCE_OPTIONS = Object.freeze([
   { value: 'light', icon: 'light_mode', labelKey: 'appearance.light' },
@@ -56,6 +71,10 @@ export const normalizePreferences = (value) => {
     landingPage: LANDING_OPTIONS.some((option) => option.value === source.landingPage) ? source.landingPage : DEFAULT_PREFERENCES.landingPage,
     reduceMotion: typeof source.reduceMotion === 'boolean' ? source.reduceMotion : DEFAULT_PREFERENCES.reduceMotion,
     quickDictation: typeof source.quickDictation === 'boolean' ? source.quickDictation : DEFAULT_PREFERENCES.quickDictation,
-    quickDictationInterval: QUICK_DICTATION_INTERVALS.includes(source.quickDictationInterval) ? source.quickDictationInterval : DEFAULT_PREFERENCES.quickDictationInterval
+    quickDictationInterval: QUICK_DICTATION_INTERVALS.includes(source.quickDictationInterval) ? source.quickDictationInterval : DEFAULT_PREFERENCES.quickDictationInterval,
+    showGrid: typeof source.showGrid === 'boolean' ? source.showGrid : DEFAULT_PREFERENCES.showGrid,
+    snapToGrid: typeof source.snapToGrid === 'boolean' ? source.snapToGrid : DEFAULT_PREFERENCES.snapToGrid,
+    zoomFocus: ZOOM_FOCUS_OPTIONS.some((option) => option.value === source.zoomFocus) ? source.zoomFocus : DEFAULT_PREFERENCES.zoomFocus,
+    boardOpenView: BOARD_OPEN_VIEW_OPTIONS.some((option) => option.value === source.boardOpenView) ? source.boardOpenView : DEFAULT_PREFERENCES.boardOpenView
   };
 };
