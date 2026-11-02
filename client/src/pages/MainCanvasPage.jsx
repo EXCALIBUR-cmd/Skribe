@@ -16,6 +16,7 @@ import ToolWheel from '../components/ui/ToolWheel';
 import EraserOverlay from '../components/ui/EraserOverlay';
 import LaserOverlay from '../components/ui/LaserOverlay';
 import CollaborativeCursorsOverlay from '../components/ui/CollaborativeCursorsOverlay';
+import { createPresenceNotices } from '../features/collab/presenceNotices';
 import CollaborativeSelectionsOverlay from '../components/ui/CollaborativeSelectionsOverlay';
 import UndoRedoFloating from '../components/ui/UndoRedoFloating';
 import apiClient from '../api/apiClient';
@@ -79,6 +80,7 @@ export const MainCanvasPage = () => {
   const { resolvedTheme, t, preferences } = usePreferences();
   const boardOpenViewRef = useRef(preferences.boardOpenView);
   boardOpenViewRef.current = preferences.boardOpenView;
+  const presenceNoticeRef = useRef(null);
   const [canvasBackground, setCanvasBackground] = useState('default');
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const navigate = useNavigate();
@@ -450,12 +452,28 @@ export const MainCanvasPage = () => {
     }
   }, [saveViewport]);
 
+  presenceNoticeRef.current = {
+    enabled: preferences.collaboratorNotifications,
+    notify: (kind, name) => addToast(
+      t(kind === 'joined' ? 'collabPrefs.joinedTitle' : 'collabPrefs.leftTitle'),
+      t(kind === 'joined' ? 'collabPrefs.joinedMessage' : 'collabPrefs.leftMessage', { name: name || t('collabPrefs.someone') }),
+      kind === 'joined' ? 'person_add' : 'person_remove'
+    )
+  };
+
   useEffect(() => {
     if (!boardId) return;
+
+    const presenceNotices = createPresenceNotices({
+      selfId: user?._id || user?.id,
+      isEnabled: () => presenceNoticeRef.current.enabled,
+      notify: (kind, name) => presenceNoticeRef.current.notify(kind, name)
+    });
 
     const handlePresence = ({ boardId: id, users }) => {
       if (id === boardId && Array.isArray(users)) {
         setActiveUsers(users);
+        presenceNotices.roster(users);
       }
     };
 
@@ -465,12 +483,14 @@ export const MainCanvasPage = () => {
           if (prev.some((u) => u.id === user.id)) return prev;
           return [...prev, user];
         });
+        presenceNotices.joined(user);
       }
     };
 
     const handleUserLeft = ({ boardId: id, userId }) => {
       if (id === boardId && userId) {
         setActiveUsers((prev) => prev.filter((u) => u.id !== userId));
+        presenceNotices.left(userId);
       }
     };
 
@@ -485,6 +505,7 @@ export const MainCanvasPage = () => {
       socketService.off('board:user:joined', handleUserJoined);
       socketService.off('board:user:left', handleUserLeft);
       socketService.leaveBoard(boardId);
+      presenceNotices.dispose();
       setActiveUsers([]);
     };
   }, [boardId]);
@@ -1246,7 +1267,7 @@ export const MainCanvasPage = () => {
           </div>
         )}
 
-        {activeUsers.length > 0 && (
+        {preferences.showOnlineCollaborators && activeUsers.length > 0 && (
           <div className="flex items-center gap-1.5 ml-1 border-l border-outline-variant/60 pl-2 shrink-0">
             <div className="flex items-center -space-x-1.5">
               {activeUsers.slice(0, 3).map((u) => (

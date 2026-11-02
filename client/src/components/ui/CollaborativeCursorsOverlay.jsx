@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as fabric from 'fabric';
 import socketService from '../../services/socket';
+import { usePreferences } from '../../context/PreferencesContext';
 
 const CURSOR_COLORS = [
   '#f59e0b',
@@ -24,6 +25,7 @@ const getUserColor = (idString = '') => {
 
 export const CollaborativeCursorsOverlay = ({ boardId, fabricCanvasRef }) => {
   const [remoteCursors, setRemoteCursors] = useState({});
+  const { preferences } = usePreferences();
   const lastEmitTimeRef = useRef(0);
   const animFrameRef = useRef(null);
 
@@ -141,7 +143,7 @@ export const CollaborativeCursorsOverlay = ({ boardId, fabricCanvasRef }) => {
   }, [boardId]);
 
   const canvas = getCanvasInstance();
-  if (!canvas || typeof canvas.getElement !== 'function') return null;
+  if (!preferences.showCollaboratorCursors || !canvas || typeof canvas.getElement !== 'function') return null;
 
   let rect = { left: 0, top: 0 };
   let vpt = [1, 0, 0, 1, 0, 0];
@@ -182,12 +184,14 @@ export const CollaborativeCursorsOverlay = ({ boardId, fabricCanvasRef }) => {
             >
               <path d="M5.653 3.123A1 1 0 004 4v16.5a1 1 0 001.653.75l4.512-3.87 3.235 6.07a1 1 0 001.378.397l2.5-1.332a1 1 0 00.397-1.378l-3.235-6.07 5.76-1.047A1 1 0 0020.5 14V4a1 1 0 00-1-1H5.653z" />
             </svg>
-            <span
-              style={{ backgroundColor: cursor.color }}
-              className="text-white text-xs font-semibold px-2 py-0.5 rounded-full shadow-md whitespace-nowrap opacity-90 tracking-wide"
-            >
-              {cursor.name}
-            </span>
+            {preferences.showCollaboratorNames && (
+              <span
+                style={{ backgroundColor: cursor.color }}
+                className="text-white text-xs font-semibold px-2 py-0.5 rounded-full shadow-md whitespace-nowrap opacity-90 tracking-wide"
+              >
+                {cursor.name}
+              </span>
+            )}
           </div>
         );
       })}
