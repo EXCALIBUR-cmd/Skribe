@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as fabric from 'fabric';
 import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
+import { playStickyEntrance } from './stickyEntrance.js';
 import { createConnectorObject } from './connectorUtils.js';
 import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
@@ -226,4 +227,66 @@ test('One object that cannot load keeps the rest of the board and is preserved f
   assert.equal(canvas.skribeRetainedObjects.length, 1);
   const merged = mergeRetainedObjects(payload.objects, canvas.skribeRetainedObjects);
   assert.deepEqual(merged.map((object) => object.id), ['text_a', 'bad_1', 'text_b']);
+});
+
+class FadePart {
+  constructor() { this.opacity = 1; this.scaleX = 1; this.scaleY = 1; }
+  set(values) { Object.assign(this, values); }
+  toObject() { return { opacity: this.opacity, scaleX: this.scaleX, scaleY: this.scaleY }; }
+}
+
+const withFrames = async (run) => {
+  const frames = [];
+  const previous = globalThis.requestAnimationFrame;
+  ['NodeList', 'HTMLCollection', 'SVGElement'].forEach((name) => { globalThis[name] = globalThis[name] || class {}; });
+  const previousWindow = globalThis.window;
+  globalThis.window = globalThis.window || globalThis;
+  const previousDocument = globalThis.document;
+  globalThis.document = globalThis.document || { hidden: false, querySelectorAll: () => [] };
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  const tick = (time) => frames.splice(0).forEach((callback) => callback(time));
+  try {
+    await run(tick);
+  } finally {
+    tick(1e9);
+    globalThis.requestAnimationFrame = previous;
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+  }
+};
+
+test('A sticky fade whose next frame arrives after its duration still ends fully visible and saves that way', async () => {
+  await withFrames(async (tick) => {
+    const parts = [new FadePart(), new FadePart(), new FadePart()];
+    let renders = 0;
+    playStickyEntrance(parts, { requestRenderAll: () => { renders += 1; } });
+    assert.deepEqual(parts.map((part) => part.opacity), [0, 0, 0]);
+    assert.deepEqual(parts[0].toObject(), { opacity: 1, scaleX: 1, scaleY: 1 });
+    const drawn = renders;
+    tick(1000);
+    tick(1600);
+    parts.forEach((part) => {
+      assert.equal(part.opacity, 1);
+      assert.equal(part.scaleX, 1);
+      assert.equal(part.scaleY, 1);
+      assert.equal(Object.prototype.hasOwnProperty.call(part, 'toObject'), false);
+      assert.deepEqual(part.toObject(), { opacity: 1, scaleX: 1, scaleY: 1 });
+    });
+    assert.ok(renders > drawn);
+  });
+});
+
+test('A sticky fade with normal frames animates, serializes as visible throughout and ends fully visible', async () => {
+  await withFrames(async (tick) => {
+    const part = new FadePart();
+    playStickyEntrance([part], { requestRenderAll: () => {} });
+    tick(5000);
+    tick(5016);
+    tick(5100);
+    assert.ok(part.opacity > 0 && part.scaleX > 0.9);
+    assert.deepEqual(part.toObject(), { opacity: 1, scaleX: 1, scaleY: 1 });
+    tick(5500);
+    assert.equal(part.opacity, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(part, 'toObject'), false);
+  });
 });

@@ -22,6 +22,7 @@ import {
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
+import { playStickyEntrance } from '../../utils/stickyEntrance.js';
 import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from '../../utils/canvasHistory.js';
 import { parseConnectorPath } from '../../features/messCleanup/connectorGeometry.js';
 import {
@@ -1492,33 +1493,7 @@ export const FabricCanvas = forwardRef(({
     const result = createLinkedElement(stickyShape, text, x, y, Number(randomAngle), timestampObj);
 
     if (result && result.shape && animate && !isReducedMotion()) {
-      const animState = { scale: 0.9, opacity: 0 };
-      const parts = [result.shape, result.textObj, result.timestampObj].filter(Boolean);
-      parts.forEach((part) => {
-        const serialize = part.toObject;
-        part.toObject = (properties) => ({ ...serialize.call(part, properties), opacity: 1, scaleX: 1, scaleY: 1 });
-      });
-      result.shape.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
-      result.textObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
-      if (result.timestampObj) result.timestampObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
-      canvas.requestRenderAll();
-
-      anime({
-        targets: animState,
-        scale: 1,
-        opacity: 1,
-        duration: 350,
-        easing: 'easeOutBack',
-        update: () => {
-          result.shape.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
-          result.textObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
-          if (result.timestampObj) result.timestampObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
-          canvas.requestRenderAll();
-        },
-        complete: () => {
-          parts.forEach((part) => { delete part.toObject; });
-        }
-      });
+      playStickyEntrance([result.shape, result.textObj, result.timestampObj].filter(Boolean), canvas);
     }
 
     if (onToolComplete) onToolComplete();
