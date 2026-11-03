@@ -2,6 +2,7 @@ import {
   OPERATION_BYTE_LIMIT,
   acceptObjects,
   applyCanvasOperation,
+  applyOrder,
   buildCanvasOperation,
   changedSince,
   conflictUndoObjects,
@@ -10,9 +11,11 @@ import {
   mergeThreeWay,
   nextLocalBase,
   operationByteSize,
+  reordered,
   sameObject,
   sameObjectList
 } from './boardSync.js';
+import { readRecord } from './pendingJournal.js';
 
 const DEFAULT_OPTIONS = Object.freeze({
   pullDelayMs: 150,
@@ -27,7 +30,6 @@ const DEFAULT_OPTIONS = Object.freeze({
   maxRetries: 8,
   foreignJournalAgeMs: 15000,
   heartbeatMs: 5000,
-  journalMaxAgeMs: 86400000,
   dedupSafeRevisions: 150
 });
 
@@ -38,7 +40,8 @@ const REBUILD_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH']);
 const SAVE_INSTEAD_CODES = new Set(['INVALID_OPERATION', 'OPERATION_TOO_LARGE']);
 const FATAL_CODES = new Set(['FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
 const UNKNOWN_FATE_CODES = new Set(['ACK_TIMEOUT', 'EMPTY_ACK', 'NO_ACK']);
-const UNRECOVERABLE_CODES = new Set(['INVALID_OPERATION', 'OPERATION_TOO_LARGE', 'FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
+const REPLAYABLE_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH', 'OPERATION_TOO_LARGE']);
+const UNRECOVERABLE_CODES = new Set(['INVALID_OPERATION', 'FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
 
 const createInstanceId = () => `inst_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -78,6 +81,8 @@ export const createBoardSyncController = ({
   let inFlightOp = null;
   let finalBlocked = false;
   let ownEntries = [];
+  let draft = null;
+  let journalWarned = false;
   let journalHealthy = true;
   let heartbeatTimer = null;
   let ended = false;
@@ -137,11 +142,14 @@ export const createBoardSyncController = ({
     return { ...buildOperationFrom({ base, stored: baseRaw, objects: canvasObjects, revision: knownRevision, kind }), base };
   };
 
+  const journalEntries = () => (draft ? [...ownEntries, draft] : ownEntries);
+
   const writeOwnRecord = () => {
     if (!journal) return;
+    const entries = journalEntries();
     try {
-      if (ownEntries.length === 0) journal.remove(instanceId);
-      else journal.write(instanceId, { beat: now(), ended, entries: ownEntries });
+      if (entries.length === 0) journal.remove(instanceId);
+      else journal.write(instanceId, { beat: now(), ended, entries });
       journalHealthy = true;
     } catch {
       journalHealthy = false;
@@ -149,29 +157,71 @@ export const createBoardSyncController = ({
   };
 
   const scheduleHeartbeat = () => {
-    if (!journal || heartbeatTimer || ended || disposed || ownEntries.length === 0) return;
+    if (!journal || heartbeatTimer || ended || disposed || journalEntries().length === 0) return;
     heartbeatTimer = timers.setTimeout(() => {
       heartbeatTimer = null;
-      if (ended || disposed || ownEntries.length === 0) return;
+      if (ended || disposed || journalEntries().length === 0) return;
       writeOwnRecord();
       scheduleHeartbeat();
     }, settings.heartbeatMs);
   };
 
-  const rememberPending = (op, base, extra = {}) => {
-    if (!journal) return null;
+  const journalEntry = (op, base, extra = {}) => {
     const index = indexObjects(base);
     const touched = [...(op.upserts || []).map((upsert) => upsert.id), ...(op.deletes || [])];
-    const entry = { savedAt: now(), op, base: Object.fromEntries(touched.map((id) => [id, index.get(id) || null])), ...extra };
+    const orderBase = Array.isArray(op.order) ? { baseOrder: [...index.keys()] } : {};
+    return { savedAt: now(), op, base: Object.fromEntries(touched.map((id) => [id, index.get(id) || null])), ...orderBase, ...extra };
+  };
+
+  const rememberPending = (op, base, extra = {}) => {
+    if (!journal) return null;
+    const entry = journalEntry(op, base, extra);
     ownEntries = [...ownEntries.filter((existing) => existing.op.opId !== op.opId), entry];
+    draft = null;
     writeOwnRecord();
     scheduleHeartbeat();
     return entry;
   };
 
+  const captureDraft = (liveObjects) => {
+    if (enabled === true) return captureFinal({ predictInFlight: true, liveObjects });
+    if (baseLocal === null) return null;
+    const objects = liveObjects || canvas.snapshot()?.objects;
+    if (!Array.isArray(objects)) return null;
+    const built = buildPendingOperation(objects, 'edit');
+    return { op: built.op, baseLocal: built.base, after: null };
+  };
+
+  const storeDraft = (captured) => {
+    if (!journal || !captured) return;
+    draft = captured.op ? journalEntry(captured.op, captured.baseLocal, captured.after ? { after: captured.after } : {}) : null;
+    writeOwnRecord();
+    scheduleHeartbeat();
+  };
+
+  const storeUnloadDraft = (captured) => {
+    const op = captured?.op;
+    if (op && !draft && (op.upserts || []).length === 0 && (op.deletes || []).length === 0) return;
+    storeDraft(captured);
+  };
+
+  const refreshDraft = () => {
+    if (draft) storeDraft(captureDraft());
+  };
+
+  const noteLocalChange = (liveObjects = null) => {
+    if (disposed || enabled === null) return;
+    storeDraft(captureDraft(liveObjects));
+    if (!canRecover() && !journalWarned) {
+      journalWarned = true;
+      notify('journal-unavailable', {});
+    }
+  };
+
   const forgetPending = (opId) => {
     if (!journal || !ownEntries.some((entry) => entry.op.opId === opId)) return;
     ownEntries = ownEntries.filter((entry) => entry.op.opId !== opId);
+    storeDraft(captureDraft());
     writeOwnRecord();
   };
 
@@ -226,6 +276,7 @@ export const createBoardSyncController = ({
     knownRevision = revision;
     usedPreviews.forEach((id) => previews.delete(id));
     dropSeenRevisions();
+    refreshDraft();
     const orderConflict = enabled === true && merge.orderConflict;
     if (merge.conflicts.length > 0 || orderConflict) {
       notify('conflict', { ids: merge.conflicts, orderConflict });
@@ -300,6 +351,7 @@ export const createBoardSyncController = ({
     baseRaw = objects;
     baseLocal = objects;
     if (Number.isInteger(revision)) knownRevision = revision;
+    refreshDraft();
   };
 
   const recordOperation = (op, objects, revision) => {
@@ -316,6 +368,7 @@ export const createBoardSyncController = ({
     baseLocal = objects;
     knownRevision = revision;
     dropSeenRevisions();
+    refreshDraft();
   };
 
   const clearRetry = () => {
@@ -399,6 +452,7 @@ export const createBoardSyncController = ({
       const { op } = pending;
       if (!op) {
         if (baseLocal && hasLocalChanges(canvasObjects)) baseLocal = canvasObjects;
+        refreshDraft();
         clearRetry();
         return { mode: 'noop' };
       }
@@ -485,6 +539,7 @@ export const createBoardSyncController = ({
     }
     if (enabled !== true) {
       await pull();
+      await recoverPending();
       if (!disposed && hasLocalChanges(canvas.serialize())) requestSave();
       return;
     }
@@ -493,9 +548,9 @@ export const createBoardSyncController = ({
     if (!disposed && hasLocalChanges(canvas.serialize())) await submitLocalChanges();
   };
 
-  const captureFinal = ({ predictInFlight = false } = {}) => {
+  const captureFinal = ({ predictInFlight = false, liveObjects = null } = {}) => {
     if (disposed || enabled !== true || baseLocal === null || finalBlocked) return null;
-    const live = typeof canvas.finalSnapshot === 'function' ? canvas.finalSnapshot() : canvas.snapshot();
+    const live = liveObjects ? { objects: liveObjects } : (typeof canvas.finalSnapshot === 'function' ? canvas.finalSnapshot() : canvas.snapshot());
     if (!live || !Array.isArray(live.objects)) return null;
     const pendingOp = inFlightOp;
     if (predictInFlight && pendingOp) {
@@ -537,49 +592,6 @@ export const createBoardSyncController = ({
     return { ok: true, merged: true, conflicts: merge.conflicts };
   };
 
-  const keepLegacySnapshot = ({ baseRaw: rawBase, baseLocal: localSide, live }) => {
-    if (!journal) return false;
-    try {
-      journal.write(`${instanceId}:legacy`, { ended: true, entries: [], legacySnapshot: { baseRaw: rawBase, baseLocal: localSide, live } });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const recoverLegacySnapshots = () => enqueue(async () => {
-    let records = [];
-    try {
-      records = journal.list();
-    } catch {
-      records = [];
-    }
-    let recovered = 0;
-    let conflicts = 0;
-    for (const { instanceId: owner, record } of records) {
-      const snapshot = record?.legacySnapshot;
-      if (disposed || !snapshot) continue;
-      const board = await api.getBoard();
-      if (!board) continue;
-      const merge = mergeThreeWay({ baseRaw: snapshot.baseRaw, baseLocal: snapshot.baseLocal, theirs: board.objects, local: snapshot.live.objects });
-      const onBoard = indexObjects(board.objects);
-      const merged = indexObjects(merge.objects);
-      const differs = merged.size !== onBoard.size || [...merged].some(([id, object]) => !onBoard.has(id) || !sameObjectList([object], [onBoard.get(id)]));
-      if (differs) {
-        const saved = await api.saveBoard({ canvasData: { ...snapshot.live, objects: merge.objects }, ifRevision: board.revision });
-        if (!saved?.ok) continue;
-        recovered += 1;
-        conflicts += merge.conflicts.length;
-      }
-      journal.remove(owner);
-    }
-    if (recovered > 0) {
-      await pullNow();
-      notify('recovered', { recovered, conflicts });
-    }
-    return { recovered, conflicts, kept: 0 };
-  });
-
   const noteRemoteEdit = (ids) => {
     if (disposed || enabled === true || baseLocal === null) return;
     const base = indexObjects(baseLocal);
@@ -594,6 +606,7 @@ export const createBoardSyncController = ({
     if (enabled !== true) {
       if (!legacyCanvasData || !Array.isArray(legacyCanvasData.objects)) return { ok: false, code: 'NO_CANVAS' };
       const captured = { baseRaw, baseLocal: localBase(), live: legacyCanvasData };
+      storeUnloadDraft(captureDraft(legacyCanvasData.objects));
       let attempt = { canvasData: legacyCanvasData, ifRevision: knownRevision };
       let legacy = null;
       try {
@@ -608,13 +621,19 @@ export const createBoardSyncController = ({
         legacy = { ok: false, code: 'SAVE_FAILED' };
       }
       if (legacy?.ok) {
+        draft = null;
+        writeOwnRecord();
         if (!disposed) recordSaved(attempt.canvasData.objects, legacy.revision);
         return { ok: true };
       }
-      keepLegacySnapshot(captured);
+      endJournalSession();
       return { ok: false, code: legacy?.code || 'SAVE_FAILED' };
     }
     const first = captureFinal();
+    if (first && !first.op && !first.pending) {
+      draft = null;
+      writeOwnRecord();
+    }
     if (!first) return { ok: false, skipped: true, code: finalBlocked ? 'ALREADY_MERGED' : 'NO_CANVAS' };
     const captured = await rebaseOnPending(first);
     if (!captured.op) return { ok: true, skipped: true };
@@ -635,13 +654,18 @@ export const createBoardSyncController = ({
   const flushOnUnload = () => {
     if (enabled !== true) {
       const live = canvas.snapshot();
-      if (!live || baseLocal === null || !hasLocalChanges(live.objects)) return false;
-      const kept = keepLegacySnapshot({ baseRaw, baseLocal: localBase(), live });
+      if (!live || baseLocal === null || !hasLocalChanges(live.objects)) {
+        endJournalSession();
+        return false;
+      }
+      storeUnloadDraft(captureDraft(live.objects));
+      endJournalSession();
       const sent = api.saveOnUnload?.({ canvasData: live, ifRevision: knownRevision });
-      return kept || Boolean(sent);
+      return canRecover() || Boolean(sent);
     }
     const captured = captureFinal({ predictInFlight: true });
     if (!captured || !captured.op) {
+      if (captured) draft = null;
       endJournalSession();
       return false;
     }
@@ -661,49 +685,58 @@ export const createBoardSyncController = ({
     return canRecover();
   };
 
+  const heldFromEntry = (entry) => [
+    ...(entry.op.upserts || []).map((upsert) => {
+      const mine = { ...upsert.data, id: upsert.id };
+      (upsert.unset || []).forEach((field) => { delete mine[field]; });
+      return { id: upsert.id, mine };
+    }),
+    ...(entry.op.deletes || []).map((id) => ({ id, mine: null }))
+  ];
+
+  const commitRecovered = async (objects, kind) => {
+    const { op, tooLarge } = buildOperationFrom({ base: localBase(), stored: baseRaw, objects, revision: knownRevision, kind });
+    if (!op) return { ok: true, noop: true };
+    const canvasData = { ...(canvas.snapshot() || {}), objects };
+    if (enabled !== true) return api.saveBoard({ canvasData, ifRevision: knownRevision });
+    if (tooLarge) return api.saveBoard({ canvasData, baseRevision: knownRevision });
+    return socket.emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
+  };
+
   const replayEntry = async (entry) => {
     await waitForSafePoint();
-    if (disposed) return { done: false, applied: 0, conflicts: 0 };
+    if (disposed) return { done: false, applied: 0, conflicts: 0, held: [], heldOrder: null };
     const local = canvas.serialize();
     const current = indexObjects(local);
+    const outsideDedupWindow = knownRevision - (entry.op.baseRevision || 0) > settings.dedupSafeRevisions;
+    const held = new Map(heldFromEntry(entry).map((item) => [item.id, item]));
+    const decisions = heldFromEntry(entry).map((item) => {
+      const present = current.get(item.id);
+      const before = entry.base?.[item.id] || null;
+      if (item.mine === null) {
+        if (!present) return { ...item, action: 'skip' };
+        return { ...item, action: before && sameObject(present, before) ? 'remove' : 'conflict' };
+      }
+      if (present && sameObject(present, item.mine)) return { ...item, action: 'skip' };
+      if (!before && !present && !outsideDedupWindow) return { ...item, action: 'add' };
+      if (before && present && sameObject(present, before)) return { ...item, action: 'replace' };
+      return { ...item, action: 'conflict' };
+    });
+    const groupOf = (item) => item.mine?.elementId || entry.base?.[item.id]?.elementId || current.get(item.id)?.elementId || null;
+    const conflictGroups = new Set(decisions.filter((item) => item.action === 'conflict').map(groupOf).filter(Boolean));
+    const final = decisions.map((item) => (item.action !== 'skip' && conflictGroups.has(groupOf(item)) ? { ...item, action: 'conflict' } : item));
+    const heldItems = final.filter((item) => item.action === 'conflict').map((item) => held.get(item.id));
     const target = new Map(local.map((object) => [object.id, object]));
     const additions = [];
-    const outsideDedupWindow = knownRevision - (entry.op.baseRevision || 0) > settings.dedupSafeRevisions;
     let applied = 0;
-    let conflicts = 0;
-    (entry.op.upserts || []).forEach((upsert) => {
-      const desired = { ...upsert.data, id: upsert.id };
-      (upsert.unset || []).forEach((field) => { delete desired[field]; });
-      const present = current.get(upsert.id);
-      const before = entry.base?.[upsert.id] || null;
-      if (present && sameObject(present, desired)) return;
-      if (!before && !present && !outsideDedupWindow) {
-        additions.push(desired);
-        applied += 1;
-        return;
-      }
-      if (before && present && sameObject(present, before)) {
-        target.set(upsert.id, desired);
-        applied += 1;
-        return;
-      }
-      conflicts += 1;
+    final.forEach((item) => {
+      if (item.action === 'add') additions.push(item.mine);
+      if (item.action === 'replace') target.set(item.id, item.mine);
+      if (item.action === 'remove') target.delete(item.id);
+      if (['add', 'replace', 'remove'].includes(item.action)) applied += 1;
     });
-    (entry.op.deletes || []).forEach((id) => {
-      const present = current.get(id);
-      const before = entry.base?.[id] || null;
-      if (!present) return;
-      if (before && sameObject(present, before)) {
-        target.delete(id);
-        applied += 1;
-        return;
-      }
-      conflicts += 1;
-    });
-    if (Array.isArray(entry.op.order)) conflicts += 1;
-    if (applied === 0) return { done: true, applied, conflicts };
-    const orderIds = local.map((object) => object.id).filter((id) => target.has(id));
     const reference = Array.isArray(entry.op.order) ? entry.op.order : [];
+    let orderIds = local.map((object) => object.id).filter((id) => target.has(id));
     additions.forEach((object) => {
       const position = reference.indexOf(object.id);
       let insertAt = orderIds.length;
@@ -717,27 +750,41 @@ export const createBoardSyncController = ({
       orderIds.splice(insertAt, 0, object.id);
       target.set(object.id, object);
     });
-    const objects = orderIds.map((id) => target.get(id));
-    const { op, tooLarge } = buildOperationFrom({ base: localBase(), stored: baseRaw, objects, revision: knownRevision, kind: entry.op.kind || 'edit' });
-    if (!op) return { done: true, applied: 0, conflicts };
-    if (tooLarge) return { done: false, applied: 0, conflicts };
-    const ack = await socket.emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
-    if (!ack?.ok) return { done: false, applied: 0, conflicts };
+    let heldOrder = null;
+    if (reference.length > 0 && reordered(reference, orderIds)) {
+      const theirsMoved = !Array.isArray(entry.baseOrder) || reordered(entry.baseOrder, local.map((object) => object.id));
+      if (theirsMoved) {
+        heldOrder = reference;
+      } else {
+        orderIds = applyOrder(reference, orderIds);
+        applied += 1;
+      }
+    }
+    const conflicts = heldItems.length + (heldOrder ? 1 : 0);
+    if (applied === 0) return { done: true, applied, conflicts, held: heldItems, heldOrder };
+    const ack = await commitRecovered(orderIds.map((id) => target.get(id)), entry.op.kind || 'edit');
+    if (FATAL_CODES.has(ack?.code)) {
+      const refused = heldFromEntry(entry);
+      return { done: true, applied: 0, conflicts: refused.length, held: refused, heldOrder: reference.length > 0 ? reference : null };
+    }
+    if (!ack?.ok) return { done: false, applied: 0, conflicts, held: [], heldOrder: null };
     await pullNow();
-    return { done: true, applied, conflicts };
+    return { done: true, applied, conflicts, held: heldItems, heldOrder };
   };
 
   const recoverRecord = async (record, totals) => {
     const remaining = [];
+    const held = new Map();
+    let heldOrder = null;
     const committed = new Map();
-    const entries = [...(record.entries || [])].filter((entry) => entry && entry.op && now() - (entry.savedAt || 0) < settings.journalMaxAgeMs).sort((a, b) => (a.savedAt || 0) - (b.savedAt || 0));
+    const entries = [...record.entries].sort((a, b) => (a.savedAt || 0) - (b.savedAt || 0));
     let stop = false;
     for (const entry of entries) {
       if (stop || disposed) {
         remaining.push(entry);
         continue;
       }
-      const exactResend = !entry.after || committed.get(entry.after) === entry.op.baseRevision;
+      const exactResend = enabled === true && (!entry.after || committed.get(entry.after) === entry.op.baseRevision);
       let code = 'STALE_REVISION';
       if (exactResend) {
         const ack = await socket.emitOperation({ boardId, ...entry.op }, settings.ackTimeoutMs);
@@ -749,64 +796,158 @@ export const createBoardSyncController = ({
         }
         code = ack?.code || 'NO_ACK';
       }
-      if (REBUILD_CODES.has(code)) {
-        await pullNow();
-        const result = await replayEntry(entry);
-        totals.recovered += result.applied;
-        totals.conflicts += result.conflicts;
-        if (result.done) continue;
+      if (REPLAYABLE_CODES.has(code)) {
+        let result = { done: false, applied: 0, conflicts: 0, held: [], heldOrder: null };
+        try {
+          for (let attempt = 0; attempt < settings.maxSaveAttempts && !result.done && !disposed; attempt += 1) {
+            await pullNow();
+            result = await replayEntry(entry);
+          }
+        } catch {
+          result = { done: false, applied: 0, conflicts: 0, held: [], heldOrder: null };
+        }
+        if (result.done) {
+          totals.recovered += result.applied;
+          totals.conflicts += result.conflicts;
+          result.held.forEach((item) => held.set(item.id, item));
+          if (result.heldOrder) heldOrder = result.heldOrder;
+          continue;
+        }
         remaining.push(entry);
         stop = true;
         continue;
       }
       if (UNRECOVERABLE_CODES.has(code)) {
-        totals.conflicts += 1;
+        const refused = heldFromEntry(entry);
+        totals.conflicts += refused.length;
+        refused.forEach((item) => held.set(item.id, item));
+        if (Array.isArray(entry.op.order)) heldOrder = entry.op.order;
         continue;
       }
       remaining.push(entry);
       stop = true;
     }
-    return remaining;
+    return { remaining, held, heldOrder };
   };
 
-  const recoverPending = () => (enabled !== true && journal && baseLocal !== null ? recoverLegacySnapshots() : enqueue(async () => {
-    const totals = { recovered: 0, conflicts: 0, kept: 0, changed: false };
-    if (disposed || enabled !== true || !journal || baseLocal === null) return { recovered: 0, conflicts: 0, kept: 0 };
-    let records = [];
+  const liveHeld = (items) => {
+    const current = indexObjects(canvas.serialize());
+    return items.filter((item) => (item.mine === null ? current.has(item.id) : !sameObject(current.get(item.id), item.mine)));
+  };
+
+  const listRecords = () => {
     try {
-      records = journal.list();
+      return journal.list();
     } catch {
-      records = [];
+      return [];
     }
+  };
+
+  const isAlive = (record) => !record.ended && now() - (record.beat || 0) < settings.foreignJournalAgeMs;
+
+  const stillDifferentOrder = (order) => {
+    if (!order) return null;
+    return reordered(order, canvas.serialize().map((object) => object.id)) ? order : null;
+  };
+
+  const retainedChanges = () => listRecords().reduce((totals, { instanceId: owner, record }) => {
+    const read = owner === instanceId ? null : readRecord(record);
+    if (!read || isAlive(record)) return totals;
+    return { kept: totals.kept + read.entries.length, held: totals.held + read.held.length, heldOrder: totals.heldOrder + (read.heldOrder ? 1 : 0) };
+  }, { kept: 0, held: 0, heldOrder: 0 });
+
+  const recoverPending = () => enqueue(async () => {
+    const totals = { recovered: 0, conflicts: 0, kept: 0, changed: false };
+    if (disposed || enabled === null || !journal || baseLocal === null) return { recovered: 0, conflicts: 0, kept: 0 };
     let aliveElsewhere = false;
-    for (const { instanceId: owner, record } of records) {
+    let damaged = 0;
+    let heldCount = 0;
+    let heldOrderCount = 0;
+    for (const { instanceId: owner, record } of listRecords()) {
       if (disposed) break;
-      if (owner === instanceId || !record) continue;
-      const alive = !record.ended && now() - (record.beat || 0) < settings.foreignJournalAgeMs;
-      if (alive) {
-        if ((record.entries || []).length > 0) aliveElsewhere = true;
+      if (owner === instanceId) continue;
+      const read = readRecord(record);
+      if (!read) {
+        damaged += 1;
+        try {
+          journal.remove(owner);
+        } catch {
+          journalHealthy = false;
+        }
         continue;
       }
-      const remaining = await recoverRecord(record, totals);
+      if (isAlive(record)) {
+        if (read.entries.length > 0) aliveElsewhere = true;
+        continue;
+      }
+      damaged += read.damaged;
+      const { remaining, held, heldOrder } = await recoverRecord({ ...record, entries: read.entries }, totals);
+      const keptHeld = new Map(read.held.map((item) => [item.id, item]));
+      held.forEach((item, id) => keptHeld.set(id, item));
+      if (totals.changed) await pullNow().catch(() => {});
+      const stillHeld = liveHeld([...keptHeld.values()]);
+      const stillOrder = stillDifferentOrder(heldOrder || read.heldOrder);
       totals.kept += remaining.length;
+      heldCount += stillHeld.length;
+      heldOrderCount += stillOrder ? 1 : 0;
       try {
-        if (remaining.length === 0) journal.remove(owner);
-        else journal.write(owner, { ...record, ended: true, entries: remaining });
+        if (remaining.length === 0 && stillHeld.length === 0 && !stillOrder) journal.remove(owner);
+        else journal.write(owner, { ended: true, beat: record.beat, entries: remaining, held: stillHeld, heldOrder: stillOrder });
       } catch {
         journalHealthy = false;
       }
     }
-    if (totals.changed) await pullNow();
-    if (aliveElsewhere && !recoveryRetryTimer && !disposed) {
+    if ((aliveElsewhere || totals.kept > 0) && !recoveryRetryTimer && !disposed) {
       recoveryRetryTimer = timers.setTimeout(() => {
         recoveryRetryTimer = null;
         recoverPending();
       }, settings.foreignJournalAgeMs + 1000);
     }
     const summary = { recovered: totals.recovered, conflicts: totals.conflicts, kept: totals.kept };
-    if (summary.recovered > 0 || summary.conflicts > 0) notify('recovered', summary);
+    if (summary.recovered > 0 || summary.conflicts > 0) notify('recovered', { ...summary, held: heldCount });
+    notify('recovery-state', { kept: totals.kept, held: heldCount, heldOrder: heldOrderCount, damaged });
     return summary;
-  }));
+  });
+
+  const resolveHeld = (choice) => enqueue(async () => {
+    if (disposed || !journal || baseLocal === null) return { ok: false, code: 'UNAVAILABLE' };
+    const owners = listRecords()
+      .map(({ instanceId: owner, record }) => ({ owner, record, read: owner === instanceId ? null : readRecord(record) }))
+      .filter(({ record, read }) => read && !isAlive(record) && (read.held.length > 0 || read.heldOrder));
+    if (choice === 'mine') {
+      const items = owners.flatMap(({ read }) => read.held);
+      const order = owners.map(({ read }) => read.heldOrder).filter(Boolean).pop() || null;
+      let ack = { ok: false };
+      for (let attempt = 0; attempt < settings.maxSaveAttempts && !ack?.ok; attempt += 1) {
+        await pullNow();
+        await waitForSafePoint();
+        if (disposed) return { ok: false, code: 'DISPOSED' };
+        const target = new Map(canvas.serialize().map((object) => [object.id, object]));
+        items.forEach((item) => {
+          if (item.mine === null) target.delete(item.id);
+          else target.set(item.id, item.mine);
+        });
+        const ids = [...target.keys()];
+        ack = await commitRecovered((order ? applyOrder(order, ids) : ids).map((id) => target.get(id)), 'edit');
+        if (FATAL_CODES.has(ack?.code)) break;
+      }
+      if (!ack?.ok) {
+        notify('sync-error', { code: ack?.code || 'SAVE_FAILED' });
+        return { ok: false, code: ack?.code || 'SAVE_FAILED' };
+      }
+      await pullNow();
+    }
+    owners.forEach(({ owner, record, read }) => {
+      try {
+        if (read.entries.length === 0) journal.remove(owner);
+        else journal.write(owner, { ended: true, beat: record.beat, entries: read.entries, held: [], heldOrder: null });
+      } catch {
+        journalHealthy = false;
+      }
+    });
+    notify('recovery-state', { ...retainedChanges(), damaged: owners.reduce((total, { read }) => total + read.damaged, 0) });
+    return { ok: true };
+  });
 
   const drain = async (timeoutMs = settings.ackTimeoutMs) => {
     if (disposed || enabled !== true) return;
@@ -820,7 +961,7 @@ export const createBoardSyncController = ({
   };
 
   const hasUnsavedWork = () => {
-    if (disposed || enabled !== true) return false;
+    if (disposed || enabled === null) return false;
     if (inFlight || editTimer) return true;
     return baseLocal !== null && hasLocalChanges(canvas.serialize());
   };
@@ -902,7 +1043,9 @@ export const createBoardSyncController = ({
     persist,
     noteRemoteEdit,
     flushOnUnload,
+    noteLocalChange,
     recoverPending,
+    resolveHeld,
     drain,
     hasUnsavedWork,
     canRecover,

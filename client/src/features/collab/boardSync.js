@@ -134,7 +134,7 @@ const sameSequence = (a, b) => a.length === b.length && a.every((id, index) => i
 
 const idsOf = (objects) => (Array.isArray(objects) ? objects : []).map((object) => object?.id).filter((id) => typeof id === 'string' && id);
 
-const reordered = (baseIds, nextIds) => {
+export const reordered = (baseIds, nextIds) => {
   const nextSet = new Set(nextIds);
   const shared = new Set(baseIds.filter((id) => nextSet.has(id)));
   return !sameSequence(baseIds.filter((id) => shared.has(id)), nextIds.filter((id) => shared.has(id)));
@@ -150,6 +150,14 @@ const insertByNeighbour = (orderIds, id, referenceIds) => {
     }
   }
   orderIds.unshift(id);
+};
+
+export const applyOrder = (wantedIds, currentIds) => {
+  const current = new Set(currentIds);
+  const result = wantedIds.filter((id) => current.has(id));
+  const placed = new Set(result);
+  currentIds.filter((id) => !placed.has(id)).forEach((id) => insertByNeighbour(result, id, currentIds));
+  return result;
 };
 
 export const mergeThreeWay = ({ baseRaw, baseLocal, theirs, local }) => {
@@ -279,6 +287,8 @@ export default {
   operationByteSize,
   applyCanvasOperation,
   mergeThreeWay,
+  reordered,
+  applyOrder,
   conflictUndoObjects,
   changedSince,
   acceptObjects,

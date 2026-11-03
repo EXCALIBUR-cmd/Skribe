@@ -38,6 +38,8 @@ import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterp
 import { registerDictationCanvas } from '../features/voice/dictationCanvasBridge.js';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 import { createBoardSyncController } from '../features/collab/boardSyncController.js';
+import { countPendingChanges, createPendingJournal } from '../features/collab/pendingJournal.js';
+import { PendingRecoveryNotice } from '../components/ui/PendingRecoveryNotice.jsx';
 
 const isValidViewport = (viewport) => (
   viewport &&
@@ -46,36 +48,6 @@ const isValidViewport = (viewport) => (
   typeof viewport.zoom === 'number' && Number.isFinite(viewport.zoom) &&
   viewport.zoom >= 0.2 && viewport.zoom <= 5
 );
-
-const PENDING_OPERATION_PREFIX = 'skribe:pending-canvas-ops:';
-
-const createPendingOperationJournal = (boardId) => {
-  const prefix = `${PENDING_OPERATION_PREFIX}${boardId}:`;
-  try {
-    window.localStorage.setItem(`${PENDING_OPERATION_PREFIX}probe`, '1');
-    window.localStorage.removeItem(`${PENDING_OPERATION_PREFIX}probe`);
-  } catch {
-    return null;
-  }
-  return {
-    available: true,
-    write: (instanceId, record) => window.localStorage.setItem(`${prefix}${instanceId}`, JSON.stringify(record)),
-    remove: (instanceId) => window.localStorage.removeItem(`${prefix}${instanceId}`),
-    list: () => {
-      const records = [];
-      for (let index = 0; index < window.localStorage.length; index += 1) {
-        const key = window.localStorage.key(index);
-        if (!key || !key.startsWith(prefix)) continue;
-        try {
-          records.push({ instanceId: key.slice(prefix.length), record: JSON.parse(window.localStorage.getItem(key)) });
-        } catch {
-          records.push({ instanceId: key.slice(prefix.length), record: null });
-        }
-      }
-      return records;
-    }
-  };
-};
 
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
@@ -128,6 +100,9 @@ export const MainCanvasPage = () => {
   const [zoom, setZoom] = useState(100);
   const [contextMenuPos, setContextMenuPos] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [recoveryState, setRecoveryState] = useState({ kept: 0, held: 0, heldOrder: 0 });
+  const [resolvingHeld, setResolvingHeld] = useState(false);
+  const recoveryKeptRef = useRef(0);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -137,7 +112,7 @@ export const MainCanvasPage = () => {
   }, []);
 
   const addToast = useCallback((title, message, icon = 'info', type = 'info') => {
-    const id = Date.now();
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setToasts((prev) => [...prev, { id, title, message, icon, type }]);
     setTimeout(() => {
       removeToast(id);
@@ -260,6 +235,7 @@ export const MainCanvasPage = () => {
     console.log('[BOARD SAVE DEBUG] Serialized object count:', currentCanvasData?.objects?.length);
 
     latestCanvasDataRef.current = currentCanvasData;
+    syncControllerRef.current?.noteLocalChange(currentCanvasData.objects);
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -322,7 +298,7 @@ export const MainCanvasPage = () => {
           syncControllerRef.current?.dispose();
           syncControllerRef.current = createBoardSyncController({
             boardId,
-            journal: createPendingOperationJournal(boardId),
+            journal: createPendingJournal({ boardId, userId: user?._id || user?.id }),
             api: {
               getBoard: async () => {
                 const latest = await apiClient.get(`/boards/${boardId}`);
@@ -382,9 +358,17 @@ export const MainCanvasPage = () => {
               } else if (kind === 'sync-error') {
                 setSaveStatus('error');
               } else if (kind === 'recovered') {
-                addToast('Changes recovered', detail.conflicts > 0
-                  ? `${detail.recovered} unsaved change${detail.recovered === 1 ? '' : 's'} from your last visit were restored. ${detail.conflicts} could not be restored because a collaborator changed the same object.`
-                  : `${detail.recovered} unsaved change${detail.recovered === 1 ? '' : 's'} from your last visit were restored.`, 'restore', 'info');
+                if (detail.recovered > 0) {
+                  addToast('Changes recovered', `${detail.recovered} unsynced change${detail.recovered === 1 ? ' was' : 's were'} restored and saved to the server.`, 'restore', 'info');
+                }
+              } else if (kind === 'recovery-state') {
+                setRecoveryState({ kept: detail.kept, held: detail.held, heldOrder: detail.heldOrder });
+                if (detail.kept > 0) setSaveStatus('error');
+                else if (recoveryKeptRef.current > 0 && !syncControllerRef.current?.hasUnsavedWork()) setSaveStatus('saved');
+                recoveryKeptRef.current = detail.kept;
+                if (detail.damaged > 0) addToast('Damaged draft removed', `${detail.damaged} damaged item${detail.damaged === 1 ? '' : 's'} in your local draft could not be read and ${detail.damaged === 1 ? 'was' : 'were'} removed.`, 'warning', 'warning');
+              } else if (kind === 'journal-unavailable') {
+                addToast('Unsaved work is at risk', 'This browser cannot keep a local copy of your changes. Stay on this page until they are saved.', 'warning', 'warning');
               } else if (kind === 'synced') {
                 setSaveStatus('saved');
               }
@@ -434,6 +418,11 @@ export const MainCanvasPage = () => {
         console.error('[MainCanvasPage] Failed to fetch board:', err);
         const errMsg = typeof err === 'string' ? err : err?.message || 'Could not load board';
         addToast('Board Error', errMsg, 'error', 'error');
+        const journal = createPendingJournal({ boardId, userId: user?._id || user?.id });
+        const pendingChanges = journal ? countPendingChanges(journal) : 0;
+        if (pendingChanges > 0) {
+          addToast('Unsynced changes kept', `${pendingChanges} unsynced change${pendingChanges === 1 ? ' is' : 's are'} saved only in this browser because this board could not be opened. Nothing was discarded.`, 'cloud_off', 'warning');
+        }
         if (isMounted) {
           isInitialLoadingRef.current = false;
           setSaveStatus('error');
@@ -737,8 +726,7 @@ export const MainCanvasPage = () => {
         navigator.sendBeacon(`/api/v1/boards/${boardId}/viewport`, viewportBlob);
       }
       const controller = syncControllerRef.current;
-      if (controller?.boardId === boardId && !controller.isEnabled()) controller.flushOnUnload();
-      if (controller?.boardId === boardId && controller.isEnabled()) {
+      if (controller?.boardId === boardId) {
         controller.flushOnUnload();
         if (!controller.canRecover() && controller.hasUnsavedWork()) {
           event.preventDefault();
@@ -1401,6 +1389,25 @@ export const MainCanvasPage = () => {
         onBringToFront={() => fabricCanvasRef.current?.bringToFront()}
         onSendToBack={() => fabricCanvasRef.current?.sendToBack()}
         onClose={() => setContextMenuPos(null)}
+      />
+
+      <PendingRecoveryNotice
+        kept={recoveryState.kept}
+        held={recoveryState.held}
+        heldOrder={recoveryState.heldOrder}
+        busy={resolvingHeld}
+        onUseMine={async () => {
+          setResolvingHeld(true);
+          const result = await syncControllerRef.current?.resolveHeld('mine');
+          setResolvingHeld(false);
+          if (result?.ok) addToast('Your version was saved', 'Your version was applied and saved to the server.', 'check_circle', 'info');
+          else addToast('Your version was not saved', 'The server did not accept it. Your version is still kept in this browser.', 'warning', 'warning');
+        }}
+        onDiscard={async () => {
+          setResolvingHeld(true);
+          await syncControllerRef.current?.resolveHeld('discard');
+          setResolvingHeld(false);
+        }}
       />
 
       <div className="fixed top-20 right-6 z-50 flex flex-col items-end pointer-events-auto">

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyCanvasOperation, buildCanvasOperation, conflictUndoObjects, mergeThreeWay, OPERATION_BYTE_LIMIT } from './boardSync.js';
 import { createBoardSyncController } from './boardSyncController.js';
+import { countPendingChanges, createPendingJournal } from './pendingJournal.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -100,6 +101,8 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
       if (kind === 'unrestorable') client.unrestorable = detail.count;
       if (kind === 'synced') client.synced = (client.synced || 0) + 1;
       if (kind === 'recovered') client.recoveries.push(detail);
+      if (kind === 'recovery-state') client.recoveryState = detail;
+      if (kind === 'journal-unavailable') client.journalWarnings = (client.journalWarnings || 0) + 1;
     },
     requestSave: () => { client.saveRequests += 1; },
     random: () => 0,
@@ -971,7 +974,7 @@ test('an unload while offline or too large falls back to a revision-checked save
 const journalStore = () => ({ records: {} });
 const pendingEntries = (store) => Object.values(store.records).flatMap((record) => record.entries || []);
 
-test('acknowledged and definitively rejected operations leave nothing in the pending journal', async () => {
+test('acknowledged operations leave nothing in the pending journal, and a refused edit stays kept as a draft', async () => {
   const server = createServer();
   const store = journalStore();
   const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
@@ -987,7 +990,8 @@ test('acknowledged and definitively rejected operations leave nothing in the pen
   a.release();
   a.failOps.push('FORBIDDEN');
   await a.commit(patch('shape_a', { left: 34 }));
-  assert.deepEqual(pendingEntries(store), []);
+  assert.equal(pendingEntries(store).length, 1);
+  assert.equal(pendingEntries(store)[0].op.upserts[0].data.left, 34);
   a.controller.dispose();
 });
 
@@ -1105,8 +1109,9 @@ test('a recovered operation that went stale applies only objects nobody else cha
   assert.deepEqual(recovery, { recovered: 1, conflicts: 1, kept: 0 });
   assert.equal(find(server.objects, 'shape_a').left, 72);
   assert.equal(find(server.objects, 'shape_b').left, 499);
-  assert.deepEqual(reloaded.recoveries, [{ recovered: 1, conflicts: 1, kept: 0 }]);
+  assert.deepEqual(reloaded.recoveries, [{ recovered: 1, conflicts: 1, kept: 0, held: 1 }]);
   assert.deepEqual(pendingEntries(store), []);
+  assert.deepEqual(Object.values(store.records).flatMap((record) => record.held).map((item) => [item.id, item.mine.left]), [['shape_b', 71]]);
   reloaded.controller.dispose();
 });
 
@@ -1424,4 +1429,559 @@ test('legacy: a kept snapshot that differs only in stacking order is not reporte
   assert.equal(summary.recovered, 0);
   assert.equal(next.recoveries.length, 0);
   assert.equal(Object.keys(records.records).length, 0);
+});
+
+const heldItems = (store) => Object.values(store.records).flatMap((record) => record.held || []);
+
+const killTab = (client, store) => {
+  const survived = clone(store.records);
+  client.controller.dispose();
+  store.records = survived;
+};
+
+const fakeStorage = () => {
+  const values = new Map();
+  return {
+    get length() { return values.size; },
+    key: (index) => [...values.keys()][index] ?? null,
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, String(value)); },
+    removeItem: (key) => { values.delete(key); }
+  };
+};
+
+test('an edit is kept durably the moment it happens and cleared only once the server accepts it', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 201 }));
+  a.controller.noteLocalChange();
+  assert.equal(pendingEntries(store).length, 1);
+  assert.equal(pendingEntries(store)[0].op.upserts[0].data.left, 201);
+  a.stall = true;
+  const pending = a.controller.submitLocalChanges();
+  await wait(30);
+  assert.equal(pendingEntries(store).length, 1);
+  const held = a.stalled.shift();
+  held.resolve(server.operation(a, held.payload));
+  await pending;
+  assert.deepEqual(pendingEntries(store), []);
+  a.controller.dispose();
+});
+
+test('a tab killed with no unload event still recovers its edit once on reopening', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 202 }));
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  assert.equal(Object.values(store.records)[0].ended, false);
+  assert.equal(server.revision, 0);
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 202);
+  assert.equal(server.revision, 1);
+  assert.equal(find(reopened.objects, 'shape_a').left, 202);
+  const again = createClient('A3', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a3' });
+  assert.deepEqual(await again.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.revision, 1);
+  assert.deepEqual(Object.keys(store.records), []);
+  reopened.controller.dispose();
+  again.controller.dispose();
+});
+
+test('an edit stays kept while a refused save is waiting on a merge', async () => {
+  const server = createServer();
+  const store = journalStore();
+  let release = null;
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a', getBoard: () => new Promise((resolve) => { release = () => resolve(server.getBoard()); }) });
+  a.failOps.push('STALE_REVISION');
+  const pending = a.commit(patch('shape_a', { left: 203 }));
+  await wait(30);
+  assert.ok(release);
+  assert.equal(pendingEntries(store).length, 1);
+  assert.equal(pendingEntries(store)[0].op.upserts[0].data.left, 203);
+  release();
+  await pending;
+  assert.equal(find(server.objects, 'shape_a').left, 203);
+  assert.deepEqual(pendingEntries(store), []);
+  a.controller.dispose();
+});
+
+test('a draft whose save was accepted before cleanup finished is removed without saving again', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 204 }));
+  a.controller.noteLocalChange();
+  const uncleaned = clone(store.records);
+  await a.controller.submitLocalChanges();
+  a.controller.dispose();
+  store.records = uncleaned;
+  const revision = server.revision;
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.revision, revision);
+  assert.deepEqual(reopened.recoveries, []);
+  assert.deepEqual(Object.keys(store.records), []);
+  reopened.controller.dispose();
+});
+
+test('a draft that cannot reach the server is kept, reported as kept and sent after reconnecting', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 205 }));
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  reopened.connected = false;
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 1 });
+  assert.deepEqual(reopened.recoveries, []);
+  assert.equal(reopened.recoveryState.kept, 1);
+  assert.equal(pendingEntries(store).length, 1);
+  reopened.connected = true;
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 205);
+  assert.equal(reopened.recoveryState.kept, 0);
+  reopened.controller.dispose();
+});
+
+test('damaged journal records are removed and reported without blocking a good one', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 206 }));
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  store.records.bad_json = null;
+  store.records.bad_shape = { ended: true, entries: 5 };
+  store.records.bad_entry = { ended: true, entries: [{ op: { opId: 1, upserts: 'x' } }, null] };
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 206);
+  assert.equal(reopened.recoveryState.damaged, 4);
+  assert.deepEqual(Object.keys(store.records), []);
+  reopened.controller.dispose();
+});
+
+test('a conflicting draft never overwrites newer work and is kept until the user chooses', async () => {
+  for (const [choice, expected] of [['mine', 207], ['discard', 499]]) {
+    const server = createServer();
+    const store = journalStore();
+    const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+    const b = createClient('B', server);
+    a.edit(patch('shape_a', { left: 207 }));
+    a.controller.noteLocalChange();
+    killTab(a, store);
+    await b.commit(patch('shape_a', { left: 499 }));
+    const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+    assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 0, conflicts: 1, kept: 0 });
+    assert.equal(find(server.objects, 'shape_a').left, 499);
+    assert.deepEqual(heldItems(store).map((item) => [item.id, item.mine.left]), [['shape_a', 207]]);
+    assert.equal(reopened.recoveryState.held, 1);
+    const later = createClient('A3', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a3' });
+    await later.controller.recoverPending();
+    assert.equal(later.recoveryState.held, 1);
+    assert.equal(find(server.objects, 'shape_a').left, 499);
+    assert.equal((await later.controller.resolveHeld(choice)).ok, true);
+    assert.equal(find(server.objects, 'shape_a').left, expected);
+    assert.equal(find(later.objects, 'shape_a').left, expected);
+    assert.deepEqual(Object.keys(store.records), []);
+    [b, reopened, later].forEach((client) => client.controller.dispose());
+  }
+});
+
+test('a conflict on one part of a linked element holds back the whole element', async () => {
+  const server = createServer();
+  server.objects = [shape('part_shape', { elementId: 'el_1' }), label('part_text', 'part_shape', { elementId: 'el_1' })];
+  server.revision = 1;
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  a.edit((objects) => objects.map((object) => ({ ...object, left: 300 })));
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  await b.commit(patch('part_text', { text: 'theirs' }));
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  await reopened.controller.recoverPending();
+  assert.notEqual(find(server.objects, 'part_shape').left, 300);
+  assert.notEqual(find(server.objects, 'part_text').left, 300);
+  assert.equal(find(server.objects, 'part_text').text, 'theirs');
+  assert.deepEqual(heldItems(store).map((item) => item.id).sort(), ['part_shape', 'part_text']);
+  [b, reopened].forEach((client) => client.controller.dispose());
+});
+
+test('legacy: a killed tab recovers its edit, keeps newer work and clears the record after the save is accepted', async () => {
+  const base = [{ id: 'one', left: 1 }, { id: 'two', left: 2 }];
+  const board = { revision: 1, objects: clone(base) };
+  const records = { records: {} };
+  const getBoard = () => ({ revision: board.revision, objects: clone(board.objects) });
+  const first = legacyWithJournal(records, getBoard, base, 'first');
+  first.objects = [{ id: 'one', left: 100 }, { id: 'two', left: 200 }, { id: 'mine', left: 3 }];
+  first.controller.noteLocalChange();
+  assert.equal(pendingEntries(records).length, 1);
+  killTab(first, records);
+  board.objects = [{ id: 'one', left: 999 }, { id: 'two', left: 2 }, { id: 'theirs', left: 4 }];
+  board.revision = 2;
+  const saves = [];
+  const next = createClient('B', createServer(), { foreignJournalAgeMs: 0 }, { getBoard, journalStore: records, instanceId: 'second' });
+  next.objects = clone(board.objects);
+  next.server.saveBoard = (client, body) => {
+    saves.push(body.ifRevision);
+    if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED' };
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  next.controller.load({ revision: 2, objects: clone(board.objects), enabled: false });
+  next.controller.markLoaded();
+  const summary = await next.controller.recoverPending();
+  assert.deepEqual(summary, { recovered: 2, conflicts: 1, kept: 0 });
+  assert.deepEqual(saves, [2]);
+  assert.deepEqual(board.objects.map((object) => [object.id, object.left]).sort(), [['mine', 3], ['one', 999], ['theirs', 4], ['two', 200]]);
+  assert.deepEqual(heldItems(records).map((item) => [item.id, item.mine.left]), [['one', 100]]);
+  assert.deepEqual(pendingEntries(records), []);
+  next.controller.dispose();
+});
+
+test('legacy: a tab that is still open keeps its draft and another tab does not take it', async () => {
+  const base = [{ id: 'one', left: 1 }];
+  const records = { records: {} };
+  const getBoard = () => ({ revision: 1, objects: clone(base) });
+  const first = legacyWithJournal(records, getBoard, base, 'first');
+  first.objects = [{ id: 'one', left: 100 }];
+  first.controller.noteLocalChange();
+  const next = legacyWithJournal(records, getBoard, base, 'second');
+  let saved = 0;
+  next.server.saveBoard = () => { saved += 1; return { ok: true, revision: 2 }; };
+  assert.deepEqual(await next.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(saved, 0);
+  assert.equal(pendingEntries(records).length, 1);
+  first.controller.dispose();
+  next.controller.dispose();
+});
+
+test('the journal keeps each account and board apart and stores no credentials', () => {
+  const storage = fakeStorage();
+  const mine = createPendingJournal({ boardId: 'board_1', userId: 'user_a', storage });
+  const record = { ended: true, entries: [{ savedAt: 1, op: { opId: 'op_1', baseRevision: 1, upserts: [{ id: 'x', data: { id: 'x' } }], deletes: [] }, base: {} }] };
+  mine.write('inst_a', record);
+  assert.deepEqual(mine.list().map((row) => row.instanceId), ['inst_a']);
+  assert.equal(countPendingChanges(mine), 1);
+  assert.deepEqual(createPendingJournal({ boardId: 'board_1', userId: 'user_b', storage }).list(), []);
+  assert.deepEqual(createPendingJournal({ boardId: 'board_2', userId: 'user_a', storage }).list(), []);
+  assert.equal(createPendingJournal({ boardId: 'board_1', userId: undefined, storage }), null);
+  storage.setItem(storage.key(0), '{not json');
+  assert.deepEqual(mine.list(), [{ instanceId: 'inst_a', record: null }]);
+  assert.equal(countPendingChanges(mine), 0);
+  mine.remove('inst_a');
+  assert.equal(storage.length, 0);
+});
+
+test('a browser that cannot keep a draft warns once and reports that it cannot recover', () => {
+  const server = createServer();
+  const store = journalStore();
+  store.failWrites = true;
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 208 }));
+  a.controller.noteLocalChange();
+  a.edit(patch('shape_a', { left: 209 }));
+  a.controller.noteLocalChange();
+  assert.equal(a.journalWarnings, 1);
+  assert.equal(a.controller.canRecover(), false);
+  assert.equal(a.controller.hasUnsavedWork(), true);
+  a.controller.dispose();
+});
+
+test('legacy: a draft is cleared only after the server accepts the save, and an edit made during the save stays kept', async () => {
+  const base = [{ id: 'one', left: 1 }, { id: 'two', left: 2 }];
+  const records = { records: {} };
+  const board = { revision: 1, objects: clone(base) };
+  const first = legacyWithJournal(records, () => ({ revision: board.revision, objects: clone(board.objects) }), base, 'first');
+  let finishSave = null;
+  first.server.saveBoard = (client, body) => new Promise((resolve) => {
+    finishSave = () => {
+      board.objects = clone(body.canvasData.objects);
+      board.revision += 1;
+      resolve({ ok: true, revision: board.revision });
+    };
+  });
+  first.edit(patch('one', { left: 100 }));
+  first.controller.noteLocalChange();
+  const saving = first.controller.persist({ version: '7', objects: clone(first.objects) });
+  await wait(20);
+  assert.equal(pendingEntries(records).length, 1);
+  first.edit(patch('two', { left: 200 }));
+  first.controller.noteLocalChange();
+  finishSave();
+  await saving;
+  const kept = pendingEntries(records);
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0].op.upserts.map((upsert) => upsert.id), ['two']);
+  const finishing = first.controller.persist({ version: '7', objects: clone(first.objects) });
+  await wait(20);
+  finishSave();
+  await finishing;
+  assert.deepEqual(pendingEntries(records), []);
+  first.controller.dispose();
+});
+
+const keptEntry = (opId, id, left) => ({ savedAt: 1, op: { opId, baseRevision: 0, kind: 'edit', upserts: [{ id, data: { id, left }, unset: [] }], deletes: [] }, base: {} });
+
+test('discarding held work reports the changes still retained and keeps them in the journal', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.dead_held = { ended: true, beat: 1, entries: [], held: [{ id: 'shape_a', mine: { id: 'shape_a', left: 1 } }] };
+  store.records.dead_mixed = { ended: true, beat: 1, entries: [keptEntry('op_mixed', 'shape_c', 7)], held: [{ id: 'shape_c', mine: { id: 'shape_c', left: 8 } }] };
+  store.records.dead_kept = { ended: true, beat: 1, entries: [keptEntry('op_kept', 'shape_b', 5)] };
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  assert.equal((await a.controller.resolveHeld('discard')).ok, true);
+  assert.deepEqual(a.recoveryState, { kept: 2, held: 0, heldOrder: 0, damaged: 0 });
+  assert.deepEqual(pendingEntries(store).map((entry) => entry.op.opId).sort(), ['op_kept', 'op_mixed']);
+  assert.deepEqual(heldItems(store), []);
+  assert.equal(store.records.dead_held, undefined);
+  a.controller.dispose();
+});
+
+test('invalid held items are reported as damaged, never applied, and valid ones in the same record stay held', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.dead = { ended: true, beat: 1, entries: [], held: [
+    { id: 5 },
+    null,
+    { id: 'shape_b', mine: 'not an object' },
+    { id: 'shape_c', mine: { id: 'a_different_object', left: 901 } },
+    { id: 'shape_a', mine: { id: 'shape_a', left: 900 } }
+  ] };
+  const a = createClient('A', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a' });
+  await a.controller.recoverPending();
+  assert.deepEqual(a.recoveryState, { kept: 0, held: 1, heldOrder: 0, damaged: 4 });
+  assert.deepEqual(store.records.dead.held.map((item) => item.id), ['shape_a']);
+  const later = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  await later.controller.recoverPending();
+  assert.deepEqual(later.recoveryState, { kept: 0, held: 1, heldOrder: 0, damaged: 0 });
+  assert.equal((await later.controller.resolveHeld('mine')).ok, true);
+  assert.equal(find(server.objects, 'shape_a').left, 900);
+  assert.equal(find(server.objects, 'a_different_object'), undefined);
+  assert.notEqual(find(server.objects, 'shape_c').left, 901);
+  assert.deepEqual(Object.keys(store.records), []);
+  [a, later].forEach((client) => client.controller.dispose());
+});
+
+test('a record with a damaged held list still recovers its valid entries', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.dead = { ended: true, beat: 1, entries: [keptEntry('op_ok', 'shape_a', 77)], held: 'broken' };
+  const a = createClient('A', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a' });
+  await a.controller.recoverPending();
+  assert.equal(find(server.objects, 'shape_a').left, 77);
+  assert.equal(a.recoveryState.damaged, 1);
+  assert.deepEqual(Object.keys(store.records), []);
+  a.controller.dispose();
+});
+
+const bringFirstToTop = (objects) => [...objects.slice(1), objects[0]];
+const orderIds = (objects) => objects.map((object) => object.id);
+
+test('an order-only edit is kept and restored, and the server order matches the client', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(bringFirstToTop);
+  const wanted = orderIds(a.objects);
+  a.controller.noteLocalChange();
+  assert.deepEqual(pendingEntries(store)[0].op.order, wanted);
+  killTab(a, store);
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  assert.equal((await reopened.controller.recoverPending()).recovered, 1);
+  assert.deepEqual(orderIds(server.objects), wanted);
+  assert.deepEqual(orderIds(reopened.objects), wanted);
+  assert.deepEqual(Object.keys(store.records), []);
+  reopened.controller.dispose();
+});
+
+test('a stale order-only edit is restored without overwriting an unrelated newer addition', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const b = createClient('B', server);
+  const moved = a.objects[0].id;
+  a.edit(bringFirstToTop);
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  await b.commit((objects) => [...objects, shape('from_b')]);
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  const summary = await reopened.controller.recoverPending();
+  assert.deepEqual(summary, { recovered: 1, conflicts: 0, kept: 0 });
+  const ids = orderIds(server.objects);
+  assert.equal(ids.filter((id) => id === 'from_b').length, 1);
+  assert.ok(ids.filter((id) => id !== 'from_b').at(-1) === moved);
+  assert.deepEqual(orderIds(reopened.objects), ids);
+  assert.deepEqual(Object.keys(store.records), []);
+  [b, reopened].forEach((client) => client.controller.dispose());
+});
+
+test('a real order conflict keeps the newer order on the server and holds mine until the user chooses', async () => {
+  for (const choice of ['mine', 'discard']) {
+    const server = createServer();
+    const store = journalStore();
+    const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+    const b = createClient('B', server);
+    a.edit(bringFirstToTop);
+    const mine = orderIds(a.objects);
+    a.controller.noteLocalChange();
+    killTab(a, store);
+    await b.commit((objects) => [objects.at(-1), ...objects.slice(0, -1)]);
+    const theirs = orderIds(server.objects);
+    const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+    assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 0, conflicts: 1, kept: 0 });
+    assert.deepEqual(orderIds(server.objects), theirs);
+    assert.deepEqual(reopened.recoveryState, { kept: 0, held: 0, heldOrder: 1, damaged: 0 });
+    assert.deepEqual(Object.values(store.records)[0].heldOrder, mine);
+    assert.equal((await reopened.controller.resolveHeld(choice)).ok, true);
+    assert.deepEqual(orderIds(server.objects), choice === 'mine' ? mine : theirs);
+    assert.deepEqual(orderIds(reopened.objects), orderIds(server.objects));
+    assert.deepEqual(Object.keys(store.records), []);
+    assert.deepEqual(reopened.recoveryState, { kept: 0, held: 0, heldOrder: 0, damaged: 0 });
+    [b, reopened].forEach((client) => client.controller.dispose());
+  }
+});
+
+test('legacy: an order-only edit is restored by an accepted save, and a real conflict is held', async () => {
+  for (const collaboratorMoved of [false, true]) {
+    const base = [{ id: 'one', left: 1 }, { id: 'two', left: 2 }, { id: 'three', left: 3 }];
+    const board = { revision: 1, objects: clone(base) };
+    const records = { records: {} };
+    const getBoard = () => ({ revision: board.revision, objects: clone(board.objects) });
+    const first = legacyWithJournal(records, getBoard, base, 'first');
+    first.edit(bringFirstToTop);
+    const mine = orderIds(first.objects);
+    first.controller.noteLocalChange();
+    killTab(first, records);
+    if (collaboratorMoved) {
+      board.objects = [clone(base[2]), clone(base[0]), clone(base[1])];
+      board.revision = 2;
+    }
+    const theirs = orderIds(board.objects);
+    const next = createClient('B', createServer(), { foreignJournalAgeMs: 0 }, { getBoard, journalStore: records, instanceId: 'second' });
+    next.objects = clone(board.objects);
+    next.server.saveBoard = (client, body) => {
+      if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED' };
+      board.objects = clone(body.canvasData.objects);
+      board.revision += 1;
+      return { ok: true, revision: board.revision };
+    };
+    next.controller.load({ revision: board.revision, objects: clone(board.objects), enabled: false });
+    next.controller.markLoaded();
+    await next.controller.recoverPending();
+    assert.deepEqual(orderIds(board.objects), collaboratorMoved ? theirs : mine);
+    assert.equal(next.recoveryState.heldOrder, collaboratorMoved ? 1 : 0);
+    assert.equal(Object.keys(records.records).length, collaboratorMoved ? 1 : 0);
+    next.controller.dispose();
+  }
+});
+
+test('acknowledging an earlier operation cannot clear an edit made while it was in flight', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  const pending = a.commit(patch('shape_a', { left: 210 }));
+  await wait(30);
+  a.edit(patch('shape_b', { left: 211 }));
+  a.controller.noteLocalChange();
+  assert.deepEqual(pendingEntries(store).map((entry) => Boolean(entry.after)), [false, true]);
+  const held = a.stalled.shift();
+  a.stall = false;
+  a.connected = false;
+  held.resolve(server.operation(a, held.payload));
+  await pending;
+  const left = pendingEntries(store);
+  assert.equal(left.length, 1);
+  assert.deepEqual(left[0].op.upserts.map((upsert) => [upsert.id, upsert.data.left]), [['shape_b', 211]]);
+  a.controller.dispose();
+});
+
+test('a draft written with operations on is recovered through the guarded save when operations are off', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.edit(patch('shape_a', { left: 220 }));
+  a.controller.noteLocalChange();
+  killTab(a, store);
+  const board = { revision: server.revision + 5, objects: patch('shape_b', { left: 999 })(clone(server.objects)) };
+  const saves = [];
+  const next = createClient('B', createServer(), { foreignJournalAgeMs: 0 }, { getBoard: () => ({ revision: board.revision, objects: clone(board.objects) }), journalStore: store, instanceId: 'second' });
+  next.objects = clone(board.objects);
+  next.server.saveBoard = (client, body) => {
+    saves.push({ ifRevision: body.ifRevision, baseRevision: body.baseRevision });
+    if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED' };
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  next.controller.load({ revision: board.revision, objects: clone(board.objects), enabled: false });
+  next.controller.markLoaded();
+  assert.equal((await next.controller.recoverPending()).recovered, 1);
+  assert.deepEqual(saves, [{ ifRevision: board.revision - 1, baseRevision: undefined }]);
+  assert.equal(find(board.objects, 'shape_a').left, 220);
+  assert.equal(find(board.objects, 'shape_b').left, 999);
+  assert.deepEqual(Object.keys(store.records), []);
+  next.controller.dispose();
+});
+
+test('a draft written with operations off is recovered through a revision-checked operation when operations are on', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const base = clone(server.objects);
+  const writer = createClient('W', createServer(), {}, { getBoard: () => ({ revision: 0, objects: clone(base) }), journalStore: store, instanceId: 'writer' });
+  writer.objects = clone(base);
+  writer.controller.load({ revision: 0, objects: clone(base), enabled: false });
+  writer.controller.markLoaded();
+  writer.edit(patch('shape_a', { left: 221 }));
+  writer.controller.noteLocalChange();
+  killTab(writer, store);
+  const b = createClient('B', server);
+  await b.commit(patch('shape_b', { left: 998 }));
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  assert.deepEqual(await reopened.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 221);
+  assert.equal(find(server.objects, 'shape_b').left, 998);
+  assert.ok(server.ops.some((op) => op.from === 'A2'));
+  assert.deepEqual(Object.keys(store.records), []);
+  [b, reopened].forEach((client) => client.controller.dispose());
+});
+
+test('a draft reuses the snapshot the page already took and keeps its in-flight ordering', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  a.stall = true;
+  const pending = a.commit(patch('shape_a', { left: 230 }));
+  await wait(30);
+  const taken = patch('shape_b', { left: 231 })(clone(a.objects));
+  a.detached = true;
+  a.controller.noteLocalChange(taken);
+  a.detached = false;
+  const entries = pendingEntries(store);
+  assert.equal(entries.length, 2);
+  assert.equal(Boolean(entries[1].after), true);
+  assert.deepEqual(entries[1].op.upserts.map((upsert) => [upsert.id, upsert.data.left]), [['shape_b', 231]]);
+  const held = a.stalled.shift();
+  held.resolve(server.operation(a, held.payload));
+  await pending;
+  a.controller.dispose();
+});
+
+test('legacy: a draft reuses the snapshot the page already took', () => {
+  const base = [{ id: 'one', left: 1 }];
+  const records = { records: {} };
+  const first = legacyWithJournal(records, () => ({ revision: 1, objects: clone(base) }), base, 'first');
+  first.detached = true;
+  first.controller.noteLocalChange([{ id: 'one', left: 240 }]);
+  first.detached = false;
+  assert.deepEqual(pendingEntries(records)[0].op.upserts.map((upsert) => [upsert.id, upsert.data.left]), [['one', 240]]);
+  first.controller.dispose();
 });
