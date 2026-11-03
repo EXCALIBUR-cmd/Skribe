@@ -33,7 +33,7 @@ export const WelcomePage = () => {
           Your canvas is a blank slate
         </h2>
         <p className="font-body text-lg text-on-surface-variant max-w-xl mx-auto">
-          Let's make some magic! Start drawing, try our AI features, or grab a template to kickstart your ideas.
+          Let's make some magic! Start drawing, try our AI features, or open your boards to pick up where you left off.
         </p>
       </div>
 
@@ -65,13 +65,13 @@ export const WelcomePage = () => {
           onClick={() => navigate('/boards')}
           className="group flex flex-col items-center justify-center p-6 bg-tertiary-container text-on-tertiary-container rounded-xl border-2 border-tertiary sticker-shadow btn-pressed transition-all hover:bg-tertiary-fixed cursor-pointer"
         >
-          <span className="material-symbols-outlined text-4xl mb-3">category</span>
-          <span className="font-label text-base font-bold">Explore Templates</span>
+          <span className="material-symbols-outlined text-4xl mb-3">dashboard</span>
+          <span className="font-label text-base font-bold">Open My Boards</span>
         </button>
       </div>
 
       {}
-      <div className="flex flex-col items-center animate-bounce text-primary hidden md:flex mt-2">
+      {user && <div className="flex flex-col items-center animate-bounce text-primary hidden md:flex mt-2">
         <span className="font-label text-sm font-bold italic mb-2">Tools down here!</span>
         <svg
           className="filter drop-shadow-[2px_2px_0px_rgba(174,47,52,0.2)]"
@@ -89,7 +89,7 @@ export const WelcomePage = () => {
             strokeWidth="4"
           />
         </svg>
-      </div>
+      </div>}
     </main>
   );
 };

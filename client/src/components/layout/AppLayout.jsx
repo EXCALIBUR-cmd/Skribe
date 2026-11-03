@@ -2,9 +2,11 @@ import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { Header } from './Header';
 import { FloatingNavBar } from './FloatingNavBar';
+import { useAuth } from '../../context/AuthContext';
 
 export const AppLayout = ({ children }) => {
   const { pathname } = useLocation();
+  const { user, loading } = useAuth();
   const isCanvasRoute = pathname === '/canvas' || pathname.startsWith('/board/');
 
   return (
@@ -15,7 +17,7 @@ export const AppLayout = ({ children }) => {
         {children}
       </main>
 
-      <FloatingNavBar />
+      {!loading && user && <FloatingNavBar />}
     </div>
   );
 };
