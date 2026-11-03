@@ -395,8 +395,11 @@ export const MainCanvasPage = () => {
             if (!isMounted) return;
             if (fabricCanvasRef.current && typeof fabricCanvasRef.current.loadFromJSON === 'function') {
               console.log('[BOARD LOAD DEBUG] Loading', initialJson?.objects?.length ?? 0, 'objects into Fabric');
-              fabricCanvasRef.current.loadFromJSON(initialJson, () => {
+              fabricCanvasRef.current.loadFromJSON(initialJson, (loadResult) => {
                 if (isMounted) {
+                  if (loadResult?.unrestorableCount > 0) {
+                    addToast('Some items could not be shown', `${loadResult.unrestorableCount} item${loadResult.unrestorableCount === 1 ? '' : 's'} on this board could not be displayed. They are kept safe and will not be lost when you save.`, 'warning', 'warning');
+                  }
                   const openView = boardOpenViewRef.current;
                   if (openView === 'remember' && isValidViewport(savedViewport)) {
                     fabricCanvasRef.current.setViewport(savedViewport);

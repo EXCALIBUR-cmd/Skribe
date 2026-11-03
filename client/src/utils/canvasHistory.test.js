@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
-import { captureCanvasHistory, diffCanvasHistory, restoreCanvasHistory } from './canvasHistory.js';
-import { SKRIBE_SERIALIZABLE_PROPERTIES } from './fabricHydration.js';
+import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
+import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { createConnectorObject } from './connectorUtils.js';
 import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
@@ -186,4 +186,44 @@ test('The broadcast diff reports undone additions and deletions by id', () => {
 
   assert.deepEqual(diffCanvasHistory(before, after), { added: ['shape_extra'], modified: [], removed: ['text_title'] });
   assert.deepEqual(diffCanvasHistory(after, before), { added: ['text_title'], modified: [], removed: ['shape_extra'] });
+});
+
+test('Hydration matches saved data by id, so a shifted canvas never swaps identities', () => {
+  const persist = (id, role) => ({ id, type: 'Rect', elementId: id, metadata: { role, elementId: id } });
+  const raw = [persist('shape_elem_a', 'shape'), persist('shape_elem_b', 'shape'), persist('text_elem_b', 'text')];
+  const live = [
+    { id: 'shape_elem_a' },
+    { id: 'text_elem_a', metadata: { role: 'text', elementId: 'a' } },
+    { id: 'timestamp_elem_a', metadata: { role: 'timestamp', elementId: 'a' } },
+    { id: 'shape_elem_b' },
+    { id: 'text_elem_b' }
+  ];
+  hydrateCanvasObjects({ getObjects: () => live }, { objects: raw });
+  assert.deepEqual(live.map((object) => object.id), ['shape_elem_a', 'text_elem_a', 'timestamp_elem_a', 'shape_elem_b', 'text_elem_b']);
+  assert.deepEqual(live.map((object) => object.metadata?.role), ['shape', 'text', 'timestamp', 'shape', 'text']);
+});
+
+test('Hydration still fills objects without ids from the same position', () => {
+  const live = [{ type: 'Path' }, { id: 'text_elem_x' }];
+  hydrateCanvasObjects({ getObjects: () => live }, { objects: [{ type: 'Path', strokeId: 'stroke_1' }, { id: 'text_elem_x', elementId: 'x' }] });
+  assert.equal(live[0].strokeId, 'stroke_1');
+  assert.equal(live[1].elementId, 'x');
+});
+
+test('One object that cannot load keeps the rest of the board and is preserved for saving', async () => {
+  const objects = [
+    { type: 'Textbox', id: 'text_a', text: 'keep me', left: 1, top: 1, width: 100 },
+    { type: 'NotARealType', id: 'bad_1', left: 2, top: 2 },
+    { type: 'Textbox', id: 'text_b', text: 'and me', left: 3, top: 3, width: 100 }
+  ];
+  const canvas = new fabric.StaticCanvas(createElement());
+  const { payload, unrestorable } = await loadCanvasTolerant(canvas, { version: '7.4.0', objects });
+  assert.deepEqual(payload.objects.map((object) => object.id), ['text_a', 'text_b']);
+  assert.deepEqual(canvas.getObjects().map((object) => object.text), ['keep me', 'and me']);
+  assert.deepEqual(unrestorable, [{ index: 1, data: objects[1] }]);
+  retainUnrestorable(canvas, unrestorable);
+  retainUnrestorable(canvas, unrestorable);
+  assert.equal(canvas.skribeRetainedObjects.length, 1);
+  const merged = mergeRetainedObjects(payload.objects, canvas.skribeRetainedObjects);
+  assert.deepEqual(merged.map((object) => object.id), ['text_a', 'bad_1', 'text_b']);
 });

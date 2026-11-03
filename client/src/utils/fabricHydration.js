@@ -162,8 +162,18 @@ export const hydrateCanvasObjects = (canvas, jsonPayload) => {
     ? jsonPayload
     : (jsonPayload?.objects || []);
 
+  const persistedById = new Map();
+  rawObjects.forEach((raw) => {
+    if (!raw?.id) return;
+    if (!persistedById.has(raw.id)) persistedById.set(raw.id, []);
+    persistedById.get(raw.id).push(raw);
+  });
+
   loadedObjects.forEach((obj, index) => {
-    const persisted = rawObjects[index];
+    const positional = rawObjects[index];
+    const persisted = obj.id
+      ? persistedById.get(obj.id)?.shift()
+      : (positional && !positional.id ? positional : undefined);
     hydrateSkribeFabricObject(obj, persisted || obj);
     if (obj.isSkribeLine || obj.skribeLine) {
       if (typeof attachSkribeLineControls === 'function') {

@@ -22,7 +22,7 @@ import {
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
-import { captureCanvasHistory, diffCanvasHistory, restoreCanvasHistory } from '../../utils/canvasHistory.js';
+import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from '../../utils/canvasHistory.js';
 import { parseConnectorPath } from '../../features/messCleanup/connectorGeometry.js';
 import {
   hydrateSkribeFabricObject,
@@ -145,6 +145,7 @@ export const FabricCanvas = forwardRef(({
   const isHistoryProcessingRef = useRef(false);
   const isLoadingFromJSONRef = useRef(false);
   const isBulkOperationRef = useRef(false);
+  const idleWaitersRef = useRef([]);
 
   const onCanvasChangeRef = useRef(onCanvasChange);
   const onViewportChangeRef = useRef(onViewportChange);
@@ -222,13 +223,15 @@ export const FabricCanvas = forwardRef(({
     if (existingObj) return;
 
     try {
-      isRemoteOperationRef.current = true;
       const objData = JSON.parse(JSON.stringify(objectData));
       if ((objData.isStickyNote || objectData.isStickyNote || objectData.noteColor || (objectData.id && typeof objectData.id === 'string' && objectData.id.startsWith('shape_'))) && objData.fill && typeof objData.fill === 'object') {
         delete objData.fill;
       }
 
       const enlivened = await fabric.util.enlivenObjects([objData]);
+      await waitForCanvasIdle();
+      if (fabricCanvasRef.current !== canvas || findCanvasObjectById(canvas, targetId)) return;
+      isRemoteOperationRef.current = true;
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const obj = enlivened[0];
         hydrateSkribeFabricObject(obj, objectData);
@@ -351,13 +354,15 @@ export const FabricCanvas = forwardRef(({
     if (!existingObj) return;
 
     try {
-      isRemoteOperationRef.current = true;
       const objData = JSON.parse(JSON.stringify(objectData));
       if ((objData.isStickyNote || objectData.isStickyNote || objectData.noteColor || existingObj.isStickyNote || (existingObj.id && typeof existingObj.id === 'string' && existingObj.id.startsWith('shape_'))) && objData.fill && typeof objData.fill === 'object') {
         delete objData.fill;
       }
 
       const enlivened = await fabric.util.enlivenObjects([objData]);
+      await waitForCanvasIdle();
+      if (fabricCanvasRef.current !== canvas) return;
+      isRemoteOperationRef.current = true;
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const newObj = enlivened[0];
         hydrateSkribeFabricObject(existingObj, objectData);
@@ -512,6 +517,17 @@ export const FabricCanvas = forwardRef(({
     } finally {
       isRemoteOperationRef.current = false;
     }
+  };
+
+  const waitForCanvasIdle = () => (isHistoryProcessingRef.current || isLoadingFromJSONRef.current
+    ? new Promise((resolve) => idleWaitersRef.current.push(resolve))
+    : Promise.resolve());
+
+  const releaseIdleWaiters = () => {
+    if (isHistoryProcessingRef.current || isLoadingFromJSONRef.current) return;
+    const waiters = idleWaitersRef.current;
+    idleWaitersRef.current = [];
+    waiters.forEach((resolve) => resolve());
   };
 
   const notifyLocalObjectAdded = (obj) => {
@@ -1477,6 +1493,11 @@ export const FabricCanvas = forwardRef(({
 
     if (result && result.shape && animate && !isReducedMotion()) {
       const animState = { scale: 0.9, opacity: 0 };
+      const parts = [result.shape, result.textObj, result.timestampObj].filter(Boolean);
+      parts.forEach((part) => {
+        const serialize = part.toObject;
+        part.toObject = (properties) => ({ ...serialize.call(part, properties), opacity: 1, scaleX: 1, scaleY: 1 });
+      });
       result.shape.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
       result.textObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
       if (result.timestampObj) result.timestampObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
@@ -1493,6 +1514,9 @@ export const FabricCanvas = forwardRef(({
           result.textObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
           if (result.timestampObj) result.timestampObj.set({ scaleX: animState.scale, scaleY: animState.scale, opacity: animState.opacity });
           canvas.requestRenderAll();
+        },
+        complete: () => {
+          parts.forEach((part) => { delete part.toObject; });
         }
       });
     }
@@ -2597,10 +2621,10 @@ export const FabricCanvas = forwardRef(({
     applyRemoteObjectAdded: (data) => applyRemoteObjectAdded(data),
     applyRemotePathCreated: (data) => applyRemoteObjectAdded(data),
     applyRemoteObjectModified: (data) => applyRemoteObjectModified(data),
-    applyRemoteBatchObjectsModified: (data) => applyRemoteBatchObjectsModified(data),
+    applyRemoteBatchObjectsModified: (data) => waitForCanvasIdle().then(() => applyRemoteBatchObjectsModified(data)),
     applyRemoteObjectTransform: (data) => applyRemoteObjectTransform(data),
     applyRemoteDrawStream: (data) => applyRemoteDrawStream(data),
-    applyRemoteObjectRemoved: (data) => applyRemoteObjectRemoved(data),
+    applyRemoteObjectRemoved: (data) => waitForCanvasIdle().then(() => applyRemoteObjectRemoved(data)),
 
     getCanvas: () => fabricCanvasRef.current,
 
@@ -2715,19 +2739,24 @@ export const FabricCanvas = forwardRef(({
           if (callback) callback();
           return;
         }
-        Promise.resolve(canvas.loadFromJSON(jsonPayload)).then(() => {
-          hydrateCanvasObjects(canvas, jsonPayload);
+        canvas.skribeRetainedObjects = [];
+        loadCanvasTolerant(canvas, jsonPayload).then(({ payload, unrestorable }) => {
+          retainUnrestorable(canvas, unrestorable);
+          hydrateCanvasObjects(canvas, payload);
           finalizeLoadedObjects();
           canvas.requestRenderAll();
           undoStackRef.current = [captureCanvasHistory(canvas)];
           redoStackRef.current = [];
           if (onHistoryChange) onHistoryChange(false, false);
           isLoadingFromJSONRef.current = false;
-          if (callback) callback();
+          releaseIdleWaiters();
+          if (callback) callback({ unrestorableCount: unrestorable.length });
         }).catch((err) => {
           console.error('[FabricCanvas] loadFromJSON promise error:', err);
+          retainUnrestorable(canvas, jsonPayload.objects.map((data, index) => ({ index, data })));
           isLoadingFromJSONRef.current = false;
-          if (callback) callback();
+          releaseIdleWaiters();
+          if (callback) callback({ unrestorableCount: jsonPayload.objects.length });
         });
       } catch (err) {
         isLoadingFromJSONRef.current = false;
@@ -2741,7 +2770,7 @@ export const FabricCanvas = forwardRef(({
       if (!canvas) return { version: '6.5.1', objects: [] };
       return {
         version: canvas.version,
-        objects: canvas.getObjects().map(serializeFabricObject).filter(Boolean)
+        objects: mergeRetainedObjects(canvas.getObjects().map(serializeFabricObject).filter(Boolean), canvas.skribeRetainedObjects)
       };
     },
 
@@ -2749,10 +2778,11 @@ export const FabricCanvas = forwardRef(({
       const canvas = fabricCanvasRef.current;
       if (!canvas) return [];
       const wanted = Array.isArray(ids) ? new Set(ids) : null;
-      return canvas.getObjects()
+      const objects = canvas.getObjects()
         .filter((o) => !isTemporaryObject(o) && (!wanted || wanted.has(o.id)))
         .map(serializeFabricObject)
         .filter(Boolean);
+      return wanted ? objects : mergeRetainedObjects(objects, canvas.skribeRetainedObjects);
     },
 
     linkedObjectIds: (objectId) => {
@@ -3243,9 +3273,11 @@ export const FabricCanvas = forwardRef(({
         updateSelectionState();
         emitHistoryOperation('undo', beforeRestore);
         if (onCanvasChangeRef.current) onCanvasChangeRef.current();
+        releaseIdleWaiters();
       }).catch((err) => {
         console.error('[FabricCanvas] undo restore error:', err);
         isHistoryProcessingRef.current = false;
+        releaseIdleWaiters();
       });
     },
 
@@ -3292,9 +3324,11 @@ export const FabricCanvas = forwardRef(({
         updateSelectionState();
         emitHistoryOperation('redo', beforeRestore);
         if (onCanvasChangeRef.current) onCanvasChangeRef.current();
+        releaseIdleWaiters();
       }).catch((err) => {
         console.error('[FabricCanvas] redo restore error:', err);
         isHistoryProcessingRef.current = false;
+        releaseIdleWaiters();
       });
     }
   }));
