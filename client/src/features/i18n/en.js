@@ -303,5 +303,10 @@ export default {
   'icons.stroke.bold': 'Bold',
   'icons.add': 'Add to canvas',
   'icons.adding': 'Adding…',
-  'icons.sectionTitle': 'Icon'
+  'icons.sectionTitle': 'Icon',
+  'mobile.status': 'In development',
+  'mobile.title': 'Skribe Mobile is coming soon.',
+  'mobile.description': "We're working on bringing the full Skribe whiteboard experience to your mobile devices. A more flexible way to create, organise and collaborate, wherever you are.",
+  'mobile.desktopNote': 'For now, enjoy the full experience on desktop.',
+  'mobile.goToBoards': 'Go to Boards'
 };

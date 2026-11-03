@@ -303,5 +303,10 @@ export default {
   'icons.stroke.bold': 'मोटी',
   'icons.add': 'कैनवास पर जोड़ें',
   'icons.adding': 'जोड़ा जा रहा है…',
-  'icons.sectionTitle': 'आइकन'
+  'icons.sectionTitle': 'आइकन',
+  'mobile.status': 'विकास जारी है',
+  'mobile.title': 'Skribe Mobile जल्द आ रहा है।',
+  'mobile.description': 'हम Skribe व्हाइटबोर्ड का पूरा अनुभव आपके मोबाइल डिवाइस पर लाने पर काम कर रहे हैं। बनाने, व्यवस्थित करने और मिलकर काम करने का एक अधिक लचीला तरीका, आप जहाँ भी हों।',
+  'mobile.desktopNote': 'फ़िलहाल, पूरे अनुभव का आनंद डेस्कटॉप पर लें।',
+  'mobile.goToBoards': 'बोर्ड पर जाएँ'
 };
