@@ -389,6 +389,32 @@ test('with the protocol flag off, operations and revision-aware saves are refuse
   }
 });
 
+test('with the protocol flag off, a save based on an old revision is refused and changes nothing', needsMongo, async () => {
+  const boardId = await createBoard();
+  config.collabOperationsEnabled = false;
+  try {
+    const first = await boardService.updateBoard(boardId, ownerId, { ifRevision: 0, canvasData: { version: '7.4.0', objects: [shape('first')] } });
+    assert.equal(first.canvasRevision, 1);
+    const before = await stored(boardId);
+    await assert.rejects(
+      boardService.updateBoard(boardId, memberId, { ifRevision: 0, canvasData: { version: '7.4.0', objects: [shape('stale')] } }),
+      (err) => err.statusCode === 409 && err.code === 'CANVAS_CHANGED' && err.currentRevision === 1
+    );
+    assert.deepEqual((await stored(boardId)).canvasData, before.canvasData);
+    const refused = fakeResponse();
+    await boardController.update({ user: { id: ownerId.toString() }, params: { id: boardId }, body: { ifRevision: 0, canvasData: { version: '7.4.0', objects: [] } } }, refused, assert.fail);
+    assert.equal(refused.statusCode, 409);
+    assert.deepEqual(refused.body.errors, { code: 'CANVAS_CHANGED', currentRevision: 1 });
+    const current = await boardService.updateBoard(boardId, memberId, { ifRevision: 1, canvasData: { version: '7.4.0', objects: [shape('merged')] } });
+    assert.equal(current.canvasRevision, 2);
+    assert.equal((await stored(boardId)).lastOperationRevision, 0);
+    const oldClient = await boardService.updateBoard(boardId, ownerId, { canvasData: { version: '7.4.0', objects: [shape('old_client')] } });
+    assert.equal(oldClient.canvasRevision, 3);
+  } finally {
+    config.collabOperationsEnabled = true;
+  }
+});
+
 test('a revision-aware save also switches the board to revision-required saves', needsMongo, async () => {
   const boardId = await createBoard();
   await boardService.updateBoard(boardId, ownerId, { baseRevision: 0, canvasData: { version: '7.4.0', objects: [shape('shape_x')] } });

@@ -28,11 +28,15 @@ export const validateCreateBoard = (req, res, next) => {
 };
 
 export const validateUpdateBoard = (req, res, next) => {
-  const { title, canvasData, isArchived, thumbnail, baseRevision, canvasBackground } = req.body || {};
+  const { title, canvasData, isArchived, thumbnail, baseRevision, ifRevision, canvasBackground } = req.body || {};
   const validationErrors = {};
 
   if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || baseRevision < 0)) {
     validationErrors.baseRevision = 'baseRevision must be a non-negative integer';
+  }
+
+  if (ifRevision !== undefined && (!Number.isInteger(ifRevision) || ifRevision < 0)) {
+    validationErrors.ifRevision = 'ifRevision must be a non-negative integer';
   }
 
   if (title !== undefined && (typeof title !== 'string' || title.trim().length > 120)) {

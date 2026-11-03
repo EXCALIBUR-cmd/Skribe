@@ -118,9 +118,9 @@ export class BoardRepository {
       .exec();
   }
 
-  async saveLegacyCanvas(id, updateData, { requireLegacyBoard = true } = {}) {
+  async saveLegacyCanvas(id, updateData, { requireLegacyBoard = true, ifRevision } = {}) {
     return await Board.findOneAndUpdate(
-      requireLegacyBoard ? { _id: id, isDeleted: false, lastOperationRevision: { $in: [0, null] } } : { _id: id, isDeleted: false },
+      { ...(requireLegacyBoard ? { _id: id, isDeleted: false, lastOperationRevision: { $in: [0, null] } } : { _id: id, isDeleted: false }), ...(ifRevision === undefined ? {} : { canvasRevision: revisionMatch(ifRevision) }) },
       { $set: updateData, $inc: { canvasRevision: 1 } },
       { new: true, runValidators: true }
     )

@@ -1284,3 +1284,23 @@ test('legacy: a board joined before loading finishes resynchronises once it has 
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.deepEqual(client.objects.map((object) => object.id).sort(), ['base', 'theirs']);
 });
+
+test('legacy: a stale save is refused, merged with the newer board and retried without losing either side', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const board = { revision: 2, objects: [...clone(base), { id: 'theirs', left: 2 }] };
+  const bodies = [];
+  const b = legacyClient('B', () => ({ revision: board.revision, objects: clone(board.objects) }), base);
+  b.server.saveBoard = (client, body) => {
+    bodies.push(body.ifRevision);
+    if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED', currentRevision: board.revision };
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  b.objects.push({ id: 'mine', left: 3 });
+  const result = await b.controller.persist({ objects: clone(b.objects) });
+  assert.equal(result.ok, true);
+  assert.deepEqual(bodies, [1, 2]);
+  assert.deepEqual(board.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+  assert.deepEqual(b.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+});

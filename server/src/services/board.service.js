@@ -142,11 +142,12 @@ export class BoardService {
       err.code = 'REVISION_PROTOCOL_DISABLED';
       throw err;
     }
+    const ifRevision = !config.collabOperationsEnabled && Number.isInteger(payload.ifRevision) ? payload.ifRevision : undefined;
     const savedBoard = hasBaseRevision
       ? await boardRepository.saveCanvasAtRevision(boardId, payload.baseRevision, allowedUpdates)
       : config.collabOperationsEnabled
         ? null
-        : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: false });
+        : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: false, ifRevision });
     if (savedBoard) return savedBoard.toJSON();
 
     const latest = await boardRepository.findBoardRevision(boardId);
@@ -155,11 +156,11 @@ export class BoardService {
       err.statusCode = 404;
       throw err;
     }
-    const err = new Error(hasBaseRevision
+    const err = new Error(hasBaseRevision || ifRevision !== undefined
       ? 'The board changed since this version was loaded'
       : 'This board now requires revision-aware saves; reload it to continue');
     err.statusCode = 409;
-    err.code = hasBaseRevision ? 'STALE_REVISION' : 'REVISION_REQUIRED';
+    err.code = ifRevision !== undefined ? 'CANVAS_CHANGED' : hasBaseRevision ? 'STALE_REVISION' : 'REVISION_REQUIRED';
     err.currentRevision = latest.canvasRevision || 0;
     throw err;
   }

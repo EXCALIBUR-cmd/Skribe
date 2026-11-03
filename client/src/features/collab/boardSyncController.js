@@ -31,6 +31,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   dedupSafeRevisions: 150
 });
 
+const CANVAS_CHANGED = 'CANVAS_CHANGED';
 const STALE_CODES = new Set(['STALE_REVISION', 'REVISION_REQUIRED']);
 const REBUILD_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH']);
 const SAVE_INSTEAD_CODES = new Set(['INVALID_OPERATION', 'OPERATION_TOO_LARGE']);
@@ -320,7 +321,7 @@ export const createBoardSyncController = ({
       if (!data || !Array.isArray(data.objects)) return { ok: false, code: 'NO_CANVAS' };
       if (enabled === true && !hasLocalChanges(data.objects)) return { ok: true, skipped: true };
       const legacy = enabled !== true;
-      const result = await api.saveBoard(legacy ? { canvasData: data } : { canvasData: data, baseRevision: knownRevision });
+      const result = await api.saveBoard(legacy ? { canvasData: data, ifRevision: knownRevision } : { canvasData: data, baseRevision: knownRevision });
       if (result?.ok) {
         if (!legacy) enabled = true;
         recordSaved(data.objects, result.revision);
@@ -328,6 +329,10 @@ export const createBoardSyncController = ({
       }
       if (result?.code === 'REVISION_PROTOCOL_DISABLED') {
         enabled = false;
+        continue;
+      }
+      if (result?.code === CANVAS_CHANGED) {
+        await pullNow();
         continue;
       }
       if (STALE_CODES.has(result?.code)) {
@@ -516,7 +521,14 @@ export const createBoardSyncController = ({
   const persistFinal = async (legacyCanvasData) => {
     if (enabled !== true) {
       if (!legacyCanvasData || !Array.isArray(legacyCanvasData.objects)) return { ok: false, code: 'NO_CANVAS' };
-      const legacy = await api.saveBoard({ canvasData: legacyCanvasData });
+      let legacy = await api.saveBoard({ canvasData: legacyCanvasData, ifRevision: knownRevision });
+      if (legacy?.code === CANVAS_CHANGED) {
+        await pullNow().catch(() => {});
+        const merged = canvas.finalSnapshot?.() || canvas.snapshot();
+        if (!merged) return { ok: false, code: CANVAS_CHANGED };
+        legacy = await api.saveBoard({ canvasData: merged, ifRevision: knownRevision });
+      }
+      if (legacy?.ok) recordSaved(legacyCanvasData.objects, legacy.revision);
       return legacy?.ok ? { ok: true } : { ok: false, code: legacy?.code || 'SAVE_FAILED' };
     }
     const first = captureFinal();
