@@ -1,7 +1,24 @@
 import * as fabric from 'fabric';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 
-export const captureCanvasHistory = (canvas) => JSON.stringify(canvas.toObject([...SKRIBE_SERIALIZABLE_PROPERTIES]));
+export const captureCanvasHistory = (canvas, memo = null) => {
+  const properties = [...SKRIBE_SERIALIZABLE_PROPERTIES];
+  if (!memo || !Array.isArray(canvas._objects) || typeof canvas._toObject !== 'function') return JSON.stringify(canvas.toObject(properties));
+  const live = canvas._objects;
+  let shell;
+  canvas._objects = [];
+  try {
+    shell = canvas.toObject(properties);
+  } finally {
+    canvas._objects = live;
+  }
+  const { objects: emptied, ...rest } = shell;
+  const objects = live
+    .filter((object) => !object.excludeFromExport)
+    .map((object) => memo.read(object, () => canvas._toObject(object, 'toObject', properties), JSON.stringify));
+  const head = JSON.stringify(rest).slice(1, -1);
+  return `{${head ? `${head},` : ''}"objects":[${objects.join(',')}]}`;
+};
 
 export const loadCanvasTolerant = async (canvas, payload) => {
   const objects = Array.isArray(payload?.objects) ? payload.objects : [];

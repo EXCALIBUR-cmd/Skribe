@@ -4,6 +4,7 @@ import * as fabric from 'fabric';
 import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { playStickyEntrance } from './stickyEntrance.js';
+import { createSerializationMemo, isMemoizable } from './serializationMemo.js';
 import { createConnectorObject } from './connectorUtils.js';
 import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
@@ -289,4 +290,108 @@ test('A sticky fade with normal frames animates, serializes as visible throughou
     assert.equal(part.opacity, 1);
     assert.equal(Object.prototype.hasOwnProperty.call(part, 'toObject'), false);
   });
+});
+
+const memoCanvas = () => {
+  const canvas = new fabric.StaticCanvas(null, { width: 800, height: 600 });
+  const rect = new fabric.Rect({ left: 10, top: 20, width: 100, height: 50, fill: '#fff', metadata: { role: 'shape', note: 'a' }, id: 'memo_rect', elementId: 'el_1' });
+  const text = new fabric.Textbox('hello', { left: 30, top: 40, width: 120, id: 'memo_text', elementId: 'el_1', parentShapeId: 'memo_rect', metadata: { role: 'text' } });
+  const path = new fabric.Path('M 0 0 L 10 10', { left: 50, top: 50, id: 'memo_path', isConnector: true });
+  const group = new fabric.Group([new fabric.Rect({ width: 20, height: 20, fill: '#abc' }), new fabric.Rect({ left: 25, width: 20, height: 20, fill: '#cba' })], { id: 'memo_group' });
+  canvas.add(rect, text, path, group);
+  return { canvas, rect, text, path, group };
+};
+
+const assertMemoMatchesFresh = (canvas, memo, label) => {
+  const cached = JSON.parse(captureCanvasHistory(canvas, memo));
+  const fresh = JSON.parse(captureCanvasHistory(canvas));
+  assert.deepEqual(cached, fresh, label);
+};
+
+test('a memoized history capture always equals a fresh capture, whatever way an object was changed', () => {
+  const { canvas, rect, text, path, group } = memoCanvas();
+  const memo = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
+  assertMemoMatchesFresh(canvas, memo, 'first capture');
+  const changes = [
+    ['set()', () => rect.set({ left: 99 })],
+    ['direct property write', () => { rect.top = 77; }],
+    ['nested metadata in place', () => { rect.metadata.note = 'changed'; }],
+    ['property that did not exist before', () => { rect.attachedTextId = 'memo_text'; }],
+    ['text content', () => { text.text = 'changed text'; }],
+    ['per-character style', () => { text.styles = { 0: { 0: { fill: '#f00' } } }; }],
+    ['connector path in place', () => { path.path[1][1] = 55; }],
+    ['group child in place', () => { group.item(0).set({ fill: '#000' }); }],
+    ['group child metadata', () => { group.item(1).metadata = { role: 'x' }; }],
+    ['layer order', () => { canvas.bringObjectToFront(rect); }],
+    ['removed object', () => { canvas.remove(text); }]
+  ];
+  changes.forEach(([label, change]) => {
+    change();
+    assertMemoMatchesFresh(canvas, memo, label);
+  });
+});
+
+test('objects inside an active selection are serialized fresh and return to the memo once released', () => {
+  const { canvas, rect, text } = memoCanvas();
+  const memo = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
+  const produce = (object) => object.toObject(SKRIBE_SERIALIZABLE_PROPERTIES);
+  const first = memo.read(rect, () => produce(rect));
+  assert.equal(memo.read(rect, () => produce(rect)), first);
+  const selection = new fabric.ActiveSelection([rect, text], { canvas });
+  assert.equal(isMemoizable(rect), false);
+  assert.equal(isMemoizable(selection), false);
+  assert.notEqual(memo.read(rect, () => produce(rect)), first);
+  selection.removeAll();
+  assert.equal(isMemoizable(rect), true);
+});
+
+test('an unchanged object is not serialized again, and a changed one is', () => {
+  const { rect, text } = memoCanvas();
+  const memo = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
+  let produced = 0;
+  const read = (object) => memo.read(object, () => { produced += 1; return object.toObject(SKRIBE_SERIALIZABLE_PROPERTIES); });
+  const before = read(rect);
+  read(text);
+  assert.equal(produced, 2);
+  assert.equal(read(rect), before);
+  read(text);
+  assert.equal(produced, 2);
+  rect.left += 1;
+  assert.notEqual(read(rect), before);
+  assert.equal(produced, 3);
+});
+
+test('objects with a clip path or a gradient are never memoized', () => {
+  const clipped = new fabric.Rect({ width: 10, height: 10, clipPath: new fabric.Rect({ width: 5, height: 5 }) });
+  const painted = new fabric.Rect({ width: 10, height: 10, fill: new fabric.Gradient({ type: 'linear', colorStops: [{ offset: 0, color: '#000' }, { offset: 1, color: '#fff' }] }) });
+  assert.equal(isMemoizable(clipped), false);
+  assert.equal(isMemoizable(painted), false);
+  assert.equal(isMemoizable(new fabric.Rect({ width: 10, height: 10 })), true);
+});
+
+test('a value that cannot be read never breaks serialization and is simply serialized again', () => {
+  const { rect } = memoCanvas();
+  const memo = createSerializationMemo(['cyclic']);
+  const cycle = {};
+  cycle.self = cycle;
+  rect.cyclic = cycle;
+  let produced = 0;
+  const read = () => memo.read(rect, () => { produced += 1; return { id: rect.id }; });
+  read();
+  read();
+  assert.equal(produced, 2);
+});
+
+test('an image is serialized again when its source changes, even though its other values are the same', () => {
+  let source = 'https://ik.imagekit.io/x/one.png';
+  const image = { getSrc: () => source, left: 1, toObject() { return { left: this.left, src: source }; } };
+  const memo = createSerializationMemo([]);
+  let produced = 0;
+  const read = () => memo.read(image, () => { produced += 1; return image.toObject(); });
+  assert.equal(read().src, 'https://ik.imagekit.io/x/one.png');
+  read();
+  assert.equal(produced, 1);
+  source = 'https://ik.imagekit.io/x/two.png';
+  assert.equal(read().src, 'https://ik.imagekit.io/x/two.png');
+  assert.equal(produced, 2);
 });

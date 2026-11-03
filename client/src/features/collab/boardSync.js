@@ -47,7 +47,7 @@ const comparable = (object) => {
   return JSON.stringify(rest);
 };
 
-export const sameObject = (a, b) => Boolean(a && b) && comparable(a) === comparable(b);
+export const sameObject = (a, b) => Boolean(a && b) && (a === b || comparable(a) === comparable(b));
 
 export const indexObjects = (objects) => new Map(
   (Array.isArray(objects) ? objects : [])

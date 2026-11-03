@@ -1985,3 +1985,74 @@ test('legacy: a draft reuses the snapshot the page already took', () => {
   assert.deepEqual(pendingEntries(records)[0].op.upserts.map((upsert) => [upsert.id, upsert.data.left]), [['one', 240]]);
   first.controller.dispose();
 });
+
+test('edits made in one interaction and before an earlier save returns all reach the server once', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  a.stall = true;
+  const first = a.commit(patch('shape_a', { left: 301 }));
+  await wait(30);
+  a.edit(patch('shape_b', { left: 302 }));
+  a.edit(patch('shape_c', { left: 303 }));
+  const second = a.controller.submitLocalChanges();
+  await wait(20);
+  a.stall = false;
+  const held = a.stalled.shift();
+  held.resolve(server.operation(a, held.payload));
+  await Promise.all([first, second]);
+  await a.controller.idle();
+  assert.deepEqual(['shape_a', 'shape_b', 'shape_c'].map((id) => find(server.objects, id).left), [301, 302, 303]);
+  assert.equal(new Set(server.objects.map((object) => object.id)).size, server.objects.length);
+  a.controller.dispose();
+});
+
+test('a shared snapshot object is never written to by a later edit or by acknowledgement', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const frozen = (objects) => objects.map((object) => Object.freeze(object));
+  a.objects = frozen(a.objects);
+  await a.commit((objects) => objects.map((object) => (object.id === 'shape_a' ? Object.freeze({ ...object, left: 305 }) : object)));
+  await a.commit((objects) => [...objects].reverse());
+  assert.equal(find(server.objects, 'shape_a').left, 305);
+  a.controller.dispose();
+});
+
+test('an edit made while recovery is pending is kept and both changes reach the server', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const dead = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  dead.edit(patch('shape_a', { left: 306 }));
+  dead.controller.noteLocalChange();
+  killTab(dead, store);
+  const reopened = createClient('A2', server, { foreignJournalAgeMs: 0 }, { journalStore: store, instanceId: 'inst_a2' });
+  const recovering = reopened.controller.recoverPending();
+  reopened.edit(patch('shape_b', { left: 307 }));
+  reopened.controller.noteLocalChange();
+  const saving = reopened.controller.submitLocalChanges();
+  await Promise.all([recovering, saving]);
+  await reopened.controller.idle();
+  assert.equal(find(server.objects, 'shape_a').left, 306);
+  assert.equal(find(server.objects, 'shape_b').left, 307);
+  assert.deepEqual(Object.keys(store.records), []);
+  reopened.controller.dispose();
+});
+
+test('a change noted while the board is loading is not journaled or sent and cannot erase the board', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const revision = server.revision;
+  const objects = clone(server.objects);
+  a.controller.load({ revision, objects, enabled: true });
+  a.objects = [];
+  a.controller.noteLocalChange([]);
+  assert.deepEqual(pendingEntries(store), []);
+  assert.equal(server.revision, revision);
+  a.objects = clone(objects);
+  a.controller.markLoaded();
+  a.edit(patch('shape_a', { left: 308 }));
+  await a.controller.submitLocalChanges();
+  assert.equal(find(server.objects, 'shape_a').left, 308);
+  assert.equal(server.objects.length, objects.length);
+  a.controller.dispose();
+});

@@ -1465,7 +1465,7 @@ export const MainCanvasPage = () => {
         penConfig={penConfig}
         onZoomChange={(newZoom) => setZoom(newZoom)}
         onViewportChange={handleViewportChange}
-        onSelectionChange={(props) => setSelectedProps(props)}
+        onSelectionChange={(props) => setSelectedProps((current) => (JSON.stringify(current) === JSON.stringify(props) ? current : props))}
         onToolComplete={() => setActiveTool('select')}
         onContextMenu={(pos) => setContextMenuPos(pos)}
         onHistoryChange={(undoable, redoable) => {

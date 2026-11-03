@@ -30,6 +30,7 @@ import {
   hydrateCanvasObjects,
   SKRIBE_SERIALIZABLE_PROPERTIES
 } from '../../utils/fabricHydration.js';
+import { createSerializationMemo } from '../../utils/serializationMemo.js';
 import { resolveElementLinks, serializeCanvasObject, isTimestampObject, isTextObject, longestIncreasingIndices } from '../../utils/boardNormalization.js';
 import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/cleanupTypes.js';
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
@@ -99,6 +100,12 @@ export const FabricCanvas = forwardRef(({
 }, ref) => {
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
+  const syncMemoRef = useRef(null);
+  if (!syncMemoRef.current) syncMemoRef.current = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
+  const historyMemoRef = useRef(null);
+  if (!historyMemoRef.current) historyMemoRef.current = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
+  const captureHistory = (canvas) => captureCanvasHistory(canvas, historyMemoRef.current);
+  const typingAttachRef = useRef(new WeakMap());
   const containerRef = useRef(null);
   const { preferences } = usePreferences();
   const canvasPrefsRef = useRef(preferences);
@@ -182,19 +189,23 @@ export const FabricCanvas = forwardRef(({
     });
   };
 
-  const serializeFabricObject = (obj) => {
+  const serializeFabricObject = (obj, knownIndex = null) => {
     if (!obj || typeof obj.toJSON !== 'function') return null;
     ensureObjectId(obj);
     const canvas = fabricCanvasRef.current;
-    const data = serializeCanvasObject(canvas, obj, SKRIBE_SERIALIZABLE_PROPERTIES);
+    const memo = syncMemoRef.current;
+    const data = memo.read(obj, () => serializeCanvasObject(canvas, obj, SKRIBE_SERIALIZABLE_PROPERTIES));
+    if (!canvas || !data) return data;
+    const index = knownIndex ?? canvas.getObjects().indexOf(obj);
+    if (index === -1 || data.stackIndex === index) return data;
+    return memo.replace(obj, { ...data, stackIndex: index });
+  };
 
-    if (canvas && data) {
-      const idx = canvas.getObjects().indexOf(obj);
-      if (idx !== -1) {
-        data.stackIndex = idx;
-      }
-    }
-
+  const serializeForExport = (obj, index) => {
+    if (!obj || typeof obj.toJSON !== 'function') return null;
+    ensureObjectId(obj);
+    const data = serializeCanvasObject(fabricCanvasRef.current, obj, SKRIBE_SERIALIZABLE_PROPERTIES);
+    if (data) data.stackIndex = index;
     return data;
   };
 
@@ -1221,7 +1232,7 @@ export const FabricCanvas = forwardRef(({
   const restartHistoryFromCanvas = () => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
-    undoStackRef.current = [captureCanvasHistory(canvas)];
+    undoStackRef.current = [captureHistory(canvas)];
     redoStackRef.current = [];
     if (onHistoryChange) onHistoryChange(false, false);
   };
@@ -1229,7 +1240,7 @@ export const FabricCanvas = forwardRef(({
   const broadcastCanvasChanges = (beforeSnapshot) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !beforeSnapshot) return;
-    const { added, modified, removed } = diffCanvasHistory(beforeSnapshot, captureCanvasHistory(canvas));
+    const { added, modified, removed } = diffCanvasHistory(beforeSnapshot, captureHistory(canvas));
     const liveById = new Map(canvas.getObjects().filter((o) => !isTemporaryObject(o)).map((o) => [o.id, o]));
     added.forEach((id) => { if (liveById.has(id)) notifyLocalObjectAdded(liveById.get(id)); });
     modified.forEach((id) => { if (liveById.has(id)) notifyLocalObjectModified(liveById.get(id)); });
@@ -1266,7 +1277,7 @@ export const FabricCanvas = forwardRef(({
     console.log('[BOARD SAVE DEBUG] Canvas change detected');
     console.log('[BOARD SAVE DEBUG] Object count:', canvasObjects.length);
 
-    const json = captureCanvasHistory(canvas);
+    const json = captureHistory(canvas);
     const stack = undoStackRef.current;
     if (stack.length === 0 || stack[stack.length - 1] !== json) {
       stack.push(json);
@@ -2562,7 +2573,7 @@ export const FabricCanvas = forwardRef(({
     }
 
     try {
-      const beforeApply = captureCanvasHistory(canvas);
+      const beforeApply = captureHistory(canvas);
       isBulkOperationRef.current = true;
       const result = applyCleanup(canvas, layoutProposal, workspaceModel);
 
@@ -2720,7 +2731,7 @@ export const FabricCanvas = forwardRef(({
           hydrateCanvasObjects(canvas, payload);
           finalizeLoadedObjects();
           canvas.requestRenderAll();
-          undoStackRef.current = [captureCanvasHistory(canvas)];
+          undoStackRef.current = [captureHistory(canvas)];
           redoStackRef.current = [];
           if (onHistoryChange) onHistoryChange(false, false);
           isLoadingFromJSONRef.current = false;
@@ -2745,7 +2756,7 @@ export const FabricCanvas = forwardRef(({
       if (!canvas) return { version: '6.5.1', objects: [] };
       return {
         version: canvas.version,
-        objects: mergeRetainedObjects(canvas.getObjects().map(serializeFabricObject).filter(Boolean), canvas.skribeRetainedObjects)
+        objects: mergeRetainedObjects(canvas.getObjects().map(serializeForExport).filter(Boolean), canvas.skribeRetainedObjects)
       };
     },
 
@@ -2753,10 +2764,12 @@ export const FabricCanvas = forwardRef(({
       const canvas = fabricCanvasRef.current;
       if (!canvas) return [];
       const wanted = Array.isArray(ids) ? new Set(ids) : null;
-      const objects = canvas.getObjects()
-        .filter((o) => !isTemporaryObject(o) && (!wanted || wanted.has(o.id)))
-        .map(serializeFabricObject)
-        .filter(Boolean);
+      const objects = [];
+      canvas.getObjects().forEach((o, index) => {
+        if (isTemporaryObject(o) || (wanted && !wanted.has(o.id))) return;
+        const data = serializeFabricObject(o, index);
+        if (data) objects.push(data);
+      });
       return wanted ? objects : mergeRetainedObjects(objects, canvas.skribeRetainedObjects);
     },
 
@@ -2889,7 +2902,7 @@ export const FabricCanvas = forwardRef(({
         }
         finalizeLoadedObjects(fresh);
         canvas.requestRenderAll();
-        const current = captureCanvasHistory(canvas);
+        const current = captureHistory(canvas);
         undoStackRef.current = undoObjects ? [JSON.stringify({ version: canvas.version, objects: undoObjects }), current] : [current];
         redoStackRef.current = [];
         if (onHistoryChange) onHistoryChange(undoStackRef.current.length > 1, false);
@@ -3227,7 +3240,7 @@ export const FabricCanvas = forwardRef(({
       const activeObj = canvas.getActiveObject();
       const selectedObjectId = activeObj?.id || activeObj?.elementId;
 
-      const beforeRestore = captureCanvasHistory(canvas);
+      const beforeRestore = captureHistory(canvas);
       isHistoryProcessingRef.current = true;
       const currentState = undoStack.pop();
       redoStack.push(currentState);
@@ -3279,7 +3292,7 @@ export const FabricCanvas = forwardRef(({
       const activeObj = canvas.getActiveObject();
       const selectedObjectId = activeObj?.id || activeObj?.elementId;
 
-      const beforeRestore = captureCanvasHistory(canvas);
+      const beforeRestore = captureHistory(canvas);
       isHistoryProcessingRef.current = true;
       const nextState = redoStack.pop();
       undoStack.push(nextState);
@@ -3621,7 +3634,7 @@ export const FabricCanvas = forwardRef(({
       }
     };
 
-    const handleObjectChange = (opt) => {
+    const handleObjectChange = (opt, typing = false) => {
       const target = opt ? opt.target : null;
       if (!target || target.isTemporaryDrawPath) return;
 
@@ -3668,7 +3681,10 @@ export const FabricCanvas = forwardRef(({
 
         if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') {
           if (!obj.parentShapeId) {
-            tryAttachTextToShape(obj);
+            const center = obj.getCenterPoint();
+            const place = `${center.x},${center.y}`;
+            if (!typing || typingAttachRef.current.get(obj) !== place) tryAttachTextToShape(obj);
+            typingAttachRef.current.set(obj, place);
           }
         }
 
@@ -4124,8 +4140,8 @@ export const FabricCanvas = forwardRef(({
       handleObjectScaling(opt);
       handleObjectChange(opt);
     });
-    canvas.on('text:changed', handleObjectChange);
-    canvas.on('editing:exited', handleObjectChange);
+    canvas.on('text:changed', (opt) => handleObjectChange(opt, true));
+    canvas.on('editing:exited', (opt) => handleObjectChange(opt));
     canvas.on('selection:created', handleSelectionHighlight);
     canvas.on('selection:updated', handleSelectionHighlight);
     canvas.on('selection:cleared', () => {
