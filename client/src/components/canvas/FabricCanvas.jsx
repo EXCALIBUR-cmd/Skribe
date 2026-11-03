@@ -1424,7 +1424,7 @@ export const FabricCanvas = forwardRef(({
     return text;
   };
 
-  const addSticky = (pos = null, initialText = '', customColor = null, textColor = null) => {
+  const addSticky = (pos = null, initialText = '', customColor = null, textColor = null, animate = true) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
@@ -1475,7 +1475,7 @@ export const FabricCanvas = forwardRef(({
 
     const result = createLinkedElement(stickyShape, text, x, y, Number(randomAngle), timestampObj);
 
-    if (result && result.shape && !isReducedMotion()) {
+    if (result && result.shape && animate && !isReducedMotion()) {
       const animState = { scale: 0.9, opacity: 0 };
       result.shape.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
       result.textObj.set({ scaleX: 0.9, scaleY: 0.9, opacity: 0 });
@@ -2969,7 +2969,7 @@ export const FabricCanvas = forwardRef(({
         if (!item || typeof item.text !== 'string' || !item.text.trim()) return;
         const position = { x: center.x + (Number(item.dx) || 0), y: center.y + (Number(item.dy) || 0) };
         if (item.kind === 'sticky') {
-          const result = addSticky(position, item.text.trim(), item.color || '#fff3a0');
+          const result = addSticky(position, item.text.trim(), item.color || '#fff3a0', null, false);
           if (result?.shape) created.push(result.shape.id);
         } else if (item.kind === 'header') {
           const result = addRoundedRect(position, item.text.trim(), {});
