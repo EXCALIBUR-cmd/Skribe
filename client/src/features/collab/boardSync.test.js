@@ -61,7 +61,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
     snapshot: () => (client.detached ? null : { version: '7.4.0', objects: clone(client.objects) }),
     prepare: async (objects) => {
       if (onPrepare) await onPrepare(objects);
-      return new Map(objects.map((object) => [object.id, clone(object)]));
+      return new Map(objects.map((object) => [object.id, client.unpreparable?.includes(object.id) ? null : clone(object)]));
     },
     applyMerge: (merge) => {
       merge.changedIds.forEach((id) => assert.ok(merge.prepared.has(id), `unprepared ${id}`));
@@ -97,6 +97,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
     notify: (kind, detail) => {
       if (kind === 'conflict') client.conflicts.push(...detail.ids);
       if (kind === 'sync-error') client.syncErrors.push(detail.code);
+      if (kind === 'unrestorable') client.unrestorable = detail.count;
       if (kind === 'synced') client.synced = (client.synced || 0) + 1;
       if (kind === 'recovered') client.recoveries.push(detail);
     },
@@ -1303,4 +1304,124 @@ test('legacy: a stale save is refused, merged with the newer board and retried w
   assert.deepEqual(bodies, [1, 2]);
   assert.deepEqual(board.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
   assert.deepEqual(b.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+});
+
+const legacyWithJournal = (records, getBoard, base, instanceId) => {
+  const client = createClient('B', createServer(), {}, { getBoard, journalStore: records, instanceId });
+  client.objects = clone(base);
+  client.controller.load({ revision: 1, objects: clone(base), enabled: false });
+  client.controller.markLoaded();
+  return client;
+};
+
+test('legacy: the final save after leaving merges a conflict from its captured snapshot', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const board = { revision: 2, objects: [...clone(base), { id: 'theirs', left: 2 }] };
+  const b = legacyClient('B', () => ({ revision: board.revision, objects: clone(board.objects) }), base);
+  b.server.saveBoard = (client, body) => {
+    if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED' };
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  const live = { version: '7', objects: [...clone(base), { id: 'mine', left: 3 }] };
+  b.objects = [];
+  b.detached = true;
+  const result = await b.controller.persist(live, { final: true });
+  assert.equal(result.ok, true);
+  assert.deepEqual(board.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+});
+
+test('legacy: a final save that fails is kept and recovered on the next load', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const board = { revision: 2, objects: [...clone(base), { id: 'theirs', left: 2 }] };
+  const records = { records: {} };
+  const getBoard = () => ({ revision: board.revision, objects: clone(board.objects) });
+  const first = legacyWithJournal(records, getBoard, base, 'first');
+  first.saveFails = true;
+  const failed = await first.controller.persist({ version: '7', objects: [...clone(base), { id: 'mine', left: 3 }] }, { final: true });
+  assert.equal(failed.ok, false);
+  assert.equal(Object.keys(records.records).length, 1);
+  const next = legacyWithJournal(records, getBoard, clone(board.objects), 'second');
+  next.server.saveBoard = (client, body) => {
+    if (body.ifRevision !== board.revision) return { ok: false, code: 'CANVAS_CHANGED' };
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  const summary = await next.controller.recoverPending();
+  assert.equal(summary.recovered, 1);
+  assert.deepEqual(board.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+  assert.deepEqual(next.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+  assert.equal(next.recoveries.length, 1);
+  assert.equal(Object.keys(records.records).length, 0);
+});
+
+test('legacy: unloading with unsaved work keeps a snapshot and sends a revision-checked save', () => {
+  const base = [{ id: 'base', left: 1 }];
+  const records = { records: {} };
+  const b = legacyWithJournal(records, () => ({ revision: 1, objects: clone(base) }), base, 'unload');
+  const sent = [];
+  b.server.saveBoard = (client, body) => { sent.push(body); return { ok: true, revision: 2 }; };
+  b.objects.push({ id: 'mine', left: 3 });
+  assert.equal(b.controller.flushOnUnload(), true);
+  assert.equal(sent[0].ifRevision, 1);
+  assert.equal(Object.keys(records.records).length, 1);
+});
+
+test('legacy: a remote edit to an object with unsaved local changes reports a conflict, and only then', () => {
+  const base = [{ id: 'one', left: 1 }, { id: 'two', left: 2 }];
+  const b = legacyClient('B', () => ({ revision: 1, objects: clone(base) }), base);
+  b.controller.noteRemoteEdit(['one']);
+  assert.deepEqual(b.conflicts, []);
+  b.objects[0].left = 50;
+  b.controller.noteRemoteEdit(['two']);
+  assert.deepEqual(b.conflicts, []);
+  b.controller.noteRemoteEdit(['one']);
+  assert.deepEqual(b.conflicts, ['one']);
+});
+
+test('an object that cannot be prepared does not stop a merge or block valid objects', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const theirs = [...base, { id: 'good', left: 2 }, { id: 'bad', left: 3 }];
+  const b = legacyClient('B', () => ({ revision: 2, objects: clone(theirs) }), base);
+  b.unpreparable = ['bad'];
+  await b.controller.reconnect();
+  assert.ok(b.objects.some((object) => object.id === 'good'));
+  assert.equal(b.unrestorable, 1);
+  assert.equal(b.syncErrors.length, 0);
+  assert.equal(b.controller.getState().knownRevision, 2);
+});
+
+test('an acknowledged edit replaced by a collaborator soon after reports a conflict, and other objects do not', async () => {
+  const server = createServer();
+  const a = createClient('A', server);
+  const b = createClient('B', server);
+  const [first, second] = a.objects;
+  a.objects[0].left = 500;
+  await a.controller.submitLocalChanges();
+  await settle(a, b);
+  b.objects.find((object) => object.id === second.id).left = 600;
+  await b.controller.submitLocalChanges();
+  await settle(a, b);
+  assert.deepEqual(a.conflicts, []);
+  b.objects.find((object) => object.id === first.id).left = 700;
+  await b.controller.submitLocalChanges();
+  await settle(a, b);
+  assert.deepEqual(a.conflicts, [first.id]);
+  assert.deepEqual(a.objects, server.objects);
+});
+
+test('legacy: a kept snapshot that differs only in stacking order is not reported as recovered work', async () => {
+  const base = [{ id: 'one', left: 1 }, { id: 'two', left: 2 }];
+  const records = { records: {} };
+  const getBoard = () => ({ revision: 1, objects: clone(base) });
+  const first = legacyWithJournal(records, getBoard, base, 'first');
+  first.objects.reverse();
+  assert.equal(first.controller.flushOnUnload(), true);
+  const next = legacyWithJournal(records, getBoard, base, 'second');
+  const summary = await next.controller.recoverPending();
+  assert.equal(summary.recovered, 0);
+  assert.equal(next.recoveries.length, 0);
+  assert.equal(Object.keys(records.records).length, 0);
 });

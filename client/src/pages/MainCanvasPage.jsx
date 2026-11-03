@@ -377,6 +377,8 @@ export const MainCanvasPage = () => {
                 addToast('Edit conflict', `${detail.ids.length} of your changes overlapped with a collaborator's edits. Your version was kept; press Undo to restore theirs.`, 'sync_problem', 'info');
               } else if (kind === 'conflict' && detail.orderConflict) {
                 addToast('Layer order conflict', 'You and a collaborator both changed the layer order. Your order was kept.', 'sync_problem', 'info');
+              } else if (kind === 'unrestorable') {
+                addToast('Some items could not be shown', `${detail.count} item${detail.count === 1 ? '' : 's'} from a collaborator could not be displayed. They are kept safe and will not be lost when you save.`, 'warning', 'warning');
               } else if (kind === 'sync-error') {
                 setSaveStatus('error');
               } else if (kind === 'recovered') {
@@ -540,6 +542,7 @@ export const MainCanvasPage = () => {
 
     const handleRemoteObjectModified = ({ boardId: id, objectId, objectData }) => {
       if (id === boardId && fabricCanvasRef.current) {
+        syncControllerRef.current?.noteRemoteEdit([objectId || objectData?.id]);
         acceptRemote(fabricCanvasRef.current.applyRemoteObjectModified({ objectId, objectData }), [objectId || objectData?.id]);
       }
     };
@@ -734,6 +737,7 @@ export const MainCanvasPage = () => {
         navigator.sendBeacon(`/api/v1/boards/${boardId}/viewport`, viewportBlob);
       }
       const controller = syncControllerRef.current;
+      if (controller?.boardId === boardId && !controller.isEnabled()) controller.flushOnUnload();
       if (controller?.boardId === boardId && controller.isEnabled()) {
         controller.flushOnUnload();
         if (!controller.canRecover() && controller.hasUnsavedWork()) {

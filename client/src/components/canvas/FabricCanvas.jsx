@@ -2816,9 +2816,16 @@ export const FabricCanvas = forwardRef(({
         if ((copy.isStickyNote || copy.noteColor) && copy.fill && typeof copy.fill === 'object') delete copy.fill;
         return copy;
       });
-      const created = await fabric.util.enlivenObjects(copies);
+      const created = await Promise.all(copies.map((copy) => fabric.util.enlivenObjects([copy]).then(([object]) => object, () => null)));
       created.forEach((object, index) => {
         const data = copies[index];
+        if (!object) {
+          const canvas = fabricCanvasRef.current;
+          canvas.skribeRetainedObjects = (canvas.skribeRetainedObjects || []).filter((entry) => entry.data?.id !== data.id);
+          retainUnrestorable(canvas, [{ index: Number.MAX_SAFE_INTEGER, data: objectsData[index] }]);
+          prepared.set(data.id, null);
+          return;
+        }
         hydrateSkribeFabricObject(object, data);
         object.id = data.id;
         ensureObjectId(object);
@@ -2844,6 +2851,13 @@ export const FabricCanvas = forwardRef(({
       try {
         const live = new Map(canvas.getObjects().map((o) => [o.id, o]));
         const fresh = changedIds.map((id) => prepared.get(id)).filter(Boolean);
+        const settled = new Set([...removedIds, ...fresh.map((object) => object.id)]);
+        canvas.skribeRetainedObjects = (canvas.skribeRetainedObjects || [])
+          .filter((entry) => !settled.has(entry.data?.id))
+          .map((entry) => {
+            const at = objects.findIndex((data) => data.id === entry.data?.id);
+            return at === -1 ? entry : { ...entry, index: at };
+          });
         const touched = new Set([...changedIds, ...removedIds]);
         const groupIds = new Set([...fresh, ...[...touched].map((id) => live.get(id))].map((o) => o?.elementId).filter(Boolean));
         const groupMemberIds = new Set(canvas.getObjects().filter((o) => o.elementId && groupIds.has(o.elementId)).map((o) => o.id));
