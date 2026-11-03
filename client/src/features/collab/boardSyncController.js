@@ -56,6 +56,7 @@ export const createBoardSyncController = ({
 }) => {
   const settings = { ...DEFAULT_OPTIONS, ...options };
   let enabled = null;
+  let resyncAfterLoad = false;
   let knownRevision = 0;
   let baseRaw = [];
   let baseLocal = null;
@@ -270,7 +271,7 @@ export const createBoardSyncController = ({
   };
 
   const receiveRevision = (event) => {
-    if (disposed || enabled !== true || !event || !Number.isInteger(event.revision) || event.revision <= knownRevision) return;
+    if (disposed || !event || !Number.isInteger(event.revision) || event.revision <= knownRevision) return;
     pullTarget = Math.max(pullTarget, event.revision);
     if (pullTimer) return;
     pullTimer = timers.setTimeout(() => {
@@ -312,6 +313,7 @@ export const createBoardSyncController = ({
   };
 
   const persistNow = async (canvasData) => {
+    if (enabled !== true && socket.isConnected?.() === false) await pullNow().catch(() => {});
     for (let attempt = 0; attempt < settings.maxSaveAttempts; attempt += 1) {
       if (disposed) return { ok: false, code: 'DISPOSED' };
       const data = canvas.snapshot() || (attempt === 0 ? canvasData : null);
@@ -452,7 +454,16 @@ export const createBoardSyncController = ({
   };
 
   const reconnect = async () => {
-    if (disposed || enabled !== true) return;
+    if (disposed) return;
+    if (baseLocal === null) {
+      resyncAfterLoad = true;
+      return;
+    }
+    if (enabled !== true) {
+      await pull();
+      if (!disposed && hasLocalChanges(canvas.serialize())) requestSave();
+      return;
+    }
     await pull();
     await recoverPending();
     if (!disposed && hasLocalChanges(canvas.serialize())) await submitLocalChanges();
@@ -723,7 +734,7 @@ export const createBoardSyncController = ({
   };
 
   const acceptRemoteObjects = (ids) => {
-    if (disposed || enabled !== true || baseLocal === null) return;
+    if (disposed || baseLocal === null) return;
     baseLocal = acceptObjects({ base: baseLocal, current: canvas.serialize(), ids });
   };
 
@@ -745,7 +756,12 @@ export const createBoardSyncController = ({
   };
 
   const markLoaded = () => {
-    if (!disposed) baseLocal = canvas.serialize();
+    if (disposed) return;
+    baseLocal = canvas.serialize();
+    if (resyncAfterLoad) {
+      resyncAfterLoad = false;
+      reconnect();
+    }
   };
 
   const isEnabled = () => !disposed && enabled === true;

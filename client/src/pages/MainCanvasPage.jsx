@@ -617,12 +617,18 @@ export const MainCanvasPage = () => {
       boardSync()?.reconnect();
     };
 
+    const handleBoardJoined = (event) => {
+      if (event?.boardId === boardId) boardSync()?.reconnect();
+    };
+
+    socketService.on('board-joined', handleBoardJoined);
     socketService.on('canvas:op-committed', handleRemoteOperation);
     socketService.on('board:revision', handleRemoteRevision);
     socketService.on('disconnect', handleSocketDisconnect);
     socketService.on('connect', handleSocketReconnect);
 
     return () => {
+      socketService.off('board-joined', handleBoardJoined);
       socketService.off('canvas:op-committed', handleRemoteOperation);
       socketService.off('board:revision', handleRemoteRevision);
       socketService.off('disconnect', handleSocketDisconnect);

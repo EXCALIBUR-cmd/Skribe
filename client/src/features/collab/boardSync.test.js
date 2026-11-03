@@ -1231,3 +1231,56 @@ test('recovery that meets a disconnected socket keeps every entry for later inst
   assert.equal(find(server.objects, 'shape_a').left, 141);
   reloaded.controller.dispose();
 });
+
+const legacyClient = (name, serverBoard, baseObjects) => {
+  const client = createClient(name, createServer(), {}, { getBoard: () => serverBoard() });
+  client.objects = clone(baseObjects);
+  client.controller.load({ revision: 1, objects: clone(baseObjects), enabled: false });
+  client.controller.markLoaded();
+  return client;
+};
+
+test('legacy: reconnecting merges edits missed while offline without losing local work', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const theirs = [...base, { id: 'theirs', left: 2 }];
+  const b = legacyClient('B', () => ({ revision: 2, objects: clone(theirs) }), base);
+  b.objects.push({ id: 'mine', left: 3 });
+  await b.controller.reconnect();
+  assert.deepEqual(b.objects.map((object) => object.id).sort(), ['base', 'mine', 'theirs']);
+  assert.equal(b.saveRequests, 1);
+});
+
+test('legacy: a save made while the socket is down merges first, so it cannot erase newer work', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const theirs = [...base, { id: 'theirs', left: 2 }];
+  const saved = [];
+  const b = legacyClient('B', () => ({ revision: 2, objects: clone(theirs) }), base);
+  b.server.saveBoard = (client, body) => { saved.push(body.canvasData.objects.map((object) => object.id)); return { ok: true, revision: 3 }; };
+  b.connected = false;
+  b.objects.push({ id: 'mine', left: 3 });
+  const result = await b.controller.persist({ objects: clone(b.objects) });
+  assert.equal(result.ok, true);
+  assert.deepEqual(saved[0].sort(), ['base', 'mine', 'theirs']);
+});
+
+test('legacy: another session saving triggers a merge instead of leaving this session stale', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const theirs = [...base, { id: 'theirs', left: 2 }];
+  const b = legacyClient('B', () => ({ revision: 2, objects: clone(theirs) }), base);
+  b.controller.receiveRevision({ revision: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(b.objects.map((object) => object.id).sort(), ['base', 'theirs']);
+});
+
+test('legacy: a board joined before loading finishes resynchronises once it has loaded', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const theirs = [...base, { id: 'theirs', left: 2 }];
+  const client = createClient('B', createServer(), {}, { getBoard: () => ({ revision: 2, objects: clone(theirs) }) });
+  client.objects = clone(base);
+  client.controller.load({ revision: 1, objects: clone(base), enabled: false });
+  await client.controller.reconnect();
+  assert.deepEqual(client.objects.map((object) => object.id), ['base']);
+  client.controller.markLoaded();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(client.objects.map((object) => object.id).sort(), ['base', 'theirs']);
+});
