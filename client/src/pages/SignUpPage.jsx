@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import SignUpIllustration from '../components/auth/SignUpIllustration';
 
 export const SignUpPage = () => {
   const { user, register } = useAuth();
@@ -76,11 +77,8 @@ export const SignUpPage = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-secondary-container/20 blur-3xl z-0 pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary-container/10 blur-3xl z-0 pointer-events-none"></div>
 
-      <div className="absolute top-20 right-32 w-24 h-24 bg-tertiary-fixed rounded-lg shadow-md -rotate-6 z-0 hidden md:flex items-center justify-center pointer-events-none">
-        <span className="material-symbols-outlined text-on-tertiary-container opacity-50" style={{ fontSize: '32px' }}>edit</span>
-      </div>
-
-      <main className="relative z-10 w-full max-w-md bg-surface rounded-xl shadow-xl border-2 border-outline/20 p-8 md:p-12">
+      <div className="relative z-10 w-full max-w-md lg:max-w-5xl flex flex-col lg:flex-row items-center gap-4 lg:gap-10">
+      <main className="w-full max-w-md lg:shrink-0 bg-surface rounded-xl shadow-xl border-2 border-outline/20 p-8 md:p-12">
         <div className="text-center mb-8">
           <Link to="/" className="inline-block">
             <h1 className="font-display text-display text-primary italic tracking-tighter mb-2">Skribe</h1>
@@ -216,6 +214,8 @@ export const SignUpPage = () => {
           </Link>
         </p>
       </main>
+      <SignUpIllustration />
+      </div>
     </div>
   );
 };
