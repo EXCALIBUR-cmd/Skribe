@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
-import { restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
+import { applyHistoryEntry, conflictHistoryState, createHistoryEntry, rebaseHistoryState, serializeHistoryState, restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { playStickyEntrance } from './stickyEntrance.js';
 import { createSerializationMemo, isMemoizable } from './serializationMemo.js';
@@ -557,4 +557,180 @@ test('a restored object is not served stale from the cache on the next edit', as
   restored.set({ left: 82 });
   assert.equal(JSON.parse(captureCanvasHistory(canvas, memo)).objects.find((object) => object.id === 'u_shape').left, 82);
   assertRestored(canvas, memo, captureCanvasHistory(canvas), 'edit after restore');
+});
+
+const historyState = (objects, head = '"version":"7"') => ({
+  head,
+  keys: objects.map((object) => `${object.id}#0`),
+  strings: objects.map((object) => JSON.stringify(object))
+});
+const shapeA = { id: 'a', left: 10, top: 10, fill: 'red' };
+const shapeB = { id: 'b', left: 50, top: 50, fill: 'blue' };
+const shapeC = { id: 'c', left: 90, top: 90, fill: 'green' };
+const objectsOf = (state) => JSON.parse(serializeHistoryState(state)).objects;
+const byId = (snapshot, id) => objectsOf(snapshot).find((object) => object.id === id);
+
+test('undo reverses a local edit and keeps an independent remote edit, and redo reapplies it', () => {
+  const start = historyState([shapeA, shapeB]);
+  const edited = historyState([{ ...shapeA, left: 200 }, shapeB]);
+  const entry = createHistoryEntry(start, edited);
+  const live = historyState([{ ...shapeA, left: 200 }, { ...shapeB, top: 500 }]);
+  const undone = applyHistoryEntry(live, entry, 'undo');
+  assert.equal(byId(undone, 'a').left, 10);
+  assert.equal(byId(undone, 'b').top, 500);
+  const redone = applyHistoryEntry(historyState(objectsOf(undone)), entry, 'redo');
+  assert.equal(byId(redone, 'a').left, 200);
+  assert.equal(byId(redone, 'b').top, 500);
+});
+
+test('a remote change is never part of the next local history entry', () => {
+  const start = historyState([shapeA, shapeB]);
+  const afterRemote = historyState([shapeA, { ...shapeB, top: 500 }]);
+  const base = rebaseHistoryState(start, start, afterRemote);
+  assert.equal(createHistoryEntry(base, afterRemote), null);
+  const entry = createHistoryEntry(base, historyState([{ ...shapeA, left: 1 }, { ...shapeB, top: 500 }]));
+  assert.deepEqual(entry.changes.map((change) => change.key), ['a#0']);
+});
+
+test('a remote change applied during a local gesture leaves the gesture in history', () => {
+  const base = historyState([shapeA, shapeB]);
+  const before = historyState([{ ...shapeA, left: 77 }, shapeB]);
+  const after = historyState([{ ...shapeA, left: 77 }, { ...shapeB, top: 500 }]);
+  const entry = createHistoryEntry(rebaseHistoryState(base, before, after), after);
+  assert.deepEqual(entry.changes.map((change) => change.key), ['a#0']);
+});
+
+test('remote previews are absorbed and do not hide a local layer change', () => {
+  const base = historyState([shapeA, shapeB]);
+  const current = historyState([{ ...shapeB, left: 5 }, shapeA]);
+  const entry = createHistoryEntry(rebaseHistoryState(base, current, current, new Set(['b#0'])), current);
+  assert.deepEqual(entry.changes, []);
+  assert.deepEqual(entry.order.before, ['a#0', 'b#0']);
+});
+
+test('a same-field conflict keeps the newer remote value and a different field still merges', () => {
+  const entry = createHistoryEntry(historyState([shapeA]), historyState([{ ...shapeA, left: 200 }]));
+  assert.equal(applyHistoryEntry(historyState([{ ...shapeA, left: 999 }]), entry, 'undo'), null);
+  const merged = applyHistoryEntry(historyState([{ ...shapeA, left: 200, fill: 'pink' }]), entry, 'undo');
+  assert.deepEqual([byId(merged, 'a').left, byId(merged, 'a').fill], [10, 'pink']);
+  assert.equal(applyHistoryEntry(historyState([{ ...shapeA, left: 999 }]), entry, 'redo'), null);
+});
+
+test('a blocked undo stays blocked on redo, so the remote value survives both', () => {
+  const entry = createHistoryEntry(historyState([shapeA]), historyState([{ ...shapeA, left: 200, top: 300 }]));
+  const live = historyState([{ ...shapeA, left: 200, top: 622 }]);
+  assert.equal(applyHistoryEntry(live, entry, 'undo'), null);
+  assert.equal(applyHistoryEntry(live, entry, 'redo'), null);
+});
+
+test('undoing a local create removes it, but a remotely edited create is kept', () => {
+  const entry = createHistoryEntry(historyState([shapeA]), historyState([shapeA, shapeB]));
+  const undone = applyHistoryEntry(historyState([{ ...shapeA, left: 3 }, shapeB]), entry, 'undo');
+  assert.deepEqual(objectsOf(undone).map((object) => object.id), ['a']);
+  assert.equal(byId(undone, 'a').left, 3);
+  assert.equal(applyHistoryEntry(historyState([shapeA, { ...shapeB, top: 1 }]), entry, 'undo'), null);
+});
+
+test('undoing a local delete restores the object in place between remote changes', () => {
+  const entry = createHistoryEntry(historyState([shapeA, shapeB, shapeC]), historyState([shapeA, shapeC]));
+  const undone = applyHistoryEntry(historyState([shapeA, { id: 'n', left: 1 }, { ...shapeC, top: 7 }]), entry, 'undo');
+  const ids = objectsOf(undone).map((object) => object.id);
+  assert.deepEqual([...ids].sort(), ['a', 'b', 'c', 'n']);
+  assert.ok(ids.indexOf('a') < ids.indexOf('b') && ids.indexOf('b') < ids.indexOf('c'));
+  assert.equal(byId(undone, 'c').top, 7);
+  const redone = applyHistoryEntry(historyState(objectsOf(undone)), entry, 'redo');
+  assert.deepEqual(objectsOf(redone).map((object) => object.id), ['a', 'n', 'c']);
+});
+
+test('an object a collaborator deleted is not brought back by undo', () => {
+  const entry = createHistoryEntry(historyState([shapeA, shapeB]), historyState([{ ...shapeA, left: 200 }, shapeB]));
+  assert.equal(applyHistoryEntry(historyState([shapeB]), entry, 'undo'), null);
+});
+
+test('linked objects move together: a conflict on one member blocks the whole linked set', () => {
+  const shape = { id: 's', left: 0, top: 0, attachedTextId: 't' };
+  const text = { id: 't', left: 0, top: 0, parentShapeId: 's' };
+  const connector = { id: 'k', left: 0, top: 0, sourceShapeId: 's', targetShapeId: 'x' };
+  const other = { id: 'o', left: 0, top: 0 };
+  const moved = (object) => ({ ...object, left: 100 });
+  const entry = createHistoryEntry(historyState([shape, text, connector, other]), historyState([shape, text, connector, other].map(moved)));
+  const undone = applyHistoryEntry(historyState([moved(shape), { ...moved(text), left: 555 }, moved(connector), moved(other)]), entry, 'undo');
+  assert.equal(byId(undone, 's').left, 100);
+  assert.equal(byId(undone, 't').left, 555);
+  assert.equal(byId(undone, 'k').left, 100);
+  assert.equal(byId(undone, 'o').left, 0);
+});
+
+test('a remote edit to a label does not block undoing the move of its shape', () => {
+  const shape = { id: 's', left: 0, attachedTextId: 't' };
+  const text = { id: 't', left: 0, parentShapeId: 's', text: 'old' };
+  const entry = createHistoryEntry(historyState([shape, text]), historyState([{ ...shape, left: 100 }, { ...text, left: 100 }]));
+  const undone = applyHistoryEntry(historyState([{ ...shape, left: 100 }, { ...text, left: 100, text: 'new' }]), entry, 'undo');
+  assert.deepEqual([byId(undone, 's').left, byId(undone, 't').left, byId(undone, 't').text], [0, 0, 'new']);
+});
+
+test('a linked object is not restored when the shape it needs was removed by a collaborator', () => {
+  const connector = { id: 'k', sourceShapeId: 's', targetShapeId: 'o' };
+  const shape = { id: 's' };
+  const other = { id: 'o' };
+  const entry = createHistoryEntry(historyState([shape, other, connector]), historyState([shape, other]));
+  assert.equal(applyHistoryEntry(historyState([other]), entry, 'undo'), null);
+  assert.deepEqual(objectsOf(applyHistoryEntry(historyState([shape, other]), entry, 'undo')).map((object) => object.id), ['s', 'o', 'k']);
+});
+
+test('layer order reverses without losing remote additions, and a remote reorder is not overwritten', () => {
+  const entry = createHistoryEntry(historyState([shapeA, shapeB, shapeC]), historyState([shapeC, shapeA, shapeB]));
+  const ids = objectsOf(applyHistoryEntry(historyState([shapeC, { id: 'n' }, shapeA, shapeB]), entry, 'undo')).map((object) => object.id);
+  assert.deepEqual(ids.filter((id) => id !== 'n'), ['a', 'b', 'c']);
+  assert.ok(ids.includes('n'));
+  assert.equal(applyHistoryEntry(historyState([shapeB, shapeC, shapeA]), entry, 'undo'), null);
+});
+
+test('a canvas-level change reverses only when no collaborator changed it since', () => {
+  const entry = createHistoryEntry(historyState([shapeA], '"background":"a"'), historyState([shapeA], '"background":"b"'));
+  assert.equal(JSON.parse(serializeHistoryState(applyHistoryEntry(historyState([shapeA], '"background":"b"'), entry, 'undo'))).background, 'a');
+  assert.equal(applyHistoryEntry(historyState([shapeA], '"background":"z"'), entry, 'undo'), null);
+});
+
+test('objects with duplicate ids stay separate in history entries', () => {
+  const state = (first, second) => ({ head: '', keys: ['d#0', 'd#1'], strings: [JSON.stringify({ id: 'd', left: first }), JSON.stringify({ id: 'd', left: second })] });
+  const entry = createHistoryEntry(state(1, 2), state(1, 9));
+  assert.deepEqual(entry.changes.map((change) => change.key), ['d#1']);
+  assert.deepEqual(objectsOf(applyHistoryEntry(state(1, 9), entry, 'undo')).map((object) => object.left), [1, 2]);
+});
+
+test('an edit conflict undo restores the collaborator version only for conflicted objects', () => {
+  const mine = { ...shapeA, left: 1 };
+  const other = { ...shapeB };
+  const current = historyState([mine, other]);
+  const entry = createHistoryEntry(conflictHistoryState([{ ...shapeA, left: 2 }, other], [mine, other], current), current);
+  assert.deepEqual(entry.changes.map((change) => change.key), ['a#0']);
+  assert.equal(byId(applyHistoryEntry(current, entry, 'undo'), 'a').left, 2);
+});
+
+test('serialized history state is a valid snapshot', () => {
+  assert.deepEqual(JSON.parse(serializeHistoryState(historyState([shapeA]))), { version: '7', objects: [shapeA] });
+});
+
+test('undoing a create a collaborator already removed still reverses the rest of the action', () => {
+  const label = { ...shapeC, parentShapeId: 'b' };
+  const entry = createHistoryEntry(historyState([shapeB]), historyState([{ ...shapeB, left: 1 }, label]));
+  const undone = applyHistoryEntry(historyState([{ ...shapeB, left: 1 }]), entry, 'undo');
+  assert.equal(byId(undone, 'b').left, 50);
+  assert.equal(byId(undone, 'c'), undefined);
+});
+
+test('undo removes a field the action added while keeping a remote edit to another field', () => {
+  const entry = createHistoryEntry(historyState([shapeA]), historyState([{ ...shapeA, tag: 'mine' }]));
+  const undone = applyHistoryEntry(historyState([{ ...shapeA, tag: 'mine', top: 500 }]), entry, 'undo');
+  assert.equal('tag' in byId(undone, 'a'), false);
+  assert.equal(byId(undone, 'a').top, 500);
+});
+
+test('a remote layer reorder is absorbed into the history base and stays out of the next entry', () => {
+  const start = historyState([shapeA, shapeB]);
+  const reordered = historyState([shapeB, shapeA]);
+  const base = rebaseHistoryState(start, start, reordered);
+  assert.deepEqual(base.keys, ['b#0', 'a#0']);
+  assert.equal(createHistoryEntry(base, reordered), null);
 });

@@ -23,7 +23,7 @@ import {
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
 import { playStickyEntrance } from '../../utils/stickyEntrance.js';
-import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreHistoryIncrementally, retainUnrestorable } from '../../utils/canvasHistory.js';
+import { applyHistoryEntry, captureCanvasHistory, captureHistoryState, conflictHistoryState, createHistoryEntry, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, rebaseHistoryState, restoreHistoryIncrementally, retainUnrestorable, serializeHistoryState } from '../../utils/canvasHistory.js';
 import { parseConnectorPath } from '../../features/messCleanup/connectorGeometry.js';
 import {
   hydrateSkribeFabricObject,
@@ -105,6 +105,30 @@ export const FabricCanvas = forwardRef(({
   const historyMemoRef = useRef(null);
   if (!historyMemoRef.current) historyMemoRef.current = createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES);
   const captureHistory = (canvas) => captureCanvasHistory(canvas, historyMemoRef.current);
+  const captureState = (canvas) => captureHistoryState(canvas, historyMemoRef.current);
+  const resetHistoryFromCanvas = (canvas) => {
+    historyBaseRef.current = captureState(canvas);
+    remotePreviewKeysRef.current.clear();
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+  };
+  const beginRemoteHistory = () => {
+    isRemoteOperationRef.current = true;
+    const canvas = fabricCanvasRef.current;
+    remoteBeforeRef.current = canvas ? captureState(canvas) : null;
+  };
+  const finishRemoteHistory = () => {
+    isRemoteOperationRef.current = false;
+    const canvas = fabricCanvasRef.current;
+    const before = remoteBeforeRef.current;
+    remoteBeforeRef.current = null;
+    if (!canvas || !before) return;
+    const after = captureState(canvas);
+    historyBaseRef.current = historyBaseRef.current
+      ? rebaseHistoryState(historyBaseRef.current, before, after, remotePreviewKeysRef.current)
+      : after;
+    remotePreviewKeysRef.current.clear();
+  };
   const typingAttachRef = useRef(new WeakMap());
   const containerRef = useRef(null);
   const { preferences } = usePreferences();
@@ -150,6 +174,9 @@ export const FabricCanvas = forwardRef(({
 
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
+  const historyBaseRef = useRef(null);
+  const remoteBeforeRef = useRef(null);
+  const remotePreviewKeysRef = useRef(new Set());
   const isHistoryProcessingRef = useRef(false);
   const isLoadingFromJSONRef = useRef(false);
   const isBulkOperationRef = useRef(false);
@@ -243,7 +270,7 @@ export const FabricCanvas = forwardRef(({
       const enlivened = await fabric.util.enlivenObjects([objData]);
       await waitForCanvasIdle();
       if (fabricCanvasRef.current !== canvas || findCanvasObjectById(canvas, targetId)) return;
-      isRemoteOperationRef.current = true;
+      beginRemoteHistory();
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const obj = enlivened[0];
         hydrateSkribeFabricObject(obj, objectData);
@@ -300,8 +327,7 @@ export const FabricCanvas = forwardRef(({
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectAdded error:', err);
     } finally {
-      isRemoteOperationRef.current = false;
-      restartHistoryFromCanvas();
+      finishRemoteHistory();
     }
   };
 
@@ -374,7 +400,7 @@ export const FabricCanvas = forwardRef(({
       const enlivened = await fabric.util.enlivenObjects([objData]);
       await waitForCanvasIdle();
       if (fabricCanvasRef.current !== canvas) return;
-      isRemoteOperationRef.current = true;
+      beginRemoteHistory();
       if (Array.isArray(enlivened) && enlivened.length > 0) {
         const newObj = enlivened[0];
         hydrateSkribeFabricObject(existingObj, objectData);
@@ -460,8 +486,7 @@ export const FabricCanvas = forwardRef(({
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectModified error:', err);
     } finally {
-      isRemoteOperationRef.current = false;
-      restartHistoryFromCanvas();
+      finishRemoteHistory();
     }
   };
 
@@ -470,7 +495,7 @@ export const FabricCanvas = forwardRef(({
     if (!canvas || !Array.isArray(changes)) return;
 
     try {
-      isRemoteOperationRef.current = true;
+      beginRemoteHistory();
       changes.forEach((change) => {
         if (!change || !change.objectId || !change.newGeometry) return;
         const existingObj = findCanvasObjectById(canvas, change.objectId);
@@ -497,8 +522,7 @@ export const FabricCanvas = forwardRef(({
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteBatchObjectsModified error:', err);
     } finally {
-      isRemoteOperationRef.current = false;
-      restartHistoryFromCanvas();
+      finishRemoteHistory();
     }
   };
 
@@ -523,6 +547,12 @@ export const FabricCanvas = forwardRef(({
       existingObj.set({ dirty: true });
       existingObj.setCoords();
       syncLinkedPosition({ target: existingObj });
+      const linkTokens = new Set([objectId, existingObj.elementId, existingObj.attachedTextId, existingObj.parentShapeId].filter(Boolean));
+      canvas.getObjects().forEach((o) => {
+        if (o.id && [o.id, o.elementId, o.attachedTextId, o.parentShapeId, o.sourceShapeId, o.targetShapeId].some((token) => token && linkTokens.has(token))) {
+          remotePreviewKeysRef.current.add(`${o.id}#0`);
+        }
+      });
       canvas.requestRenderAll();
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectTransform error:', err);
@@ -1229,17 +1259,9 @@ export const FabricCanvas = forwardRef(({
       .join('\n');
   };
 
-  const restartHistoryFromCanvas = () => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-    undoStackRef.current = [captureHistory(canvas)];
-    redoStackRef.current = [];
-    if (onHistoryChange) onHistoryChange(false, false);
-  };
-
   const broadcastCanvasChanges = (beforeSnapshot, knownDiff = null) => {
     const canvas = fabricCanvasRef.current;
-    if (!canvas || !beforeSnapshot) return;
+    if (!canvas || (!beforeSnapshot && !knownDiff)) return;
     const { added, modified, removed } = knownDiff || diffCanvasHistory(beforeSnapshot, captureHistory(canvas));
     const liveById = new Map(canvas.getObjects().filter((o) => !isTemporaryObject(o)).map((o) => [o.id, o]));
     added.forEach((id) => { if (liveById.has(id)) notifyLocalObjectAdded(liveById.get(id)); });
@@ -1277,14 +1299,21 @@ export const FabricCanvas = forwardRef(({
     console.log('[BOARD SAVE DEBUG] Canvas change detected');
     console.log('[BOARD SAVE DEBUG] Object count:', canvasObjects.length);
 
-    const json = captureHistory(canvas);
+    const current = captureState(canvas);
     const stack = undoStackRef.current;
-    if (stack.length === 0 || stack[stack.length - 1] !== json) {
-      stack.push(json);
-      if (stack.length > 30) stack.shift();
-      redoStackRef.current = [];
-      if (onHistoryChange) {
-        onHistoryChange(stack.length > 1, false);
+    const previous = historyBaseRef.current;
+    const base = previous && remotePreviewKeysRef.current.size > 0
+      ? rebaseHistoryState(previous, current, current, remotePreviewKeysRef.current)
+      : previous;
+    remotePreviewKeysRef.current.clear();
+    const entry = base ? createHistoryEntry(base, current) : null;
+    historyBaseRef.current = current;
+    if (!base || entry) {
+      if (entry) {
+        stack.push(entry);
+        if (stack.length > 30) stack.shift();
+        redoStackRef.current = [];
+        if (onHistoryChange) onHistoryChange(true, false);
       }
       if (!isLoadingFromJSONRef.current && onCanvasChangeRef.current) {
         console.log('[BOARD SAVE DEBUG] Notifying MainCanvasPage (isLoadingFromJSON=false)');
@@ -1295,6 +1324,81 @@ export const FabricCanvas = forwardRef(({
     } else {
       console.log('[BOARD SAVE DEBUG] State unchanged — skipping notification');
     }
+  };
+
+  const stepHistory = (kind) => {
+    const canvas = fabricCanvasRef.current;
+    const source = kind === 'undo' ? undoStackRef.current : redoStackRef.current;
+    const target = kind === 'undo' ? redoStackRef.current : undoStackRef.current;
+    if (!canvas || isHistoryProcessingRef.current || isLoadingFromJSONRef.current || source.length === 0) return;
+
+    const activeObj = canvas.getActiveObject();
+    const selectedObjectId = activeObj?.id || activeObj?.elementId;
+    isHistoryProcessingRef.current = true;
+    canvas.discardActiveObject();
+
+    const live = captureState(canvas);
+    let step = null;
+    while (!step && source.length > 0) {
+      const entry = source.pop();
+      target.push(entry);
+      step = applyHistoryEntry(live, entry, kind);
+    }
+    const notifyHistory = () => {
+      if (onHistoryChange) onHistoryChange(undoStackRef.current.length > 0, redoStackRef.current.length > 0);
+    };
+    if (!step) {
+      isHistoryProcessingRef.current = false;
+      if (activeObj && selectedObjectId) {
+        const kept = canvas.getObjects().find((o) => o.id === selectedObjectId || o.elementId === selectedObjectId);
+        if (kept) canvas.setActiveObject(kept);
+      }
+      canvas.requestRenderAll();
+      notifyHistory();
+      updateSelectionState();
+      releaseIdleWaiters();
+      return;
+    }
+
+    restoreHistoryIncrementally(canvas, step, historyMemoRef.current, live).then(({ objects: allObjects, fresh, diff }) => {
+      (fresh || allObjects).forEach((o) => {
+        ensureObjectId(o);
+        if (o.isStickyNote) {
+          const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
+          o.noteColor = paperColor;
+          o.set('fill', createRuledPaperFill(paperColor));
+        }
+      });
+
+      let restoredObj = null;
+      if (selectedObjectId) {
+        restoredObj = allObjects.find(
+          (o) => (o.id && o.id === selectedObjectId) || (o.elementId && o.elementId === selectedObjectId)
+        );
+      }
+
+      if (restoredObj) {
+        canvas.setActiveObject(restoredObj);
+      } else {
+        canvas.discardActiveObject();
+      }
+
+      canvas.requestRenderAll();
+      historyBaseRef.current = captureState(canvas);
+      remotePreviewKeysRef.current.clear();
+      isHistoryProcessingRef.current = false;
+      notifyHistory();
+      updateSelectionState();
+      emitHistoryOperation(kind, diff ? null : serializeHistoryState(live), diff);
+      if (onCanvasChangeRef.current) onCanvasChangeRef.current();
+      releaseIdleWaiters();
+    }).catch((err) => {
+      console.error(`[FabricCanvas] ${kind} restore error:`, err);
+      historyBaseRef.current = captureState(canvas);
+      isHistoryProcessingRef.current = false;
+      notifyHistory();
+      releaseIdleWaiters();
+    });
   };
 
   const getViewportCenterPoint = (canvas) => {
@@ -2529,7 +2633,7 @@ export const FabricCanvas = forwardRef(({
     if (idsToRemove.size === 0) return;
 
     try {
-      isRemoteOperationRef.current = true;
+      beginRemoteHistory();
       const allObjects = canvas.getObjects();
       const targets = allObjects.filter((o) =>
         idsToRemove.has(o.id) ||
@@ -2557,8 +2661,7 @@ export const FabricCanvas = forwardRef(({
     } catch (err) {
       console.error('[FabricCanvas] applyRemoteObjectRemoved error:', err);
     } finally {
-      isRemoteOperationRef.current = false;
-      restartHistoryFromCanvas();
+      finishRemoteHistory();
     }
   };
 
@@ -2731,8 +2834,7 @@ export const FabricCanvas = forwardRef(({
           hydrateCanvasObjects(canvas, payload);
           finalizeLoadedObjects();
           canvas.requestRenderAll();
-          undoStackRef.current = [captureHistory(canvas)];
-          redoStackRef.current = [];
+          resetHistoryFromCanvas(canvas);
           if (onHistoryChange) onHistoryChange(false, false);
           isLoadingFromJSONRef.current = false;
           releaseIdleWaiters();
@@ -2837,6 +2939,7 @@ export const FabricCanvas = forwardRef(({
       if (!canvas) return false;
       isLoadingFromJSONRef.current = true;
       try {
+        const mergeBefore = captureState(canvas);
         const live = new Map(canvas.getObjects().map((o) => [o.id, o]));
         const fresh = changedIds.map((id) => prepared.get(id)).filter(Boolean);
         const settled = new Set([...removedIds, ...fresh.map((object) => object.id)]);
@@ -2902,10 +3005,18 @@ export const FabricCanvas = forwardRef(({
         }
         finalizeLoadedObjects(fresh);
         canvas.requestRenderAll();
-        const current = captureHistory(canvas);
-        undoStackRef.current = undoObjects ? [JSON.stringify({ version: canvas.version, objects: undoObjects }), current] : [current];
-        redoStackRef.current = [];
-        if (onHistoryChange) onHistoryChange(undoStackRef.current.length > 1, false);
+        const current = captureState(canvas);
+        historyBaseRef.current = historyBaseRef.current
+          ? rebaseHistoryState(historyBaseRef.current, mergeBefore, current, remotePreviewKeysRef.current)
+          : current;
+        remotePreviewKeysRef.current.clear();
+        const conflictEntry = undoObjects ? createHistoryEntry(conflictHistoryState(undoObjects, objects, current), current) : null;
+        if (conflictEntry) {
+          undoStackRef.current.push(conflictEntry);
+          if (undoStackRef.current.length > 30) undoStackRef.current.shift();
+          redoStackRef.current = [];
+        }
+        if (onHistoryChange) onHistoryChange(undoStackRef.current.length > 0, redoStackRef.current.length > 0);
         updateSelectionState();
         return true;
       } finally {
@@ -3231,108 +3342,9 @@ export const FabricCanvas = forwardRef(({
       saveState();
     },
 
-    undo: () => {
-      const canvas = fabricCanvasRef.current;
-      const undoStack = undoStackRef.current;
-      const redoStack = redoStackRef.current;
-      if (!canvas || isHistoryProcessingRef.current || isLoadingFromJSONRef.current || undoStack.length <= 1) return;
+    undo: () => stepHistory('undo'),
 
-      const activeObj = canvas.getActiveObject();
-      const selectedObjectId = activeObj?.id || activeObj?.elementId;
-
-      const beforeRestore = captureHistory(canvas);
-      isHistoryProcessingRef.current = true;
-      const currentState = undoStack.pop();
-      redoStack.push(currentState);
-
-      const previousState = undoStack[undoStack.length - 1];
-      restoreHistoryIncrementally(canvas, previousState, historyMemoRef.current).then(({ objects: allObjects, fresh, diff }) => {
-        (fresh || allObjects).forEach((o) => {
-          ensureObjectId(o);
-          if (o.isStickyNote) {
-            const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
-            o.noteColor = paperColor;
-            o.set('fill', createRuledPaperFill(paperColor));
-          }
-        });
-
-        let restoredObj = null;
-        if (selectedObjectId) {
-          restoredObj = allObjects.find(
-            (o) => (o.id && o.id === selectedObjectId) || (o.elementId && o.elementId === selectedObjectId)
-          );
-        }
-
-        if (restoredObj) {
-          canvas.setActiveObject(restoredObj);
-        } else {
-          canvas.discardActiveObject();
-        }
-
-        canvas.requestRenderAll();
-        isHistoryProcessingRef.current = false;
-        if (onHistoryChange) onHistoryChange(undoStack.length > 1, true);
-        updateSelectionState();
-        emitHistoryOperation('undo', beforeRestore, diff);
-        if (onCanvasChangeRef.current) onCanvasChangeRef.current();
-        releaseIdleWaiters();
-      }).catch((err) => {
-        console.error('[FabricCanvas] undo restore error:', err);
-        isHistoryProcessingRef.current = false;
-        releaseIdleWaiters();
-      });
-    },
-
-    redo: () => {
-      const canvas = fabricCanvasRef.current;
-      const undoStack = undoStackRef.current;
-      const redoStack = redoStackRef.current;
-      if (!canvas || isHistoryProcessingRef.current || isLoadingFromJSONRef.current || redoStack.length === 0) return;
-
-      const activeObj = canvas.getActiveObject();
-      const selectedObjectId = activeObj?.id || activeObj?.elementId;
-
-      const beforeRestore = captureHistory(canvas);
-      isHistoryProcessingRef.current = true;
-      const nextState = redoStack.pop();
-      undoStack.push(nextState);
-
-      restoreHistoryIncrementally(canvas, nextState, historyMemoRef.current).then(({ objects: allObjects, fresh, diff }) => {
-        (fresh || allObjects).forEach((o) => {
-          ensureObjectId(o);
-          if (o.isStickyNote) {
-            const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
-            o.noteColor = paperColor;
-            o.set('fill', createRuledPaperFill(paperColor));
-          }
-        });
-
-        let restoredObj = null;
-        if (selectedObjectId) {
-          restoredObj = allObjects.find(
-            (o) => (o.id && o.id === selectedObjectId) || (o.elementId && o.elementId === selectedObjectId)
-          );
-        }
-
-        if (restoredObj) {
-          canvas.setActiveObject(restoredObj);
-        } else {
-          canvas.discardActiveObject();
-        }
-
-        canvas.requestRenderAll();
-        isHistoryProcessingRef.current = false;
-        if (onHistoryChange) onHistoryChange(true, redoStack.length > 0);
-        updateSelectionState();
-        emitHistoryOperation('redo', beforeRestore, diff);
-        if (onCanvasChangeRef.current) onCanvasChangeRef.current();
-        releaseIdleWaiters();
-      }).catch((err) => {
-        console.error('[FabricCanvas] redo restore error:', err);
-        isHistoryProcessingRef.current = false;
-        releaseIdleWaiters();
-      });
-    }
+    redo: () => stepHistory('redo')
   }));
 
   useEffect(() => {
