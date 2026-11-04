@@ -155,6 +155,18 @@ export const hydrateSkribeFabricObject = (fabricObj, persistedData) => {
   return prepareIconObject(fabricObj);
 };
 
+export const hydrateRestoredObject = (obj, persisted) => {
+  hydrateSkribeFabricObject(obj, persisted);
+  if (obj.isSkribeLine || obj.skribeLine) {
+    if (typeof attachSkribeLineControls === 'function') {
+      attachSkribeLineControls(obj);
+    }
+    if (typeof syncSkribeLineToFabric === 'function' && obj.skribeLine) {
+      syncSkribeLineToFabric(obj);
+    }
+  }
+};
+
 export const hydrateCanvasObjects = (canvas, jsonPayload) => {
   if (!canvas || typeof canvas.getObjects !== 'function') return [];
   const loadedObjects = canvas.getObjects();
@@ -174,15 +186,7 @@ export const hydrateCanvasObjects = (canvas, jsonPayload) => {
     const persisted = obj.id
       ? persistedById.get(obj.id)?.shift()
       : (positional && !positional.id ? positional : undefined);
-    hydrateSkribeFabricObject(obj, persisted || obj);
-    if (obj.isSkribeLine || obj.skribeLine) {
-      if (typeof attachSkribeLineControls === 'function') {
-        attachSkribeLineControls(obj);
-      }
-      if (typeof syncSkribeLineToFabric === 'function' && obj.skribeLine) {
-        syncSkribeLineToFabric(obj);
-      }
-    }
+    hydrateRestoredObject(obj, persisted || obj);
   });
 
   return loadedObjects;

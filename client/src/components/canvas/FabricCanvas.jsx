@@ -23,7 +23,7 @@ import {
 import eraserManager from '../../utils/EraserManager';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
 import { playStickyEntrance } from '../../utils/stickyEntrance.js';
-import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from '../../utils/canvasHistory.js';
+import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreHistoryIncrementally, retainUnrestorable } from '../../utils/canvasHistory.js';
 import { parseConnectorPath } from '../../features/messCleanup/connectorGeometry.js';
 import {
   hydrateSkribeFabricObject,
@@ -1237,10 +1237,10 @@ export const FabricCanvas = forwardRef(({
     if (onHistoryChange) onHistoryChange(false, false);
   };
 
-  const broadcastCanvasChanges = (beforeSnapshot) => {
+  const broadcastCanvasChanges = (beforeSnapshot, knownDiff = null) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !beforeSnapshot) return;
-    const { added, modified, removed } = diffCanvasHistory(beforeSnapshot, captureHistory(canvas));
+    const { added, modified, removed } = knownDiff || diffCanvasHistory(beforeSnapshot, captureHistory(canvas));
     const liveById = new Map(canvas.getObjects().filter((o) => !isTemporaryObject(o)).map((o) => [o.id, o]));
     added.forEach((id) => { if (liveById.has(id)) notifyLocalObjectAdded(liveById.get(id)); });
     modified.forEach((id) => { if (liveById.has(id)) notifyLocalObjectModified(liveById.get(id)); });
@@ -1248,8 +1248,8 @@ export const FabricCanvas = forwardRef(({
     if (removable.length > 0) notifyLocalObjectRemoved(removable);
   };
 
-  const emitHistoryOperation = (kind, beforeSnapshot) => {
-    const legacyBroadcast = () => broadcastCanvasChanges(beforeSnapshot);
+  const emitHistoryOperation = (kind, beforeSnapshot, knownDiff = null) => {
+    const legacyBroadcast = () => broadcastCanvasChanges(beforeSnapshot, knownDiff);
     if (onLocalHistoryOperationRef.current) {
       onLocalHistoryOperationRef.current({ kind, legacyBroadcast });
       return;
@@ -3246,8 +3246,8 @@ export const FabricCanvas = forwardRef(({
       redoStack.push(currentState);
 
       const previousState = undoStack[undoStack.length - 1];
-      restoreCanvasHistory(canvas, previousState).then((allObjects) => {
-        allObjects.forEach((o) => {
+      restoreHistoryIncrementally(canvas, previousState, historyMemoRef.current).then(({ objects: allObjects, fresh, diff }) => {
+        (fresh || allObjects).forEach((o) => {
           ensureObjectId(o);
           if (o.isStickyNote) {
             const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
@@ -3273,7 +3273,7 @@ export const FabricCanvas = forwardRef(({
         isHistoryProcessingRef.current = false;
         if (onHistoryChange) onHistoryChange(undoStack.length > 1, true);
         updateSelectionState();
-        emitHistoryOperation('undo', beforeRestore);
+        emitHistoryOperation('undo', beforeRestore, diff);
         if (onCanvasChangeRef.current) onCanvasChangeRef.current();
         releaseIdleWaiters();
       }).catch((err) => {
@@ -3297,8 +3297,8 @@ export const FabricCanvas = forwardRef(({
       const nextState = redoStack.pop();
       undoStack.push(nextState);
 
-      restoreCanvasHistory(canvas, nextState).then((allObjects) => {
-        allObjects.forEach((o) => {
+      restoreHistoryIncrementally(canvas, nextState, historyMemoRef.current).then(({ objects: allObjects, fresh, diff }) => {
+        (fresh || allObjects).forEach((o) => {
           ensureObjectId(o);
           if (o.isStickyNote) {
             const paperColor = o.noteColor || (typeof o.fill === 'string' ? o.fill : '#fff3a0');
@@ -3324,7 +3324,7 @@ export const FabricCanvas = forwardRef(({
         isHistoryProcessingRef.current = false;
         if (onHistoryChange) onHistoryChange(true, redoStack.length > 0);
         updateSelectionState();
-        emitHistoryOperation('redo', beforeRestore);
+        emitHistoryOperation('redo', beforeRestore, diff);
         if (onCanvasChangeRef.current) onCanvasChangeRef.current();
         releaseIdleWaiters();
       }).catch((err) => {

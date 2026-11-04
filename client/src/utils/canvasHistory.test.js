@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
-import { captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
+import { restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { playStickyEntrance } from './stickyEntrance.js';
 import { createSerializationMemo, isMemoizable } from './serializationMemo.js';
@@ -394,4 +394,167 @@ test('an image is serialized again when its source changes, even though its othe
   source = 'https://ik.imagekit.io/x/two.png';
   assert.equal(read().src, 'https://ik.imagekit.io/x/two.png');
   assert.equal(produced, 2);
+});
+
+const undoBoard = () => {
+  const canvas = new fabric.StaticCanvas(null, { width: 800, height: 600 });
+  const shape = new fabric.Rect({ id: 'u_shape', elementId: 'u_el', left: 10, top: 10, width: 100, height: 60, fill: '#fff', attachedTextId: 'u_text', metadata: { role: 'shape', note: 'a' } });
+  const label = new fabric.Textbox('label', { id: 'u_text', elementId: 'u_el', parentShapeId: 'u_shape', left: 20, top: 20, width: 80, fontWeight: 'bold', metadata: { role: 'text' } });
+  const other = new fabric.Circle({ id: 'u_circle', left: 200, top: 10, radius: 20, fill: '#abc' });
+  const connector = new fabric.Path('M 0 0 L 50 50', { id: 'u_conn', isConnector: true, connectorType: 'straight', endArrow: true, sourceShapeId: 'u_shape', targetShapeId: 'u_circle', left: 120, top: 30, fill: '' });
+  const group = new fabric.Group([new fabric.Rect({ width: 20, height: 20, fill: '#123' }), new fabric.Rect({ left: 25, width: 20, height: 20, fill: '#321' })], { id: 'u_group', left: 300, top: 100 });
+  const line = new fabric.Line([0, 0, 40, 40], { id: 'u_line', left: 400, top: 10, stroke: '#000' });
+  const filler = Array.from({ length: 12 }, (_, index) => new fabric.Rect({ id: `u_fill_${index}`, left: index * 30, top: 300, width: 20, height: 20, fill: '#eee' }));
+  canvas.add(shape, label, other, connector, group, line, ...filler);
+  return { canvas, shape, label, other, connector, group, line, memo: createSerializationMemo(SKRIBE_SERIALIZABLE_PROPERTIES) };
+};
+
+const assertRestored = (canvas, memo, snapshot, label) => {
+  const wanted = JSON.parse(snapshot);
+  assert.deepEqual(JSON.parse(captureCanvasHistory(canvas, memo)), wanted, `${label}: cached capture`);
+  assert.deepEqual(JSON.parse(captureCanvasHistory(canvas)), wanted, `${label}: fresh capture`);
+};
+
+const historyCases = [
+  ['one property', ({ shape }) => { shape.set({ left: 99 }); }, ['u_shape']],
+  ['several objects together', ({ shape, label, other }) => { shape.set({ left: 50 }); label.set({ left: 55 }); other.set({ top: 77 }); }, ['u_shape', 'u_text', 'u_circle']],
+  ['text and formatting', ({ label }) => { label.set({ text: 'changed', fontWeight: 'normal', fill: '#f00' }); }, ['u_text']],
+  ['connector endpoints', ({ connector }) => { connector.sourceShapeId = 'u_circle'; connector.set({ stroke: '#f00' }); }, ['u_conn']],
+  ['group child', ({ group }) => { group.item(0).set({ fill: '#999' }); }, ['u_group']],
+  ['metadata in place', ({ shape }) => { shape.metadata.note = 'b'; }, ['u_shape']]
+];
+
+historyCases.forEach(([name, change, changed]) => {
+  test(`undo and redo restore exactly and rebuild only what changed: ${name}`, async () => {
+    const board = undoBoard();
+    const { canvas, memo } = board;
+    const before = captureCanvasHistory(canvas, memo);
+    change(board);
+    const after = captureCanvasHistory(canvas, memo);
+    const untouched = canvas.getObjects().filter((object) => !changed.includes(object.id));
+    const undone = await restoreHistoryIncrementally(canvas, before, memo);
+    assert.deepEqual(undone.diff.modified.sort(), [...changed].sort());
+    assert.equal(undone.fresh.length, changed.length);
+    assertRestored(canvas, memo, before, 'undo');
+    untouched.forEach((object) => assert.ok(canvas.getObjects().includes(object), object.id));
+    const redone = await restoreHistoryIncrementally(canvas, after, memo);
+    assert.equal(redone.fresh.length, changed.length);
+    assertRestored(canvas, memo, after, 'redo');
+    untouched.forEach((object) => assert.ok(canvas.getObjects().includes(object), object.id));
+    canvas.getObjects().forEach((object) => assert.equal(object.canvas, canvas));
+  });
+});
+
+test('undo restores a deleted object at its old layer and redo removes it again, with no duplicates', async () => {
+  const { canvas, memo, other } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  const position = canvas.getObjects().indexOf(other);
+  canvas.remove(other);
+  const after = captureCanvasHistory(canvas, memo);
+  const undone = await restoreHistoryIncrementally(canvas, before, memo);
+  assert.deepEqual(undone.diff.added, ['u_circle']);
+  assert.equal(canvas.getObjects()[position].id, 'u_circle');
+  assertRestored(canvas, memo, before, 'undo');
+  const redone = await restoreHistoryIncrementally(canvas, after, memo);
+  assert.deepEqual(redone.diff.removed, ['u_circle']);
+  assert.equal(redone.fresh.length, 0);
+  assertRestored(canvas, memo, after, 'redo');
+  assert.equal(new Set(canvas.getObjects().map((object) => object.id)).size, canvas.getObjects().length);
+});
+
+test('undo removes a created object and redo brings it back', async () => {
+  const { canvas, memo } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  const created = new fabric.Textbox('new', { id: 'u_new', left: 5, top: 500, width: 90, metadata: { source: 'ai-diagram' } });
+  canvas.add(created);
+  const after = captureCanvasHistory(canvas, memo);
+  await restoreHistoryIncrementally(canvas, before, memo);
+  assert.equal(created.canvas, undefined);
+  assertRestored(canvas, memo, before, 'undo');
+  const redone = await restoreHistoryIncrementally(canvas, after, memo);
+  assert.deepEqual(redone.diff.added, ['u_new']);
+  assert.deepEqual(canvas.getObjects().at(-1).metadata, { source: 'ai-diagram' });
+  assertRestored(canvas, memo, after, 'redo');
+});
+
+test('a layer-order change rebuilds nothing and keeps every instance', async () => {
+  const { canvas, memo, shape } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  const instances = new Set(canvas.getObjects());
+  canvas.bringObjectToFront(shape);
+  const after = captureCanvasHistory(canvas, memo);
+  const undone = await restoreHistoryIncrementally(canvas, before, memo);
+  assert.equal(undone.fresh.length, 0);
+  assertRestored(canvas, memo, before, 'undo');
+  const redone = await restoreHistoryIncrementally(canvas, after, memo);
+  assert.equal(redone.fresh.length, 0);
+  assert.equal(canvas.getObjects().at(-1), shape);
+  canvas.getObjects().forEach((object) => assert.ok(instances.has(object)));
+});
+
+test('several undos then several redos walk the history exactly', async () => {
+  const { canvas, memo, shape, label, other } = undoBoard();
+  const states = [captureCanvasHistory(canvas, memo)];
+  [() => shape.set({ left: 61 }), () => label.set({ text: 'second' }), () => canvas.remove(other)].forEach((change) => {
+    change();
+    states.push(captureCanvasHistory(canvas, memo));
+  });
+  for (const index of [2, 1, 0, 1, 2, 3]) {
+    await restoreHistoryIncrementally(canvas, states[index], memo);
+    assertRestored(canvas, memo, states[index], `state ${index}`);
+  }
+});
+
+test('a full restore is used when an incremental one cannot be proven safe, and the result is the same', async () => {
+  const cases = [
+    ['most of the board changed', ({ canvas }) => canvas.getObjects().forEach((object) => object.set({ top: object.top + 1 }))],
+    ['duplicate ids', ({ other, shape }) => { other.id = shape.id; }],
+    ['object without an id', ({ other }) => { other.id = undefined; }],
+    ['canvas background changed', ({ canvas }) => { canvas.backgroundColor = '#123456'; }],
+    ['temporary object on the canvas', ({ canvas }) => { canvas.add(new fabric.Rect({ id: 'u_temp', width: 5, height: 5, excludeFromExport: true })); }]
+  ];
+  for (const [name, change] of cases) {
+    const board = undoBoard();
+    const { canvas, memo } = board;
+    const before = captureCanvasHistory(canvas, memo);
+    change(board);
+    const result = await restoreHistoryIncrementally(canvas, before, memo);
+    assert.equal(result.fresh, null, name);
+    assert.equal(result.diff, null, name);
+    assert.equal(canvas.getObjects().length, JSON.parse(before).objects.length, name);
+    assertRestored(canvas, memo, before, name);
+  }
+});
+
+test('a board that changed while objects were being rebuilt falls back to a full restore', async () => {
+  const { canvas, memo, shape, other } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  shape.set({ left: 71 });
+  const pending = restoreHistoryIncrementally(canvas, before, memo);
+  canvas.remove(other);
+  const result = await pending;
+  assert.equal(result.fresh, null);
+  assertRestored(canvas, memo, before, 'after race');
+});
+
+test('an object that cannot be rebuilt falls back to the tolerant full restore', async () => {
+  const { canvas, memo } = undoBoard();
+  const target = JSON.parse(captureCanvasHistory(canvas, memo));
+  target.objects[2] = { ...target.objects[2], type: 'NoSuchFabricType' };
+  const result = await restoreHistoryIncrementally(canvas, JSON.stringify(target), memo);
+  assert.equal(result.fresh, null);
+  assert.equal(canvas.getObjects().some((object) => object.id === 'u_circle'), false);
+  assert.ok(canvas.skribeRetainedObjects.some((entry) => entry.data.id === 'u_circle'));
+});
+
+test('a restored object is not served stale from the cache on the next edit', async () => {
+  const { canvas, memo, shape } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  shape.set({ left: 81 });
+  await restoreHistoryIncrementally(canvas, before, memo);
+  const restored = canvas.getObjects().find((object) => object.id === 'u_shape');
+  assert.notEqual(restored, shape);
+  restored.set({ left: 82 });
+  assert.equal(JSON.parse(captureCanvasHistory(canvas, memo)).objects.find((object) => object.id === 'u_shape').left, 82);
+  assertRestored(canvas, memo, captureCanvasHistory(canvas), 'edit after restore');
 });
