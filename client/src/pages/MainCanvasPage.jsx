@@ -1284,48 +1284,52 @@ export const MainCanvasPage = () => {
       />
 
       <div
-        className="fixed top-20 right-6 md:right-8 z-40 transition-all duration-220 ease-out flex items-center gap-2.5 bg-surface/90 backdrop-blur-md rounded-full px-3.5 py-1.5 border border-outline-variant/80 shadow-md pointer-events-auto select-none overflow-hidden"
+        className="fixed top-20 right-2 sm:right-6 md:right-8 z-40 transition-all duration-220 ease-out flex items-center gap-1 p-1 xl:max-w-[calc(50vw-286px)] bg-surface/95 backdrop-blur-sm rounded border border-outline-variant/60 pointer-events-auto select-none"
       >
         <button
           onClick={handleBackToBoards}
-          className="flex items-center justify-center w-7 h-7 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors cursor-pointer shrink-0"
+          className="flex items-center justify-center w-8 h-8 rounded-[12px] text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors cursor-pointer shrink-0"
           title={t('workspace.back')}
+          aria-label={t('workspace.back')}
         >
-          <span className="material-symbols-outlined text-lg">arrow_back</span>
+          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
         </button>
 
-        <span className="font-headline font-bold text-xs text-on-surface truncate max-w-[90px] xs:max-w-[130px] sm:max-w-[180px] md:max-w-[240px]">
+        <span
+          className="min-w-0 font-headline font-semibold text-[13px] text-on-surface truncate max-w-[104px] sm:max-w-[180px] md:max-w-[220px] xl:max-w-[260px] pr-1"
+          title={boardTitle}
+        >
           {boardTitle}
         </span>
 
-        <div className="h-3.5 w-px bg-outline-variant/60 mx-0.5 shrink-0" />
-
-        {saveStatus === 'saving' && (
-          <div className="flex items-center gap-1.5 text-primary text-[11px] font-bold font-mono shrink-0">
-            <div className="w-2 h-2 rounded-full bg-primary animate-ping" />
-            <span>{t('workspace.saving')}</span>
-          </div>
-        )}
-        {saveStatus === 'saved' && (
-          <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold font-mono shrink-0">
-            <span className="material-symbols-outlined text-sm font-bold">check_circle</span>
-            <span>{t('workspace.saved')}</span>
-          </div>
-        )}
-        {saveStatus === 'error' && (
-          <div className="flex items-center gap-1 text-error text-[11px] font-bold font-mono shrink-0">
-            <span className="material-symbols-outlined text-sm font-bold">error</span>
-            <span>{t('workspace.saveFailed')}</span>
-          </div>
-        )}
+        <div role="status" aria-live="polite" className="flex items-center shrink-0 pr-1">
+          {saveStatus === 'saving' && (
+            <span className="flex items-center gap-1 text-on-surface-variant text-[11px] font-medium">
+              <span className="material-symbols-outlined text-[14px] text-primary animate-spin">progress_activity</span>
+              <span>{t('workspace.saving')}</span>
+            </span>
+          )}
+          {saveStatus === 'saved' && (
+            <span className="flex items-center gap-1 text-on-surface-variant text-[11px] font-medium">
+              <span className="material-symbols-outlined text-[14px] text-emerald-600 dark:text-emerald-400">check_circle</span>
+              <span>{t('workspace.saved')}</span>
+            </span>
+          )}
+          {saveStatus === 'error' && (
+            <span className="flex items-center gap-1 text-error text-[11px] font-semibold">
+              <span className="material-symbols-outlined text-[14px]">error</span>
+              <span>{t('workspace.saveFailed')}</span>
+            </span>
+          )}
+        </div>
 
         {preferences.showOnlineCollaborators && activeUsers.length > 0 && (
-          <div className="flex items-center gap-1.5 ml-1 border-l border-outline-variant/60 pl-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0 pl-2 border-l border-outline-variant/60">
             <div className="flex items-center -space-x-1.5">
               {activeUsers.slice(0, 3).map((u) => (
                 <div
                   key={u.id}
-                  className="w-6 h-6 rounded-full bg-primary text-on-primary font-bold text-[10px] flex items-center justify-center ring-2 ring-surface shadow-xs"
+                  className="w-6 h-6 rounded-full bg-primary text-on-primary font-bold text-[10px] flex items-center justify-center ring-2 ring-surface"
                   title={u.name || 'User'}
                 >
                   {u.avatar ? (
@@ -1353,10 +1357,11 @@ export const MainCanvasPage = () => {
 
         <button
           onClick={() => setIsShareModalOpen(true)}
-          className="flex items-center gap-1 px-2.5 py-1 bg-surface-container-high hover:bg-primary-container text-on-surface hover:text-primary rounded-full text-xs font-label font-bold border border-outline-variant transition-colors ml-1 cursor-pointer shrink-0"
+          className="flex items-center justify-center gap-1 h-8 min-w-8 px-2 sm:px-2.5 ml-1 bg-secondary hover:bg-secondary/90 text-on-secondary rounded-[12px] text-xs font-label font-bold transition-colors cursor-pointer shrink-0"
           title={t('workspace.shareBoard')}
+          aria-label={t('workspace.shareBoard')}
         >
-          <span className="material-symbols-outlined text-base">share</span>
+          <span className="material-symbols-outlined text-[16px]">share</span>
           <span className="hidden sm:inline">{t('workspace.share')}</span>
         </button>
       </div>
@@ -1493,25 +1498,25 @@ export const MainCanvasPage = () => {
         }}
         onMouseLeave={() => setToolbarTooltip(null)}
         onScroll={() => setToolbarTooltip(null)}
-        className={`fixed top-[136px] xl:top-20 -translate-x-1/2 z-40 bg-surface/95 backdrop-blur-md border border-outline-variant/80 shadow-md transition-all duration-220 ease-out pointer-events-auto select-none ${
+        className={`fixed top-[130px] xl:top-20 left-1/2 -translate-x-1/2 z-40 rounded p-1 bg-surface/95 backdrop-blur-sm border border-outline-variant/60 shadow-sm transition-all duration-220 ease-out pointer-events-auto select-none ${
           isToolbarCollapsed
-            ? 'rounded-full p-1'
-            : 'rounded-full px-2.5 sm:px-3.5 py-1.5 flex items-center gap-1 sm:gap-1.5 max-w-[calc(100vw-90px)] overflow-x-auto overflow-y-hidden custom-scrollbar'
-        } left-1/2`}
+            ? ''
+            : 'flex items-center max-w-[calc(100vw-16px)] overflow-x-auto overflow-y-hidden custom-scrollbar'
+        }`}
       >
         {isToolbarCollapsed ? (
           <button
             onClick={() => setIsToolbarCollapsed(false)}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
+            className="w-8 h-8 rounded-[12px] flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer"
             data-toolbar-tooltip={t('toolbar.expand')}
             aria-label={t('toolbar.expand')}
             title={t('toolbar.expand')}
           >
-            <span className="material-symbols-outlined text-xl">chevron_right</span>
+            <span className="material-symbols-outlined text-[18px]">chevron_right</span>
           </button>
         ) : (
-          <div className="flex items-center gap-1 sm:gap-1.5 min-w-max">
-            <div className="px-1 text-[8px] font-black uppercase tracking-wider text-on-surface-variant/70" aria-hidden="true">
+          <div className="flex items-center gap-0.5 min-w-max">
+            <div className="hidden sm:block pl-1.5 pr-1 text-[9px] font-bold uppercase tracking-[0.08em] text-on-surface-variant/70" aria-hidden="true">
               {t('toolbar.core')}
             </div>
 
@@ -1521,15 +1526,15 @@ export const MainCanvasPage = () => {
             setActiveTool('select');
             setActiveWheel(null);
           }}
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             activeTool === 'select'
-              ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
           }`}
           data-toolbar-tooltip={t('toolbar.select')}
           title={t('toolbar.select')}
         >
-          <span className="material-symbols-outlined text-[20px]">near_me</span>
+          <span className="material-symbols-outlined text-[18px]">near_me</span>
         </button>
 
         <button
@@ -1538,15 +1543,15 @@ export const MainCanvasPage = () => {
             setActiveTool('pan');
             setActiveWheel(null);
           }}
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             activeTool === 'pan'
-              ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
           }`}
           data-toolbar-tooltip={t('toolbar.pan')}
           title={t('toolbar.pan')}
         >
-          <span className="material-symbols-outlined text-[20px]">pan_tool</span>
+          <span className="material-symbols-outlined text-[18px]">pan_tool</span>
         </button>
 
         <button
@@ -1555,15 +1560,15 @@ export const MainCanvasPage = () => {
             setActiveTool('draw');
             setActiveWheel(null);
           }}
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             activeTool === 'draw'
-              ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
           }`}
           data-toolbar-tooltip={t('toolbar.draw')}
           title={t('toolbar.draw')}
         >
-          <span className="material-symbols-outlined text-[20px]">edit</span>
+          <span className="material-symbols-outlined text-[18px]">edit</span>
         </button>
 
         <button
@@ -1571,15 +1576,15 @@ export const MainCanvasPage = () => {
             setActiveTool('eraser');
             setActiveWheel(null);
           }}
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             activeTool === 'eraser'
-              ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
           }`}
           data-toolbar-tooltip={t('toolbar.eraser')}
           title={t('toolbar.eraser')}
         >
-          <span className="material-symbols-outlined text-[20px]">auto_fix_high</span>
+          <span className="material-symbols-outlined text-[18px]">auto_fix_high</span>
         </button>
 
         <button
@@ -1588,18 +1593,18 @@ export const MainCanvasPage = () => {
             setActiveTool('laser');
             setActiveWheel(null);
           }}
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             activeTool === 'laser'
-              ? 'bg-primary text-on-primary shadow-xs scale-105 font-bold'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
           }`}
           data-toolbar-tooltip={t('toolbar.laser')}
           title={t('toolbar.laser')}
         >
-          <span className="material-symbols-outlined text-[20px]">flare</span>
+          <span className="material-symbols-outlined text-[18px]">flare</span>
         </button>
 
-        <div className="h-5 w-px bg-outline-variant/60 my-auto" />
+        <div className="h-4 w-px bg-outline-variant/70 mx-1 shrink-0" aria-hidden="true" />
 
         <button
           ref={aiBtnRef}
@@ -1608,15 +1613,15 @@ export const MainCanvasPage = () => {
           aria-haspopup="dialog"
           aria-label={t('toolbar.ai')}
           data-ai-assistant-toggle
-          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer relative group ${
+          className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors cursor-pointer relative group ${
             isAIAssistantOpen
-              ? 'bg-primary text-on-primary shadow-md scale-105 ring-2 ring-primary ring-offset-1 font-bold'
-              : 'bg-surface-container-high text-accent hover:bg-primary hover:text-on-primary hover:scale-105'
+              ? 'bg-primary text-on-primary'
+              : 'text-accent hover:bg-surface-container-high'
           }`}
           data-toolbar-tooltip={t('toolbar.ai')}
           title={t('toolbar.ai')}
         >
-          <span className="material-symbols-outlined text-[20px]">psychology</span>
+          <span className="material-symbols-outlined text-[18px]">psychology</span>
         </button>
 
         <button
@@ -1624,16 +1629,16 @@ export const MainCanvasPage = () => {
           aria-expanded={isPreferencesOpen}
           aria-haspopup="dialog"
           data-preferences-toggle
-          className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary hover:scale-105 transition-all cursor-pointer relative group"
+          className="w-8 h-8 rounded-[12px] flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer relative group"
           data-toolbar-tooltip={t('toolbar.preferences')}
           title={t('toolbar.preferences')}
           aria-label={t('toolbar.preferences')}
         >
-          <span className="material-symbols-outlined text-[20px]">settings</span>
+          <span className="material-symbols-outlined text-[18px]">settings</span>
         </button>
 
-        <div className="h-5 w-px bg-outline-variant/70 my-auto" aria-hidden="true" />
-        <div className="px-1 text-[8px] font-black uppercase tracking-wider text-primary/80" aria-hidden="true">
+        <div className="h-4 w-px bg-outline-variant/70 mx-1 shrink-0" aria-hidden="true" />
+        <div className="hidden sm:block pl-1 pr-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-primary/80" aria-hidden="true">
           Skribe
         </div>
 
@@ -1644,10 +1649,10 @@ export const MainCanvasPage = () => {
               key={feature.id}
               onClick={() => handleSkribeFeatureClick(feature)}
               disabled={isLoading}
-              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all relative group ${
+              className={`w-8 h-8 rounded-[12px] flex items-center justify-center transition-colors relative group ${
                 isLoading
-                  ? 'opacity-50 cursor-not-allowed text-primary/50 bg-primary/5'
-                  : 'text-primary bg-primary/10 hover:bg-primary hover:text-on-primary hover:scale-105 cursor-pointer'
+                  ? 'opacity-50 cursor-not-allowed text-primary/50'
+                  : 'text-primary hover:bg-primary/10 cursor-pointer'
               }`}
               data-toolbar-tooltip={isLoading ? 'Analyzing...' : feature.label}
               data-toolbar-tooltip-detail={isLoading ? 'Workspace analysis in progress' : feature.tooltip}
@@ -1655,7 +1660,7 @@ export const MainCanvasPage = () => {
               aria-label={feature.label}
               aria-disabled={isLoading}
             >
-              <span className={`material-symbols-outlined text-[20px] ${isLoading ? 'animate-spin' : ''}`}>
+              <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>
                 {isLoading ? 'progress_activity' : feature.icon}
               </span>
             </button>
@@ -1664,12 +1669,12 @@ export const MainCanvasPage = () => {
 
             <button
               onClick={() => setIsToolbarCollapsed(true)}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all cursor-pointer"
+              className="w-8 h-8 rounded-[12px] flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors cursor-pointer"
               data-toolbar-tooltip={t('toolbar.collapse')}
               aria-label={t('toolbar.collapse')}
               title={t('toolbar.collapse')}
             >
-              <span className="material-symbols-outlined text-xl">chevron_left</span>
+              <span className="material-symbols-outlined text-[18px]">chevron_left</span>
             </button>
           </div>
         )}
