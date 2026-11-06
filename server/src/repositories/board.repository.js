@@ -3,6 +3,8 @@ import Board from '../models/Board.js';
 export const RECENT_OPERATION_LIMIT = 200;
 
 export const revisionMatch = (revision) => (revision === 0 ? { $in: [0, null] } : revision);
+const unclaimed = (opId) => (opId ? { 'recentOperations.opId': { $ne: opId } } : {});
+const attributed = (opId, revision) => (opId ? { $push: { recentOperations: { $each: [{ opId, revision }], $slice: -RECENT_OPERATION_LIMIT } } } : {});
 
 export class BoardRepository {
   async createBoard(boardData) {
@@ -107,10 +109,10 @@ export class BoardRepository {
     ).lean();
   }
 
-  async saveCanvasAtRevision(id, baseRevision, updateData) {
+  async saveCanvasAtRevision(id, baseRevision, updateData, opId) {
     return await Board.findOneAndUpdate(
-      { _id: id, isDeleted: false, canvasRevision: revisionMatch(baseRevision) },
-      { $set: { ...updateData, lastOperationRevision: baseRevision + 1 }, $inc: { canvasRevision: 1 } },
+      { _id: id, isDeleted: false, canvasRevision: revisionMatch(baseRevision), ...unclaimed(opId) },
+      { $set: { ...updateData, lastOperationRevision: baseRevision + 1 }, $inc: { canvasRevision: 1 }, ...attributed(opId, baseRevision + 1) },
       { new: true, runValidators: true }
     )
       .populate('owner', 'name email avatar')
@@ -118,10 +120,11 @@ export class BoardRepository {
       .exec();
   }
 
-  async saveLegacyCanvas(id, updateData, { requireLegacyBoard = true, ifRevision } = {}) {
+  async saveLegacyCanvas(id, updateData, { requireLegacyBoard = true, ifRevision, opId } = {}) {
+    const claim = ifRevision === undefined ? undefined : opId;
     return await Board.findOneAndUpdate(
-      { ...(requireLegacyBoard ? { _id: id, isDeleted: false, lastOperationRevision: { $in: [0, null] } } : { _id: id, isDeleted: false }), ...(ifRevision === undefined ? {} : { canvasRevision: revisionMatch(ifRevision) }) },
-      { $set: updateData, $inc: { canvasRevision: 1 } },
+      { ...(requireLegacyBoard ? { _id: id, isDeleted: false, lastOperationRevision: { $in: [0, null] } } : { _id: id, isDeleted: false }), ...(ifRevision === undefined ? {} : { canvasRevision: revisionMatch(ifRevision) }), ...unclaimed(claim) },
+      { $set: updateData, $inc: { canvasRevision: 1 }, ...attributed(claim, ifRevision + 1) },
       { new: true, runValidators: true }
     )
       .populate('owner', 'name email avatar')

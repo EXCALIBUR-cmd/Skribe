@@ -176,11 +176,24 @@ export const commitCanvasOperation = async ({ boardId, userId, op }) => {
   return { status: 'stale', currentRevision: latest.canvasRevision || 0 };
 };
 
+export const operationFate = async ({ boardId, userId, opId, baseRevision }) => {
+  if (typeof opId !== 'string' || !OP_ID_PATTERN.test(opId) || !Number.isInteger(baseRevision) || baseRevision < 0) return { status: 'invalid' };
+  const board = await boardRepository.findBoardRevisionState(boardId);
+  if (!board) return { status: 'not_found' };
+  if (!hasBoardAccess(board, userId)) return { status: 'forbidden' };
+  const revision = committedRevision(board, opId);
+  if (revision !== undefined) return { status: 'ok', fate: 'committed', revision };
+  const currentRevision = board.canvasRevision || 0;
+  const accounted = new Set((board.recentOperations || []).filter((entry) => entry.revision > baseRevision && entry.revision <= currentRevision).map((entry) => entry.revision));
+  return { status: 'ok', fate: accounted.size === Math.max(0, currentRevision - baseRevision) ? 'not_committed' : 'unknown', currentRevision };
+};
+
 export default {
   OPERATION_KINDS,
   UNSETTABLE_FIELDS,
   OPERATION_LIMITS,
   validateCanvasOperation,
   applyCanvasOperation,
-  commitCanvasOperation
+  commitCanvasOperation,
+  operationFate
 };

@@ -9,7 +9,9 @@ import boardService from '../services/board.service.js';
 import boardController from '../controllers/board.controller.js';
 import { initSocketIO } from '../sockets/index.js';
 import { OPERATION_RATE_LIMIT, boardRoomName, registerBoardHandlers } from '../sockets/boardHandlers.js';
-import { OPERATION_LIMITS, applyCanvasOperation, commitCanvasOperation, validateCanvasOperation } from '../services/boardOperation.service.js';
+import { OPERATION_LIMITS, applyCanvasOperation, commitCanvasOperation, operationFate, validateCanvasOperation } from '../services/boardOperation.service.js';
+import { RECENT_OPERATION_LIMIT } from '../repositories/board.repository.js';
+import { validateUpdateBoard } from '../validators/board.validator.js';
 
 const TEST_DB_NAME = `skribe_board_ops_test_${process.pid}_${Date.now()}`;
 const TEST_MONGO_BASE = process.env.TEST_MONGODB_URI || 'mongodb://127.0.0.1:27017';
@@ -465,4 +467,67 @@ test('board fetches report whether collaboration operations are enabled', needsM
   } finally {
     config.collabOperationsEnabled = true;
   }
+});
+
+test('operation fate is proven from attributed revisions and is unknown once the history no longer covers them', needsMongo, async () => {
+  const boardId = await createBoard();
+  const first = operation(0, { upserts: [{ id: 'shape_b', unset: [], data: shape('shape_b', { left: 50 }) }] });
+  await commitCanvasOperation({ boardId, userId: ownerId, op: first });
+  assert.deepEqual(await operationFate({ boardId, userId: ownerId, opId: first.opId, baseRevision: 0 }), { status: 'ok', fate: 'committed', revision: 1 });
+  const never = operation(0).opId;
+  assert.equal((await operationFate({ boardId, userId: memberId, opId: never, baseRevision: 0 })).fate, 'not_committed');
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: never, baseRevision: 5 })).fate, 'not_committed');
+  await boardService.updateBoard(boardId, ownerId, { baseRevision: 1, canvasData: { version: '7.4.0', objects: [shape('unattributed')] } });
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: never, baseRevision: 0 })).fate, 'unknown');
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: never, baseRevision: 2 })).fate, 'not_committed');
+  assert.deepEqual(await operationFate({ boardId, userId: strangerId, opId: first.opId, baseRevision: 0 }), { status: 'forbidden' });
+  assert.deepEqual(await operationFate({ boardId, userId: ownerId, opId: 'bad id', baseRevision: 0 }), { status: 'invalid' });
+  assert.deepEqual(await operationFate({ boardId, userId: ownerId, opId: never, baseRevision: -1 }), { status: 'invalid' });
+});
+
+test('an acknowledged operation pushed out of the 200-entry history is reported unknown, never not committed', needsMongo, async () => {
+  const boardId = await createBoard([shape('shape_a')]);
+  const old = operation(0, { upserts: [{ id: 'shape_a', unset: [], data: shape('shape_a', { left: 1 }) }] });
+  await commitCanvasOperation({ boardId, userId: ownerId, op: old });
+  for (let revision = 1; revision <= RECENT_OPERATION_LIMIT; revision += 1) {
+    const result = await commitCanvasOperation({ boardId, userId: memberId, op: operation(revision, { upserts: [{ id: 'shape_a', unset: [], data: shape('shape_a', { left: revision + 1 }) }] }) });
+    assert.equal(result.status, 'committed');
+  }
+  const board = await stored(boardId);
+  assert.equal(board.recentOperations.length, RECENT_OPERATION_LIMIT);
+  assert.equal(board.recentOperations.some((entry) => entry.opId === old.opId), false);
+  assert.equal((await commitCanvasOperation({ boardId, userId: ownerId, op: old })).status, 'stale');
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: old.opId, baseRevision: 0 })).fate, 'unknown');
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: operation(0).opId, baseRevision: 1 })).fate, 'not_committed');
+});
+
+test('saves that carry an opId are attributed to their revision in both protocol modes, and a reused opId is refused', needsMongo, async () => {
+  const boardId = await createBoard();
+  const saved = await boardService.updateBoard(boardId, ownerId, { baseRevision: 0, opId: 'op_save_on_0001', canvasData: { version: '7.4.0', objects: [shape('saved')] } });
+  assert.equal(saved.canvasRevision, 1);
+  assert.equal((await operationFate({ boardId, userId: ownerId, opId: 'op_save_on_0001', baseRevision: 0 })).fate, 'committed');
+  config.collabOperationsEnabled = false;
+  try {
+    const legacy = await boardService.updateBoard(boardId, memberId, { ifRevision: 1, opId: 'op_save_off_0001', canvasData: { version: '7.4.0', objects: [shape('legacy')] } });
+    assert.equal(legacy.canvasRevision, 2);
+    assert.deepEqual(await operationFate({ boardId, userId: memberId, opId: 'op_save_off_0001', baseRevision: 1 }), { status: 'ok', fate: 'committed', revision: 2 });
+    await assert.rejects(
+      boardService.updateBoard(boardId, memberId, { ifRevision: 2, opId: 'op_save_off_0001', canvasData: { version: '7.4.0', objects: [shape('again')] } }),
+      (err) => err.statusCode === 409
+    );
+    const unguarded = await boardService.updateBoard(boardId, ownerId, { opId: 'op_save_off_0002', canvasData: { version: '7.4.0', objects: [shape('plain')] } });
+    assert.equal(unguarded.canvasRevision, 3);
+    assert.equal((await operationFate({ boardId, userId: ownerId, opId: 'op_save_off_0002', baseRevision: 2 })).fate, 'unknown');
+    const refused = fakeResponse();
+    validateUpdateBoard({ body: { opId: 'x', canvasData: { version: '7.4.0', objects: [] } } }, refused, assert.fail);
+    assert.equal(refused.statusCode, 400);
+  } finally {
+    config.collabOperationsEnabled = true;
+  }
+  const response = fakeResponse();
+  await boardController.operationFate({ user: { id: strangerId.toString() }, params: { id: boardId, opId: 'op_save_on_0001' }, query: { baseRevision: '0' } }, response, assert.fail);
+  assert.equal(response.statusCode, 403);
+  const ok = fakeResponse();
+  await boardController.operationFate({ user: { id: memberId.toString() }, params: { id: boardId, opId: 'op_save_on_0001' }, query: { baseRevision: '0' } }, ok, assert.fail);
+  assert.deepEqual(ok.body.data, { fate: 'committed', revision: 1 });
 });

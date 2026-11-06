@@ -105,6 +105,7 @@ export const MainCanvasPage = () => {
   const recoveryKeptRef = useRef(0);
   const [recoveryStorage, setRecoveryStorage] = useState('');
   const recoveryStorageWarnedRef = useRef(false);
+  const recoveryBlockedWarnedRef = useRef(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -298,8 +299,14 @@ export const MainCanvasPage = () => {
           latestCanvasDataRef.current = initialJson;
 
           syncControllerRef.current?.dispose();
+          const journalUserId = String(user?._id || user?.id || '');
           syncControllerRef.current = createBoardSyncController({
             boardId,
+            verifyIdentity: async () => {
+              const me = await apiClient.get('/auth/me');
+              const sessionUserId = String(me?.data?.user?._id || me?.data?.user?.id || '');
+              return journalUserId !== '' && sessionUserId === journalUserId;
+            },
             journal: createPendingJournal({
               boardId,
               userId: user?._id || user?.id,
@@ -317,6 +324,10 @@ export const MainCanvasPage = () => {
                 const latest = await apiClient.get(`/boards/${boardId}`);
                 const latestBoard = latest?.data?.board;
                 return latestBoard ? { revision: latestBoard.canvasRevision ?? 0, objects: latestBoard.canvasData?.objects || [] } : null;
+              },
+              operationFate: async ({ opId, baseRevision }) => {
+                const answer = await apiClient.get(`/boards/${boardId}/operations/${encodeURIComponent(opId)}`, { params: { baseRevision } });
+                return { fate: answer?.data?.fate };
               },
               saveOnUnload: (body) => {
                 try {
@@ -380,6 +391,11 @@ export const MainCanvasPage = () => {
                 else if (recoveryKeptRef.current > 0 && !syncControllerRef.current?.hasUnsavedWork()) setSaveStatus('saved');
                 recoveryKeptRef.current = detail.kept;
                 if (detail.damaged > 0) addToast('Damaged draft removed', `${detail.damaged} damaged item${detail.damaged === 1 ? '' : 's'} in your local draft could not be read and ${detail.damaged === 1 ? 'was' : 'were'} removed.`, 'warning', 'warning');
+              } else if (kind === 'recovery-blocked') {
+                if (!recoveryBlockedWarnedRef.current) {
+                  recoveryBlockedWarnedRef.current = true;
+                  addToast('Recovery paused', 'Unsynced changes in this browser belong to the account that opened this board. Sign back in to that account to restore them. Nothing was discarded.', 'lock', 'warning');
+                }
               } else if (kind === 'journal-unavailable') {
                 addToast('Unsaved work is at risk', 'This browser cannot keep a local copy of your changes. Stay on this page until they are saved.', 'warning', 'warning');
               } else if (kind === 'synced') {
@@ -413,12 +429,7 @@ export const MainCanvasPage = () => {
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);
                   syncControllerRef.current?.markLoaded();
-                  const journalUserId = String(user?._id || user?.id || '');
-                  apiClient.get('/auth/me').then((me) => {
-                    const sessionUserId = String(me?.data?.user?._id || me?.data?.user?.id || '');
-                    if (!isMounted || !sessionUserId || sessionUserId !== journalUserId) return null;
-                    return syncControllerRef.current?.recoverPending();
-                  }).catch((err) => {
+                  syncControllerRef.current?.recoverPending().catch((err) => {
                     console.error('[MainCanvasPage] Pending change recovery failed:', err);
                   });
                   isInitialLoadingRef.current = false;

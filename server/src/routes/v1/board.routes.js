@@ -15,6 +15,8 @@ router.get('/:id', validateBoardId, boardController.getById);
 
 router.patch('/:id', validateBoardId, validateUpdateBoard, boardController.update);
 
+router.get('/:id/operations/:opId', validateBoardId, boardController.operationFate);
+
 router.patch('/:id/viewport', validateBoardId, validateViewport, boardController.saveViewport);
 
 router.delete('/:id', validateBoardId, boardController.delete);

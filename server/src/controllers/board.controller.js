@@ -4,6 +4,7 @@ import { error, success } from '../utils/apiResponse.js';
 import { getSocketServer } from '../sockets/index.js';
 import { boardRoomName } from '../sockets/boardHandlers.js';
 import { syncBoardReferences } from '../services/asset.service.js';
+import { operationFate } from '../services/boardOperation.service.js';
 
 export class BoardController {
   async create(req, res, next) {
@@ -41,6 +42,18 @@ export class BoardController {
       const board = await boardService.getBoardById(boardId, userId);
 
       return success(res, { board, collaboration: { operationsEnabled: config.collabOperationsEnabled } }, 'Board retrieved successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async operationFate(req, res, next) {
+    try {
+      const result = await operationFate({ boardId: req.params.id, userId: req.user.id, opId: req.params.opId, baseRevision: Number(req.query.baseRevision) });
+      if (result.status === 'invalid') return error(res, 'Invalid operation query', 400, { code: 'INVALID_OPERATION' });
+      if (result.status === 'not_found') return error(res, 'Board not found', 404, { code: 'BOARD_NOT_FOUND' });
+      if (result.status === 'forbidden') return error(res, 'You do not have access to this board', 403, { code: 'FORBIDDEN' });
+      return success(res, { fate: result.fate, revision: result.revision ?? null }, 'Operation fate', 200);
     } catch (err) {
       next(err);
     }

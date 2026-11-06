@@ -143,11 +143,12 @@ export class BoardService {
       throw err;
     }
     const ifRevision = !config.collabOperationsEnabled && Number.isInteger(payload.ifRevision) ? payload.ifRevision : undefined;
+    const opId = typeof payload.opId === 'string' ? payload.opId : undefined;
     const savedBoard = hasBaseRevision
-      ? await boardRepository.saveCanvasAtRevision(boardId, payload.baseRevision, allowedUpdates)
+      ? await boardRepository.saveCanvasAtRevision(boardId, payload.baseRevision, allowedUpdates, opId)
       : config.collabOperationsEnabled
         ? null
-        : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: false, ifRevision });
+        : await boardRepository.saveLegacyCanvas(boardId, allowedUpdates, { requireLegacyBoard: false, ifRevision, opId });
     if (savedBoard) return savedBoard.toJSON();
 
     const latest = await boardRepository.findBoardRevision(boardId);

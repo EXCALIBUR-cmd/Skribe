@@ -54,7 +54,7 @@ const createServer = ({ enabled = true, objects = startingBoard() } = {}) => {
   return server;
 };
 
-const createClient = (name, server, overrides = {}, { normalize = (objects) => objects, getBoard = null, onPrepare = null, journalStore = null, instanceId = undefined } = {}) => {
+const createClient = (name, server, overrides = {}, { normalize = (objects) => objects, getBoard = null, onPrepare = null, journalStore = null, instanceId = undefined, verifyIdentity = null, operationFate = null } = {}) => {
   const client = { name, server, stalled: [], recoveries: [], connected: true, busy: false, objects: [], undoBase: null, merges: [], conflicts: [], syncErrors: [], failOps: [], rejoins: 0, legacyBroadcasts: 0, saveRequests: 0, hold: null, held: [] };
   const canvas = {
     serialize: () => clone(client.objects),
@@ -77,7 +77,8 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
     api: {
       getBoard: async () => (getBoard ? getBoard() : server.getBoard()),
       saveBoard: async (body) => (client.saveFails ? { ok: false, code: 'NETWORK_ERROR' } : server.saveBoard(client, clone(body))),
-      saveOnUnload: (body) => { client.unloadSaves = (client.unloadSaves || 0) + 1; server.saveBoard(client, clone(body)); return true; }
+      saveOnUnload: (body) => { client.unloadSaves = (client.unloadSaves || 0) + 1; server.saveBoard(client, clone(body)); return true; },
+      ...(operationFate ? { operationFate } : {})
     },
     socket: {
       emitOperation: async (payload) => {
@@ -103,6 +104,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
       if (kind === 'recovered') client.recoveries.push(detail);
       if (kind === 'recovery-state') client.recoveryState = detail;
       if (kind === 'journal-unavailable') client.journalWarnings = (client.journalWarnings || 0) + 1;
+      if (kind === 'recovery-blocked') client.blocked = (client.blocked || 0) + 1;
     },
     requestSave: () => { client.saveRequests += 1; },
     random: () => 0,
@@ -113,6 +115,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
       list: () => Object.entries(journalStore.records).map(([id, record]) => ({ instanceId: id, record: clone(record) }))
     } : null,
     ...(instanceId ? { instanceId } : {}),
+    ...(verifyIdentity ? { verifyIdentity } : {}),
     options: { pullDelayMs: 5, gapTimeoutMs: 20, idlePollMs: 2, editDelayMs: 5, retryBaseMs: 20, retryMaxMs: 80, ...overrides }
   });
   client.deliver = (method, event) => {
@@ -2055,4 +2058,138 @@ test('a change noted while the board is loading is not journaled or sent and can
   assert.equal(find(server.objects, 'shape_a').left, 308);
   assert.equal(server.objects.length, objects.length);
   a.controller.dispose();
+});
+
+test('recovery submits nothing while another account or no account is signed in, leaves the records untouched, and recovers once the owner signs back in', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_owner_0001', 'shape_a', 71)] };
+  const before = clone(store.records);
+  let session = 'user_b';
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', verifyIdentity: async () => {
+    if (session === null) throw new Error('401');
+    return session === 'user_a';
+  } });
+  assert.equal((await reloaded.controller.recoverPending()).blocked, true);
+  session = null;
+  assert.equal((await reloaded.controller.recoverPending()).blocked, true);
+  assert.equal(reloaded.blocked, 2);
+  assert.deepEqual(server.ops, []);
+  assert.equal(server.revision, 0);
+  assert.deepEqual(store.records, before);
+  session = 'user_a';
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 71);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('an account change in the middle of recovery stops before the next submission and does not rewrite the remaining record', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.dead_1 = { ended: true, beat: 1, entries: [keptEntry('op_first_0001', 'shape_a', 72)] };
+  store.records.dead_2 = { ended: true, beat: 1, entries: [keptEntry('op_second_001', 'shape_z', 73)] };
+  const second = clone(store.records.dead_2);
+  let checks = 0;
+  let restored = false;
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', verifyIdentity: async () => restored || (checks += 1) < 3 });
+  assert.equal((await reloaded.controller.recoverPending()).blocked, true);
+  assert.deepEqual(server.ops.map((op) => op.opId), ['op_first_0001']);
+  assert.equal(store.records.dead_1, undefined);
+  assert.deepEqual(store.records.dead_2, second);
+  restored = true;
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_z').left, 73);
+  assert.equal(server.objects.filter((object) => object.id === 'shape_z').length, 1);
+  assert.deepEqual(pendingEntries(store), []);
+  reloaded.controller.dispose();
+});
+
+test('a recovered operation the server can no longer prove uncommitted is held for the user, never replayed', async () => {
+  for (const enabled of [true, false]) {
+    const server = createServer({ enabled });
+    server.revision = 250;
+    const store = journalStore();
+    store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_acked_0001', 'shape_a', 81)] };
+    const asked = [];
+    const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', operationFate: async (query) => { asked.push(query); return { fate: 'unknown' }; } });
+    if (!enabled) {
+      reloaded.controller.load({ revision: 250, objects: clone(server.objects), enabled: false });
+      reloaded.controller.markLoaded();
+    }
+    const saves = server.saves.length;
+    const summary = await reloaded.controller.recoverPending();
+    assert.deepEqual(asked, [{ opId: 'op_acked_0001', baseRevision: 0 }]);
+    assert.equal(summary.recovered, 0);
+    assert.equal(server.revision, 250);
+    assert.equal(server.saves.length, saves);
+    assert.equal(find(server.objects, 'shape_a').left, 10);
+    assert.deepEqual(heldItems(store), [{ id: 'shape_a', mine: { id: 'shape_a', left: 81 } }]);
+    assert.deepEqual(pendingEntries(store), []);
+    reloaded.controller.dispose();
+  }
+});
+
+test('a recovered operation the server reports committed is cleared without being sent again', async () => {
+  const server = createServer();
+  server.revision = 3;
+  const store = journalStore();
+  store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_acked_0002', 'shape_a', 82)] };
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', operationFate: async () => ({ fate: 'committed' }) });
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.deepEqual(server.ops.map((op) => op.opId), ['op_acked_0002']);
+  assert.equal(server.revision, 3);
+  assert.deepEqual(store.records, {});
+  reloaded.controller.dispose();
+});
+
+test('a replay the server proves uncommitted keeps the original opId, so a second recovery of a lost cleanup is a duplicate', async () => {
+  const server = createServer();
+  server.revision = 2;
+  const store = journalStore();
+  const record = { ended: true, beat: 1, entries: [keptEntry('op_replay_001', 'shape_new', 83)] };
+  store.records.inst_dead = clone(record);
+  const fate = async ({ opId }) => ({ fate: server.recent.has(opId) ? 'committed' : 'not_committed' });
+  const first = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', operationFate: fate });
+  assert.equal((await first.controller.recoverPending()).recovered, 1);
+  assert.equal(server.recent.get('op_replay_001'), 3);
+  first.controller.dispose();
+  store.records.inst_dead = clone(record);
+  const second = createClient('A3', server, {}, { journalStore: store, instanceId: 'inst_a3', operationFate: fate });
+  assert.deepEqual(await second.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 0 });
+  assert.equal(server.revision, 3);
+  assert.deepEqual(store.records, {});
+  second.controller.dispose();
+});
+
+test('legacy: each save carries the opId of the journal draft it commits, and a failed fate lookup keeps the entry', async () => {
+  const base = [{ id: 'base', left: 1 }];
+  const records = journalStore();
+  const seen = [];
+  const board = { revision: 1, objects: clone(base) };
+  const b = legacyWithJournal(records, () => ({ revision: board.revision, objects: clone(board.objects) }), base, 'inst_b');
+  b.server.saveBoard = (client, body) => {
+    seen.push({ opId: body.opId, ifRevision: body.ifRevision, draft: pendingEntries(records).map((entry) => entry.op.opId) });
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  b.objects.push({ id: 'mine', left: 2 });
+  b.controller.noteLocalChange();
+  assert.equal((await b.save()).ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].ifRevision, 1);
+  assert.ok(seen[0].opId);
+  assert.deepEqual(seen[0].draft, [seen[0].opId]);
+  assert.deepEqual(pendingEntries(records), []);
+  b.controller.dispose();
+  const store = journalStore();
+  store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_lookup_001', 'shape_a', 84)] };
+  const server = createServer();
+  server.revision = 4;
+  const offline = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', operationFate: async () => { throw new Error('offline'); } });
+  assert.deepEqual(await offline.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 1 });
+  assert.equal(server.revision, 4);
+  assert.deepEqual(pendingEntries(store).map((entry) => entry.op.opId), ['op_lookup_001']);
+  offline.controller.dispose();
 });

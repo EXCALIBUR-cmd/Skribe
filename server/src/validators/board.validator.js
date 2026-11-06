@@ -28,8 +28,12 @@ export const validateCreateBoard = (req, res, next) => {
 };
 
 export const validateUpdateBoard = (req, res, next) => {
-  const { title, canvasData, isArchived, thumbnail, baseRevision, ifRevision, canvasBackground } = req.body || {};
+  const { title, canvasData, isArchived, thumbnail, baseRevision, ifRevision, opId, canvasBackground } = req.body || {};
   const validationErrors = {};
+
+  if (opId !== undefined && (typeof opId !== 'string' || !/^[A-Za-z0-9_:-]{8,128}$/.test(opId))) {
+    validationErrors.opId = 'opId is invalid';
+  }
 
   if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || baseRevision < 0)) {
     validationErrors.baseRevision = 'baseRevision must be a non-negative integer';

@@ -41,7 +41,7 @@ const SAVE_INSTEAD_CODES = new Set(['INVALID_OPERATION', 'OPERATION_TOO_LARGE'])
 const FATAL_CODES = new Set(['FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
 const UNKNOWN_FATE_CODES = new Set(['ACK_TIMEOUT', 'EMPTY_ACK', 'NO_ACK']);
 const REPLAYABLE_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH', 'OPERATION_TOO_LARGE']);
-const UNRECOVERABLE_CODES = new Set(['INVALID_OPERATION', 'FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
+const UNRECOVERABLE_CODES = new Set(['INVALID_OPERATION', 'FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND', 'UNKNOWN_FATE']);
 
 const createInstanceId = () => `inst_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -55,6 +55,7 @@ export const createBoardSyncController = ({
   timers = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle) },
   random = Math.random,
   journal = null,
+  verifyIdentity = null,
   instanceId = createInstanceId(),
   now = () => Date.now(),
   options = {}
@@ -89,6 +90,7 @@ export const createBoardSyncController = ({
   let recoveryRetryTimer = null;
   let chain = Promise.resolve();
   let disposed = false;
+  let identityBlocked = false;
 
   const enqueue = (task) => {
     const run = chain.then(task, task);
@@ -97,6 +99,19 @@ export const createBoardSyncController = ({
   };
 
   const delay = (ms) => new Promise((resolve) => timers.setTimeout(resolve, ms));
+
+  const identityConfirmed = async () => {
+    if (typeof verifyIdentity !== 'function') return true;
+    const confirmed = await Promise.resolve().then(verifyIdentity).catch(() => false);
+    if (confirmed !== true) identityBlocked = true;
+    return confirmed === true;
+  };
+
+  const operationFate = async (entry) => {
+    if (typeof api.operationFate !== 'function') return 'not_committed';
+    const answer = await Promise.resolve().then(() => api.operationFate({ opId: entry.op.opId, baseRevision: entry.op.baseRevision || 0 })).catch(() => null);
+    return answer?.fate || null;
+  };
 
   const waitForSafePoint = async () => {
     while (!disposed && canvas.isBusy()) {
@@ -393,7 +408,9 @@ export const createBoardSyncController = ({
       if (!data || !Array.isArray(data.objects)) return { ok: false, code: 'NO_CANVAS' };
       if (enabled === true && !hasLocalChanges(data.objects)) return { ok: true, skipped: true };
       const legacy = enabled !== true;
-      const result = await api.saveBoard(legacy ? { canvasData: data, ifRevision: knownRevision } : { canvasData: data, baseRevision: knownRevision });
+      const pending = legacy && journal ? captureDraft(data.objects) : null;
+      if (pending?.op) storeDraft(pending);
+      const result = await api.saveBoard(legacy ? { canvasData: data, ifRevision: knownRevision, ...(pending?.op ? { opId: pending.op.opId } : {}) } : { canvasData: data, baseRevision: knownRevision });
       if (result?.ok) {
         if (!legacy) enabled = true;
         recordSaved(data.objects, result.revision);
@@ -694,12 +711,14 @@ export const createBoardSyncController = ({
     ...(entry.op.deletes || []).map((id) => ({ id, mine: null }))
   ];
 
-  const commitRecovered = async (objects, kind) => {
+  const commitRecovered = async (objects, kind, opId = null) => {
     const { op, tooLarge } = buildOperationFrom({ base: localBase(), stored: baseRaw, objects, revision: knownRevision, kind });
     if (!op) return { ok: true, noop: true };
+    if (!(await identityConfirmed())) return { ok: false, code: 'IDENTITY_MISMATCH' };
+    if (opId) op.opId = opId;
     const canvasData = { ...(canvas.snapshot() || {}), objects };
-    if (enabled !== true) return api.saveBoard({ canvasData, ifRevision: knownRevision });
-    if (tooLarge) return api.saveBoard({ canvasData, baseRevision: knownRevision });
+    if (enabled !== true) return api.saveBoard({ canvasData, ifRevision: knownRevision, opId: op.opId });
+    if (tooLarge) return api.saveBoard({ canvasData, baseRevision: knownRevision, opId: op.opId });
     return socket.emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
   };
 
@@ -762,7 +781,7 @@ export const createBoardSyncController = ({
     }
     const conflicts = heldItems.length + (heldOrder ? 1 : 0);
     if (applied === 0) return { done: true, applied, conflicts, held: heldItems, heldOrder };
-    const ack = await commitRecovered(orderIds.map((id) => target.get(id)), entry.op.kind || 'edit');
+    const ack = await commitRecovered(orderIds.map((id) => target.get(id)), entry.op.kind || 'edit', conflicts === 0 ? entry.op.opId : null);
     if (FATAL_CODES.has(ack?.code)) {
       const refused = heldFromEntry(entry);
       return { done: true, applied: 0, conflicts: refused.length, held: refused, heldOrder: reference.length > 0 ? reference : null };
@@ -780,11 +799,15 @@ export const createBoardSyncController = ({
     const entries = [...record.entries].sort((a, b) => (a.savedAt || 0) - (b.savedAt || 0));
     let stop = false;
     for (const entry of entries) {
-      if (stop || disposed) {
+      if (stop || disposed || identityBlocked) {
         remaining.push(entry);
         continue;
       }
       const exactResend = enabled === true && (!entry.after || committed.get(entry.after) === entry.op.baseRevision);
+      if (exactResend && !(await identityConfirmed())) {
+        remaining.push(entry);
+        continue;
+      }
       let code = 'STALE_REVISION';
       if (exactResend) {
         const ack = await socket.emitOperation({ boardId, ...entry.op }, settings.ackTimeoutMs);
@@ -797,9 +820,22 @@ export const createBoardSyncController = ({
         code = ack?.code || 'NO_ACK';
       }
       if (REPLAYABLE_CODES.has(code)) {
+        const fate = await operationFate(entry);
+        if (fate === 'committed') {
+          totals.changed = true;
+          continue;
+        }
+        if (fate === 'unknown') code = 'UNKNOWN_FATE';
+        else if (fate !== 'not_committed') {
+          remaining.push(entry);
+          stop = true;
+          continue;
+        }
+      }
+      if (REPLAYABLE_CODES.has(code)) {
         let result = { done: false, applied: 0, conflicts: 0, held: [], heldOrder: null };
         try {
-          for (let attempt = 0; attempt < settings.maxSaveAttempts && !result.done && !disposed; attempt += 1) {
+          for (let attempt = 0; attempt < settings.maxSaveAttempts && !result.done && !disposed && !identityBlocked; attempt += 1) {
             await pullNow();
             result = await replayEntry(entry);
           }
@@ -861,11 +897,14 @@ export const createBoardSyncController = ({
     if (disposed || enabled === null || !journal || baseLocal === null) return { recovered: 0, conflicts: 0, kept: 0 };
     if (journal.load) await journal.load().catch(() => false);
     if (disposed) return { recovered: 0, conflicts: 0, kept: 0 };
+    identityBlocked = false;
+    const foreign = listRecords().filter(({ instanceId: owner }) => owner !== instanceId);
+    if (foreign.length > 0) await identityConfirmed();
     let aliveElsewhere = false;
     let damaged = 0;
     let heldCount = 0;
     let heldOrderCount = 0;
-    for (const { instanceId: owner, record } of listRecords()) {
+    for (const { instanceId: owner, record } of identityBlocked ? [] : foreign) {
       if (disposed) break;
       if (owner === instanceId) continue;
       const read = readRecord(record);
@@ -884,6 +923,7 @@ export const createBoardSyncController = ({
       }
       damaged += read.damaged;
       const { remaining, held, heldOrder } = await recoverRecord({ ...record, entries: read.entries }, totals);
+      if (identityBlocked) break;
       const keptHeld = new Map(read.held.map((item) => [item.id, item]));
       held.forEach((item, id) => keptHeld.set(id, item));
       if (totals.changed) await pullNow().catch(() => {});
@@ -899,13 +939,17 @@ export const createBoardSyncController = ({
         journalHealthy = false;
       }
     }
-    if ((aliveElsewhere || totals.kept > 0) && !recoveryRetryTimer && !disposed) {
+    if ((aliveElsewhere || totals.kept > 0 || identityBlocked) && !recoveryRetryTimer && !disposed) {
       recoveryRetryTimer = timers.setTimeout(() => {
         recoveryRetryTimer = null;
         recoverPending();
       }, settings.foreignJournalAgeMs + 1000);
     }
     const summary = { recovered: totals.recovered, conflicts: totals.conflicts, kept: totals.kept };
+    if (identityBlocked) {
+      notify('recovery-blocked', { reason: 'identity' });
+      return { ...summary, blocked: true };
+    }
     if (summary.recovered > 0 || summary.conflicts > 0) notify('recovered', { ...summary, held: heldCount });
     notify('recovery-state', { kept: totals.kept, held: heldCount, heldOrder: heldOrderCount, damaged });
     return summary;
