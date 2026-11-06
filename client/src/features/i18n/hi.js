@@ -193,6 +193,11 @@ export default {
   'workspace.saving': 'सहेजा जा रहा है',
   'workspace.saved': 'सहेजा गया',
   'workspace.saveFailed': 'सहेजना विफल',
+  'workspace.recovery.pending': 'स्थानीय रूप से सहेजा जा रहा है',
+  'workspace.recovery.protected': 'इस ब्राउज़र में सुरक्षित',
+  'workspace.recovery.unavailable': 'ब्राउज़र रिकवरी उपलब्ध नहीं',
+  'workspace.recovery.full': 'ब्राउज़र स्टोरेज भरा है',
+  'workspace.recovery.error': 'ब्राउज़र रिकवरी विफल',
   'workspace.share': 'शेयर करें',
   'workspace.shareBoard': 'बोर्ड शेयर करें',
 

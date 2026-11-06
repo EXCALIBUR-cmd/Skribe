@@ -859,6 +859,8 @@ export const createBoardSyncController = ({
   const recoverPending = () => enqueue(async () => {
     const totals = { recovered: 0, conflicts: 0, kept: 0, changed: false };
     if (disposed || enabled === null || !journal || baseLocal === null) return { recovered: 0, conflicts: 0, kept: 0 };
+    if (journal.load) await journal.load().catch(() => false);
+    if (disposed) return { recovered: 0, conflicts: 0, kept: 0 };
     let aliveElsewhere = false;
     let damaged = 0;
     let heldCount = 0;

@@ -193,6 +193,11 @@ export default {
   'workspace.saving': 'Saving',
   'workspace.saved': 'Saved',
   'workspace.saveFailed': 'Save failed',
+  'workspace.recovery.pending': 'Saving locally',
+  'workspace.recovery.protected': 'Protected in this browser',
+  'workspace.recovery.unavailable': 'Browser recovery unavailable',
+  'workspace.recovery.full': 'Browser storage full',
+  'workspace.recovery.error': 'Browser recovery failed',
   'workspace.share': 'Share',
   'workspace.shareBoard': 'Share Board',
 

@@ -103,6 +103,8 @@ export const MainCanvasPage = () => {
   const [recoveryState, setRecoveryState] = useState({ kept: 0, held: 0, heldOrder: 0 });
   const [resolvingHeld, setResolvingHeld] = useState(false);
   const recoveryKeptRef = useRef(0);
+  const [recoveryStorage, setRecoveryStorage] = useState('');
+  const recoveryStorageWarnedRef = useRef(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -298,7 +300,18 @@ export const MainCanvasPage = () => {
           syncControllerRef.current?.dispose();
           syncControllerRef.current = createBoardSyncController({
             boardId,
-            journal: createPendingJournal({ boardId, userId: user?._id || user?.id }),
+            journal: createPendingJournal({
+              boardId,
+              userId: user?._id || user?.id,
+              onState: (next) => {
+                if (!isMounted) return;
+                setRecoveryStorage(next);
+                if (next === 'full' && !recoveryStorageWarnedRef.current) {
+                  recoveryStorageWarnedRef.current = true;
+                  addToast('Browser storage is full', 'Your newest changes are kept for now, but this browser cannot protect them if it closes. Stay on this page until they are saved.', 'warning', 'warning');
+                }
+              }
+            }),
             api: {
               getBoard: async () => {
                 const latest = await apiClient.get(`/boards/${boardId}`);
@@ -400,7 +413,12 @@ export const MainCanvasPage = () => {
                   const afterCount = fabricCanvasRef.current?.getCanvas?.()?.getObjects?.()?.length ?? '?';
                   console.log('[BOARD LOAD DEBUG] Canvas object count after load:', afterCount);
                   syncControllerRef.current?.markLoaded();
-                  syncControllerRef.current?.recoverPending().catch((err) => {
+                  const journalUserId = String(user?._id || user?.id || '');
+                  apiClient.get('/auth/me').then((me) => {
+                    const sessionUserId = String(me?.data?.user?._id || me?.data?.user?.id || '');
+                    if (!isMounted || !sessionUserId || sessionUserId !== journalUserId) return null;
+                    return syncControllerRef.current?.recoverPending();
+                  }).catch((err) => {
                     console.error('[MainCanvasPage] Pending change recovery failed:', err);
                   });
                   isInitialLoadingRef.current = false;
@@ -419,6 +437,7 @@ export const MainCanvasPage = () => {
         const errMsg = typeof err === 'string' ? err : err?.message || 'Could not load board';
         addToast('Board Error', errMsg, 'error', 'error');
         const journal = createPendingJournal({ boardId, userId: user?._id || user?.id });
+        if (journal) await journal.load().catch(() => false);
         const pendingChanges = journal ? countPendingChanges(journal) : 0;
         if (pendingChanges > 0) {
           addToast('Unsynced changes kept', `${pendingChanges} unsynced change${pendingChanges === 1 ? ' is' : 's are'} saved only in this browser because this board could not be opened. Nothing was discarded.`, 'cloud_off', 'warning');
@@ -1319,6 +1338,12 @@ export const MainCanvasPage = () => {
             <span className="flex items-center gap-1 text-error text-[11px] font-semibold">
               <span className="material-symbols-outlined text-[14px]">error</span>
               <span>{t('workspace.saveFailed')}</span>
+            </span>
+          )}
+          {recoveryStorage && (saveStatus !== 'saved' || !['pending', 'protected'].includes(recoveryStorage)) && (
+            <span data-recovery-storage={recoveryStorage} className={`flex items-center gap-1 ml-2 text-[11px] font-medium ${['pending', 'protected'].includes(recoveryStorage) ? 'text-on-surface-variant' : 'text-error'}`}>
+              <span className="material-symbols-outlined text-[14px]">{recoveryStorage === 'protected' ? 'shield' : recoveryStorage === 'pending' ? 'hard_drive' : 'warning'}</span>
+              <span>{t(`workspace.recovery.${recoveryStorage}`)}</span>
             </span>
           )}
         </div>
