@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { getExpectedUser } from '../api/apiClient';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
@@ -15,6 +16,8 @@ export const connect = () => {
   socket = io(SOCKET_URL, {
 
     withCredentials: true,
+
+    auth: (send) => send(getExpectedUser() ? { expectedUserId: getExpectedUser() } : {}),
 
     transports: ['websocket', 'polling'],
 
@@ -54,6 +57,10 @@ export const disconnect = () => {
     socket = null;
     console.log('[Socket] Disconnected and instance cleared (logout)');
   }
+};
+
+export const pause = () => {
+  if (socket) socket.disconnect();
 };
 
 export const joinBoard = (boardId) => {
@@ -99,6 +106,7 @@ export const getSocket = () => socket;
 const socketService = {
   connect,
   disconnect,
+  pause,
   joinBoard,
   leaveBoard,
   on,

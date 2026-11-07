@@ -216,6 +216,7 @@ export const registerBoardHandlers = (io, socket) => {
   socket.on('canvas:op', async (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
     if (!config.collabOperationsEnabled) return reply({ ok: false, code: 'OPERATIONS_DISABLED' });
+    if (Number.isFinite(socket.data?.tokenExp) && Date.now() >= socket.data.tokenExp * 1000) return reply({ ok: false, code: 'SESSION_EXPIRED' });
     const boardId = payload?.boardId;
     if (typeof boardId !== 'string' || !mongoose.Types.ObjectId.isValid(boardId)) return reply({ ok: false, code: 'INVALID_OPERATION' });
     const room = boardRoomName(boardId);

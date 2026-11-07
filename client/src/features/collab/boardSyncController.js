@@ -40,6 +40,7 @@ const REBUILD_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH']);
 const SAVE_INSTEAD_CODES = new Set(['INVALID_OPERATION', 'OPERATION_TOO_LARGE']);
 const FATAL_CODES = new Set(['FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND']);
 const UNKNOWN_FATE_CODES = new Set(['ACK_TIMEOUT', 'EMPTY_ACK', 'NO_ACK']);
+const SESSION_CODES = new Set(['IDENTITY_MISMATCH', 'UNAUTHENTICATED', 'SESSION_EXPIRED', 'SESSION_HELD']);
 const REPLAYABLE_CODES = new Set(['STALE_REVISION', 'ORDER_MISMATCH', 'OPERATION_TOO_LARGE']);
 const UNRECOVERABLE_CODES = new Set(['INVALID_OPERATION', 'FORBIDDEN', 'BOARD_NOT_FOUND', 'NOT_FOUND', 'UNKNOWN_FATE']);
 
@@ -91,6 +92,7 @@ export const createBoardSyncController = ({
   let chain = Promise.resolve();
   let disposed = false;
   let identityBlocked = false;
+  let sessionHeld = false;
 
   const enqueue = (task) => {
     const run = chain.then(task, task);
@@ -108,10 +110,35 @@ export const createBoardSyncController = ({
   };
 
   const operationFate = async (entry) => {
-    if (typeof api.operationFate !== 'function') return 'not_committed';
+    if (typeof api.operationFate !== 'function') return null;
     const answer = await Promise.resolve().then(() => api.operationFate({ opId: entry.op.opId, baseRevision: entry.op.baseRevision || 0 })).catch(() => null);
     return answer?.fate || null;
   };
+
+  const holdSession = (code = 'SESSION_HELD') => {
+    identityBlocked = true;
+    if (sessionHeld || disposed) return;
+    sessionHeld = true;
+    clearRetry();
+    notify('session-held', { code });
+  };
+
+  const resumeSession = () => {
+    const wasHeld = sessionHeld;
+    sessionHeld = false;
+    return wasHeld;
+  };
+
+  const guarded = (send) => async (...args) => {
+    if (sessionHeld) return { ok: false, code: 'SESSION_HELD' };
+    const result = await send(...args);
+    if (SESSION_CODES.has(result?.code)) holdSession(result.code);
+    return result;
+  };
+
+  const saveBoard = guarded((body) => api.saveBoard(body));
+
+  const emitOperation = guarded((payload, timeoutMs) => socket.emitOperation(payload, timeoutMs));
 
   const waitForSafePoint = async () => {
     while (!disposed && canvas.isBusy()) {
@@ -410,7 +437,7 @@ export const createBoardSyncController = ({
       const legacy = enabled !== true;
       const pending = legacy && journal ? captureDraft(data.objects) : null;
       if (pending?.op) storeDraft(pending);
-      const result = await api.saveBoard(legacy ? { canvasData: data, ifRevision: knownRevision, ...(pending?.op ? { opId: pending.op.opId } : {}) } : { canvasData: data, baseRevision: knownRevision });
+      const result = await saveBoard(legacy ? { canvasData: data, ifRevision: knownRevision, ...(pending?.op ? { opId: pending.op.opId } : {}) } : { canvasData: data, baseRevision: knownRevision });
       if (result?.ok) {
         if (!legacy) enabled = true;
         recordSaved(data.objects, result.revision);
@@ -463,6 +490,7 @@ export const createBoardSyncController = ({
       if (disposed) return { mode: 'disposed' };
       await waitForSafePoint();
       if (disposed) return { mode: 'disposed' };
+      if (sessionHeld) return { mode: 'held' };
       const canvasObjects = canvas.serialize();
       const pending = buildPendingOperation(canvasObjects, kind);
       if (baseLocal) baseLocal = pending.base;
@@ -475,7 +503,7 @@ export const createBoardSyncController = ({
       }
       if (pending.tooLarge) return saveInstead('OPERATION_TOO_LARGE');
       const entry = rememberPending(op, pending.base);
-      inFlight = socket.emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
+      inFlight = emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
       inFlightOp = { op, objects: canvasObjects, ack: inFlight };
       let ack;
       try {
@@ -485,12 +513,13 @@ export const createBoardSyncController = ({
         inFlightOp = null;
       }
       if (ack?.ok) supersedePending(entry);
-      else if (!UNKNOWN_FATE_CODES.has(ack?.code || 'NO_ACK')) forgetPending(op.opId);
+      else if (!UNKNOWN_FATE_CODES.has(ack?.code || 'NO_ACK') && !SESSION_CODES.has(ack?.code)) forgetPending(op.opId);
       if (ack?.ok) {
         recordOperation(op, canvasObjects, ack.revision);
         return synced({ mode: 'operation', revision: ack.revision, duplicate: Boolean(ack.duplicate) });
       }
       const code = ack?.code || 'NO_ACK';
+      if (SESSION_CODES.has(code)) return { mode: 'held', code };
       if (code === 'OPERATIONS_DISABLED') {
         enabled = false;
         clearRetry();
@@ -593,7 +622,7 @@ export const createBoardSyncController = ({
   };
 
   const saveCaptured = async (captured) => {
-    const result = await api.saveBoard({ canvasData: captured.live, baseRevision: captured.revision });
+    const result = await saveBoard({ canvasData: captured.live, baseRevision: captured.revision });
     if (result?.ok) {
       if (!disposed && knownRevision === captured.revision) recordSaved(captured.live.objects, result.revision);
       return { ok: true };
@@ -603,7 +632,7 @@ export const createBoardSyncController = ({
     if (!board || !Number.isInteger(board.revision)) return { ok: false, code: result.code };
     const merge = mergeThreeWay({ baseRaw: captured.baseRaw, baseLocal: captured.baseLocal, theirs: board.objects, local: captured.live.objects });
     const merged = { ...captured.live, objects: merge.objects };
-    const retry = await api.saveBoard({ canvasData: merged, baseRevision: board.revision });
+    const retry = await saveBoard({ canvasData: merged, baseRevision: board.revision });
     if (!retry?.ok) return { ok: false, code: retry?.code || 'SAVE_FAILED' };
     finalBlocked = true;
     return { ok: true, merged: true, conflicts: merge.conflicts };
@@ -628,7 +657,7 @@ export const createBoardSyncController = ({
       let legacy = null;
       try {
         for (let tries = 0; tries < settings.maxSaveAttempts; tries += 1) {
-          legacy = await api.saveBoard(attempt);
+          legacy = await saveBoard(attempt);
           if (legacy?.code !== CANVAS_CHANGED) break;
           const board = await api.getBoard();
           const merge = mergeThreeWay({ baseRaw: captured.baseRaw, baseLocal: captured.baseLocal, theirs: board.objects, local: captured.live.objects });
@@ -656,7 +685,7 @@ export const createBoardSyncController = ({
     if (!captured.op) return { ok: true, skipped: true };
     const entry = rememberPending(captured.op, captured.baseLocal);
     if (!captured.tooLarge) {
-      const ack = await socket.emitOperation({ boardId, ...captured.op }, settings.ackTimeoutMs);
+      const ack = await emitOperation({ boardId, ...captured.op }, settings.ackTimeoutMs);
       if (ack?.ok) {
         supersedePending(entry);
         if (!disposed && knownRevision === captured.revision) recordOperation(captured.op, captured.live.objects, ack.revision);
@@ -717,9 +746,9 @@ export const createBoardSyncController = ({
     if (!(await identityConfirmed())) return { ok: false, code: 'IDENTITY_MISMATCH' };
     if (opId) op.opId = opId;
     const canvasData = { ...(canvas.snapshot() || {}), objects };
-    if (enabled !== true) return api.saveBoard({ canvasData, ifRevision: knownRevision, opId: op.opId });
-    if (tooLarge) return api.saveBoard({ canvasData, baseRevision: knownRevision, opId: op.opId });
-    return socket.emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
+    if (enabled !== true) return saveBoard({ canvasData, ifRevision: knownRevision, opId: op.opId });
+    if (tooLarge) return saveBoard({ canvasData, baseRevision: knownRevision, opId: op.opId });
+    return emitOperation({ boardId, ...op }, settings.ackTimeoutMs);
   };
 
   const replayEntry = async (entry) => {
@@ -810,7 +839,7 @@ export const createBoardSyncController = ({
       }
       let code = 'STALE_REVISION';
       if (exactResend) {
-        const ack = await socket.emitOperation({ boardId, ...entry.op }, settings.ackTimeoutMs);
+        const ack = await emitOperation({ boardId, ...entry.op }, settings.ackTimeoutMs);
         if (ack?.ok) {
           committed.set(entry.op.opId, ack.revision);
           if (!ack.duplicate) totals.recovered += 1;
@@ -897,7 +926,7 @@ export const createBoardSyncController = ({
     if (disposed || enabled === null || !journal || baseLocal === null) return { recovered: 0, conflicts: 0, kept: 0 };
     if (journal.load) await journal.load().catch(() => false);
     if (disposed) return { recovered: 0, conflicts: 0, kept: 0 };
-    identityBlocked = false;
+    identityBlocked = sessionHeld;
     const foreign = listRecords().filter(({ instanceId: owner }) => owner !== instanceId);
     if (foreign.length > 0) await identityConfirmed();
     let aliveElsewhere = false;
@@ -1102,6 +1131,8 @@ export const createBoardSyncController = ({
     receiveOperation,
     receiveRevision,
     reconnect,
+    holdSession,
+    resumeSession,
     pull,
     idle,
     dispose,

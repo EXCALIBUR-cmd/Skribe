@@ -12,6 +12,10 @@ import { OPERATION_RATE_LIMIT, boardRoomName, registerBoardHandlers } from '../s
 import { OPERATION_LIMITS, applyCanvasOperation, commitCanvasOperation, operationFate, validateCanvasOperation } from '../services/boardOperation.service.js';
 import { RECENT_OPERATION_LIMIT } from '../repositories/board.repository.js';
 import { validateUpdateBoard } from '../validators/board.validator.js';
+import { authenticate, requireExpectedUser } from '../middleware/auth.middleware.js';
+import { socketAuthMiddleware } from '../sockets/socketAuth.js';
+import { generateAccessToken } from '../utils/jwt.js';
+import { COOKIE_NAME } from '../utils/cookieOptions.js';
 
 const TEST_DB_NAME = `skribe_board_ops_test_${process.pid}_${Date.now()}`;
 const TEST_MONGO_BASE = process.env.TEST_MONGODB_URI || 'mongodb://127.0.0.1:27017';
@@ -530,4 +534,66 @@ test('saves that carry an opId are attributed to their revision in both protocol
   const ok = fakeResponse();
   await boardController.operationFate({ user: { id: memberId.toString() }, params: { id: boardId, opId: 'op_save_on_0001' }, query: { baseRevision: '0' } }, ok, assert.fail);
   assert.deepEqual(ok.body.data, { fate: 'committed', revision: 1 });
+});
+
+const requestFor = (userId, expected, extra = {}) => ({
+  user: { id: userId },
+  get: (name) => (name.toLowerCase() === 'x-skribe-user' ? expected : undefined),
+  ...extra
+});
+
+test('a board mutation whose expected user differs from the authenticated user is refused before the controller runs and changes nothing', needsMongo, async () => {
+  const boardId = await createBoard();
+  const before = await stored(boardId);
+  const refused = fakeResponse();
+  let reached = false;
+  requireExpectedUser(requestFor(memberId, ownerId.toString()), refused, () => { reached = true; });
+  assert.equal(reached, false);
+  assert.equal(refused.statusCode, 409);
+  assert.equal(refused.body.errors.code, 'IDENTITY_MISMATCH');
+  const after = await stored(boardId);
+  assert.equal(after.canvasRevision ?? 0, before.canvasRevision ?? 0);
+  assert.deepEqual(after.canvasData, before.canvasData);
+  let passed = 0;
+  requireExpectedUser(requestFor(ownerId, ownerId.toString()), fakeResponse(), () => { passed += 1; });
+  requireExpectedUser(requestFor(ownerId, undefined), fakeResponse(), () => { passed += 1; });
+  assert.equal(passed, 2);
+});
+
+test('an expired or missing session is reported with an UNAUTHENTICATED code', async () => {
+  const missing = fakeResponse();
+  await authenticate({ cookies: {}, headers: {} }, missing, () => assert.fail('must not pass'));
+  assert.equal(missing.statusCode, 401);
+  assert.equal(missing.body.errors.code, 'UNAUTHENTICATED');
+  const expired = fakeResponse();
+  await authenticate({ cookies: { [COOKIE_NAME]: generateAccessToken({ id: ownerId.toString() }, '-1s') }, headers: {} }, expired, () => assert.fail('must not pass'));
+  assert.equal(expired.statusCode, 401);
+  assert.equal(expired.body.errors.code, 'UNAUTHENTICATED');
+});
+
+test('a socket handshake is refused when its cookie belongs to a different user than the board session expects', needsMongo, async () => {
+  const userA = await User.create({ name: 'User A', email: `a_${Date.now()}@test.local`, password: 'password123' });
+  const userB = await User.create({ name: 'User B', email: `b_${Date.now()}@test.local`, password: 'password123' });
+  const handshake = (cookieUser, expectedUserId) => new Promise((resolve) => {
+    const socket = { data: {}, handshake: { headers: { cookie: `${COOKIE_NAME}=${generateAccessToken({ id: cookieUser._id.toString() })}` }, auth: expectedUserId ? { expectedUserId } : {} } };
+    socketAuthMiddleware(socket, (err) => resolve({ err, socket }));
+  });
+  const crossed = await handshake(userB, userA._id.toString());
+  assert.equal(crossed.err?.message, 'IDENTITY_MISMATCH');
+  assert.equal(crossed.socket.user, undefined);
+  const matched = await handshake(userA, userA._id.toString());
+  assert.equal(matched.err, undefined);
+  assert.equal(String(matched.socket.user.id), userA._id.toString());
+  assert.ok(Number.isFinite(matched.socket.data.tokenExp));
+  const unbound = await handshake(userB, null);
+  assert.equal(unbound.err, undefined);
+});
+
+test('an operation on a socket whose session has expired is refused without committing', needsMongo, async () => {
+  const boardId = await createBoard();
+  const { socket, send } = fakeSocket(ownerId, boardId);
+  socket.data.tokenExp = Math.floor(Date.now() / 1000) - 1;
+  const ack = await send({ boardId, ...operation(0, { upserts: [{ id: 'shape_b', data: shape('shape_b', { left: 999 }), unset: [] }] }) });
+  assert.deepEqual(ack, { ok: false, code: 'SESSION_EXPIRED' });
+  assert.equal((await stored(boardId)).canvasRevision ?? 0, 0);
 });

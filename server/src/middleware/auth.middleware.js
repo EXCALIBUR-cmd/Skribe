@@ -16,19 +16,19 @@ export const authenticate = async (req, res, next) => {
     }
 
     if (!token) {
-      return error(res, 'Authentication token missing. Please log in.', 401);
+      return error(res, 'Authentication token missing. Please log in.', 401, { code: 'UNAUTHENTICATED' });
     }
 
     let decoded;
     try {
       decoded = verifyAccessToken(token);
     } catch (jwtErr) {
-      return error(res, 'Authentication token is invalid or expired. Please log in again.', 401);
+      return error(res, 'Authentication token is invalid or expired. Please log in again.', 401, { code: 'UNAUTHENTICATED' });
     }
 
     const user = await userRepository.findById(decoded.id);
     if (!user) {
-      return error(res, 'Authenticated user account no longer exists.', 401);
+      return error(res, 'Authenticated user account no longer exists.', 401, { code: 'UNAUTHENTICATED' });
     }
 
     req.user = user.toJSON();
@@ -36,6 +36,16 @@ export const authenticate = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+export const EXPECTED_USER_HEADER = 'x-skribe-user';
+
+export const requireExpectedUser = (req, res, next) => {
+  const expected = req.get(EXPECTED_USER_HEADER);
+  if (expected && expected !== String(req.user?.id ?? '')) {
+    return error(res, 'This board was opened by a different account than the one now signed in. Nothing was changed.', 409, { code: 'IDENTITY_MISMATCH' });
+  }
+  return next();
 };
 
 export default authenticate;

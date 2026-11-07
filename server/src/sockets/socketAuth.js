@@ -37,6 +37,11 @@ export const socketAuthMiddleware = async (socket, next) => {
     }
 
     const userJson = user.toJSON();
+    const expectedUserId = socket.handshake.auth?.expectedUserId;
+    if (expectedUserId && String(expectedUserId) !== String(userJson.id)) {
+      return next(new Error('IDENTITY_MISMATCH'));
+    }
+    socket.data.tokenExp = decoded.exp;
     socket.user = {
       id: userJson.id,
       name: userJson.name,

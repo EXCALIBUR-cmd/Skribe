@@ -19,7 +19,7 @@ import CollaborativeCursorsOverlay from '../components/ui/CollaborativeCursorsOv
 import { createPresenceNotices } from '../features/collab/presenceNotices';
 import CollaborativeSelectionsOverlay from '../components/ui/CollaborativeSelectionsOverlay';
 import UndoRedoFloating from '../components/ui/UndoRedoFloating';
-import apiClient from '../api/apiClient';
+import apiClient, { getExpectedUser } from '../api/apiClient';
 import SidekickPanel from '../components/sidekick/SidekickPanel';
 import { executeSidekickPlan } from '../features/sidekick/sidekickPlan';
 import { renderMermaid } from '../features/aiAssistant/mermaidRenderer';
@@ -51,7 +51,7 @@ const isValidViewport = (viewport) => (
 
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
-  const { user } = useAuth();
+  const { user, sessionUserId, recheckSession } = useAuth();
   const { resolvedTheme, t, preferences } = usePreferences();
   const boardOpenViewRef = useRef(preferences.boardOpenView);
   boardOpenViewRef.current = preferences.boardOpenView;
@@ -106,6 +106,10 @@ export const MainCanvasPage = () => {
   const [recoveryStorage, setRecoveryStorage] = useState('');
   const recoveryStorageWarnedRef = useRef(false);
   const recoveryBlockedWarnedRef = useRef(false);
+  const sessionWarnedRef = useRef(false);
+  const sessionUserIdRef = useRef(sessionUserId);
+  const recheckSessionRef = useRef(recheckSession);
+  recheckSessionRef.current = recheckSession;
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -186,6 +190,19 @@ export const MainCanvasPage = () => {
       }
     }
   }, [boardId]);
+
+  useEffect(() => {
+    sessionUserIdRef.current = sessionUserId;
+    const sync = syncControllerRef.current;
+    const ownerId = String(user?._id || user?.id || '');
+    if (!sync || !ownerId) return;
+    if (sessionUserId !== ownerId) {
+      sync.holdSession('SESSION_CHANGED');
+    } else if (sync.resumeSession()) {
+      sessionWarnedRef.current = false;
+      socketService.connect();
+    }
+  }, [sessionUserId, user]);
 
   const saveViewport = useCallback(async (viewport) => {
     if (!boardId || !isValidViewport(viewport)) return;
@@ -333,7 +350,7 @@ export const MainCanvasPage = () => {
                 try {
                   const payload = JSON.stringify(body);
                   if (payload.length > 60000) return false;
-                  fetch(`${apiClient.defaults.baseURL}/boards/${boardId}`, { method: 'PATCH', keepalive: true, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: payload });
+                  fetch(`${apiClient.defaults.baseURL}/boards/${boardId}`, { method: 'PATCH', keepalive: true, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(getExpectedUser() ? { 'X-Skribe-User': getExpectedUser() } : {}) }, body: payload });
                   return true;
                 } catch {
                   return false;
@@ -391,8 +408,21 @@ export const MainCanvasPage = () => {
                 else if (recoveryKeptRef.current > 0 && !syncControllerRef.current?.hasUnsavedWork()) setSaveStatus('saved');
                 recoveryKeptRef.current = detail.kept;
                 if (detail.damaged > 0) addToast('Damaged draft removed', `${detail.damaged} damaged item${detail.damaged === 1 ? '' : 's'} in your local draft could not be read and ${detail.damaged === 1 ? 'was' : 'were'} removed.`, 'warning', 'warning');
+              } else if (kind === 'session-held') {
+                setSaveStatus('error');
+                socketService.pause();
+                Promise.resolve(recheckSessionRef.current?.()).then((id) => {
+                  if (id && id === journalUserId && syncControllerRef.current?.resumeSession()) {
+                    sessionWarnedRef.current = false;
+                    socketService.connect();
+                  }
+                });
+                if (!sessionWarnedRef.current) {
+                  sessionWarnedRef.current = true;
+                  addToast('Signed-in account changed', `This board was opened as ${user?.email || 'another account'}. Your edits are kept in this browser and have not been sent. Sign back in as that account to continue saving.`, 'lock', 'warning');
+                }
               } else if (kind === 'recovery-blocked') {
-                if (!recoveryBlockedWarnedRef.current) {
+                if (!recoveryBlockedWarnedRef.current && !sessionWarnedRef.current) {
                   recoveryBlockedWarnedRef.current = true;
                   addToast('Recovery paused', 'Unsynced changes in this browser belong to the account that opened this board. Sign back in to that account to restore them. Nothing was discarded.', 'lock', 'warning');
                 }
@@ -405,6 +435,7 @@ export const MainCanvasPage = () => {
             requestSave: () => handleCanvasChangeRef.current?.()
           });
           syncControllerRef.current.load({ revision: res.data.board.canvasRevision ?? 0, objects: initialJson.objects || [], enabled: res.data.collaboration?.operationsEnabled === true });
+          if (journalUserId && sessionUserIdRef.current !== journalUserId) syncControllerRef.current.holdSession('SESSION_CHANGED');
 
           const applyCanvasData = () => {
             if (!isMounted) return;
@@ -639,6 +670,10 @@ export const MainCanvasPage = () => {
       boardSync()?.reconnect();
     };
 
+    const handleSocketRefused = (err) => {
+      if (err?.message === 'IDENTITY_MISMATCH') boardSync()?.holdSession('IDENTITY_MISMATCH');
+    };
+
     const handleBoardJoined = (event) => {
       if (event?.boardId === boardId) boardSync()?.reconnect();
     };
@@ -648,6 +683,7 @@ export const MainCanvasPage = () => {
     socketService.on('board:revision', handleRemoteRevision);
     socketService.on('disconnect', handleSocketDisconnect);
     socketService.on('connect', handleSocketReconnect);
+    socketService.on('connect_error', handleSocketRefused);
 
     return () => {
       socketService.off('board-joined', handleBoardJoined);
@@ -655,6 +691,7 @@ export const MainCanvasPage = () => {
       socketService.off('board:revision', handleRemoteRevision);
       socketService.off('disconnect', handleSocketDisconnect);
       socketService.off('connect', handleSocketReconnect);
+      socketService.off('connect_error', handleSocketRefused);
       syncControllerRef.current?.dispose();
     };
   }, [boardId]);

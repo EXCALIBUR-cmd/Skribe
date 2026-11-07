@@ -8,6 +8,19 @@ export const apiClient = axios.create({
   }
 });
 
+let expectedUserId = null;
+
+export const setExpectedUser = (id) => {
+  expectedUserId = id ? String(id) : null;
+};
+
+export const getExpectedUser = () => expectedUserId;
+
+apiClient.interceptors.request.use((config) => {
+  if (expectedUserId) config.headers['X-Skribe-User'] = expectedUserId;
+  return config;
+});
+
 apiClient.interceptors.response.use(
   (response) => {
     return response.data;

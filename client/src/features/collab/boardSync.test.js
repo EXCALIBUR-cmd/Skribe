@@ -78,7 +78,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
       getBoard: async () => (getBoard ? getBoard() : server.getBoard()),
       saveBoard: async (body) => (client.saveFails ? { ok: false, code: 'NETWORK_ERROR' } : server.saveBoard(client, clone(body))),
       saveOnUnload: (body) => { client.unloadSaves = (client.unloadSaves || 0) + 1; server.saveBoard(client, clone(body)); return true; },
-      ...(operationFate ? { operationFate } : {})
+      ...(operationFate === false ? {} : { operationFate: operationFate || (async ({ opId }) => ({ fate: server.recent.has(opId) ? 'committed' : 'not_committed' })) })
     },
     socket: {
       emitOperation: async (payload) => {
@@ -105,6 +105,7 @@ const createClient = (name, server, overrides = {}, { normalize = (objects) => o
       if (kind === 'recovery-state') client.recoveryState = detail;
       if (kind === 'journal-unavailable') client.journalWarnings = (client.journalWarnings || 0) + 1;
       if (kind === 'recovery-blocked') client.blocked = (client.blocked || 0) + 1;
+      if (kind === 'session-held') client.sessionHeld = [...(client.sessionHeld || []), detail.code];
     },
     requestSave: () => { client.saveRequests += 1; },
     random: () => 0,
@@ -2192,4 +2193,118 @@ test('legacy: each save carries the opId of the journal draft it commits, and a 
   assert.equal(server.revision, 4);
   assert.deepEqual(pendingEntries(store).map((entry) => entry.op.opId), ['op_lookup_001']);
   offline.controller.dispose();
+});
+
+test('a changed account holds every submission: nothing reaches the server, the edit stays in the journal, one warning, and resuming sends it once', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const id = a.objects[0].id;
+  a.controller.holdSession('SESSION_CHANGED');
+  a.controller.holdSession('SESSION_CHANGED');
+  a.edit((objects) => objects.map((object) => (object.id === id ? { ...object, left: 333 } : object)));
+  a.controller.noteLocalChange();
+  assert.equal((await a.controller.submitLocalChanges()).mode, 'held');
+  assert.deepEqual(await a.controller.persist(null), { ok: false, code: 'SESSION_HELD' });
+  assert.deepEqual(server.ops, []);
+  assert.equal(server.saves.length, 0);
+  assert.equal(server.revision, 0);
+  assert.deepEqual(a.sessionHeld, ['SESSION_CHANGED']);
+  assert.ok(JSON.stringify(store.records).includes('333'));
+  assert.equal(a.controller.resumeSession(), true);
+  assert.equal(a.controller.resumeSession(), false);
+  await a.controller.reconnect();
+  assert.equal(server.ops.length, 1);
+  assert.equal(find(server.objects, id).left, 333);
+  assert.equal((await a.controller.submitLocalChanges()).mode, 'noop');
+  assert.equal(server.ops.length, 1);
+  a.controller.dispose();
+});
+
+test('a server identity or session rejection holds the session without dropping the pending edit, in both modes', async () => {
+  const server = createServer();
+  const store = journalStore();
+  const a = createClient('A', server, {}, { journalStore: store, instanceId: 'inst_a' });
+  const id = a.objects[0].id;
+  a.failOps.push('IDENTITY_MISMATCH');
+  a.edit((objects) => objects.map((object) => (object.id === id ? { ...object, left: 444 } : object)));
+  a.controller.noteLocalChange();
+  assert.equal((await a.controller.submitLocalChanges()).mode, 'held');
+  assert.equal((await a.controller.submitLocalChanges()).mode, 'held');
+  assert.deepEqual(a.sessionHeld, ['IDENTITY_MISMATCH']);
+  assert.deepEqual(server.ops, []);
+  assert.equal(server.revision, 0);
+  assert.ok(JSON.stringify(store.records).includes('444'));
+  a.controller.resumeSession();
+  await a.controller.reconnect();
+  assert.equal(server.ops.length, 1);
+  assert.equal(find(server.objects, id).left, 444);
+  a.controller.dispose();
+
+  const base = [{ id: 'base', left: 1 }];
+  const records = journalStore();
+  const board = { revision: 1, objects: clone(base) };
+  const b = legacyWithJournal(records, () => ({ revision: board.revision, objects: clone(board.objects) }), base, 'inst_b');
+  let signedIn = false;
+  const saved = [];
+  b.server.saveBoard = (client, body) => {
+    if (!signedIn) return { ok: false, code: 'UNAUTHENTICATED' };
+    saved.push(body.opId);
+    board.objects = clone(body.canvasData.objects);
+    board.revision += 1;
+    return { ok: true, revision: board.revision };
+  };
+  b.objects.push({ id: 'mine', left: 2 });
+  b.controller.noteLocalChange();
+  assert.deepEqual(await b.controller.persist(null), { ok: false, code: 'UNAUTHENTICATED' });
+  assert.deepEqual(await b.controller.persist(null), { ok: false, code: 'SESSION_HELD' });
+  assert.deepEqual(b.sessionHeld, ['UNAUTHENTICATED']);
+  assert.equal(board.revision, 1);
+  assert.equal(pendingEntries(records).length, 1);
+  signedIn = true;
+  assert.equal(b.controller.resumeSession(), true);
+  assert.equal((await b.controller.persist(null)).ok, true);
+  assert.equal(saved.length, 1);
+  assert.equal(board.revision, 2);
+  assert.deepEqual(pendingEntries(records), []);
+  b.controller.dispose();
+});
+
+test('with no operation lookup available, a stale recovered operation is kept pending unchanged and never merged, in both modes', async () => {
+  for (const enabled of [true, false]) {
+    const server = createServer({ enabled });
+    server.revision = 6;
+    const store = journalStore();
+    store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_nolookup_1', 'shape_a', 91)] };
+    const before = clone(store.records.inst_dead.entries);
+    const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', operationFate: false });
+    if (!enabled) {
+      reloaded.controller.load({ revision: 6, objects: clone(server.objects), enabled: false });
+      reloaded.controller.markLoaded();
+    }
+    const saves = server.saves.length;
+    assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 0, conflicts: 0, kept: 1 });
+    assert.equal(server.revision, 6);
+    assert.equal(server.saves.length, saves);
+    assert.equal(find(server.objects, 'shape_a').left, 10);
+    assert.deepEqual(pendingEntries(store), before);
+    assert.deepEqual(heldItems(store), []);
+    reloaded.controller.dispose();
+  }
+});
+
+test('recovery while the session is held submits nothing and leaves foreign records untouched', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.inst_dead = { ended: true, beat: 1, entries: [keptEntry('op_heldrec_01', 'shape_a', 92)] };
+  const before = clone(store.records);
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', verifyIdentity: async () => true });
+  reloaded.controller.holdSession('SESSION_CHANGED');
+  assert.equal((await reloaded.controller.recoverPending()).blocked, true);
+  assert.deepEqual(server.ops, []);
+  assert.deepEqual(store.records.inst_dead, before.inst_dead);
+  reloaded.controller.resumeSession();
+  assert.deepEqual(await reloaded.controller.recoverPending(), { recovered: 1, conflicts: 0, kept: 0 });
+  assert.equal(find(server.objects, 'shape_a').left, 92);
+  reloaded.controller.dispose();
 });
