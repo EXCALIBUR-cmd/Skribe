@@ -994,7 +994,7 @@ export const createBoardSyncController = ({
       const order = owners.map(({ read }) => read.heldOrder).filter(Boolean).pop() || null;
       let ack = { ok: false };
       for (let attempt = 0; attempt < settings.maxSaveAttempts && !ack?.ok; attempt += 1) {
-        await pullNow();
+        await pullNow().catch(() => {});
         await waitForSafePoint();
         if (disposed) return { ok: false, code: 'DISPOSED' };
         const target = new Map(canvas.serialize().map((object) => [object.id, object]));
@@ -1004,13 +1004,13 @@ export const createBoardSyncController = ({
         });
         const ids = [...target.keys()];
         ack = await commitRecovered((order ? applyOrder(order, ids) : ids).map((id) => target.get(id)), 'edit');
-        if (FATAL_CODES.has(ack?.code)) break;
+        if (FATAL_CODES.has(ack?.code) || SESSION_CODES.has(ack?.code)) break;
       }
       if (!ack?.ok) {
         notify('sync-error', { code: ack?.code || 'SAVE_FAILED' });
         return { ok: false, code: ack?.code || 'SAVE_FAILED' };
       }
-      await pullNow();
+      await pullNow().catch(() => {});
     }
     owners.forEach(({ owner, record, read }) => {
       try {

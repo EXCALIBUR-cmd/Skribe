@@ -4,6 +4,7 @@ import * as fabric from 'fabric';
 import { MAX_IMAGE_BYTES, detectImageType, formatFileSize, getInitialImageScale, installImageAssetLoading, uploadImageAsset, validateImageFile } from './imageAssets.js';
 import { captureCanvasHistory, restoreCanvasHistory } from '../../utils/canvasHistory.js';
 import { TOOL_REGISTRY } from '../../components/config/ToolRegistry.js';
+import apiClient, { setExpectedUser, setSessionRefusedHandler, setSessionUser } from '../../api/apiClient.js';
 
 const context = new Proxy({}, {
   get: (target, key) => (key in target ? target[key] : key === 'measureText' ? () => ({ width: 10 }) : () => {}),
@@ -156,4 +157,30 @@ test('an image that cannot be loaded keeps the board loading and keeps its saved
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(fabric.FabricImage.fromObject(board.objects[0], { signal: controller.signal }));
+});
+
+test('while another account is signed in, uploads and other user requests are refused before leaving the browser, and resume with the owner', async () => {
+  const sent = [];
+  const adapter = async (config) => { sent.push({ url: config.url, user: config.headers['X-Skribe-User'] }); return { data: { success: true, data: {} }, status: 200, statusText: 'OK', headers: {}, config }; };
+  let rechecks = 0;
+  setSessionRefusedHandler(() => { rechecks += 1; });
+  setExpectedUser('user_a');
+  setSessionUser('user_b');
+  for (const [method, url] of [['post', '/assets/images?boardId=b1'], ['get', '/assets/usage'], ['post', '/mess-cleanup/analyze'], ['post', '/sidekick/chat'], ['patch', '/auth/me/preferences'], ['patch', '/boards/b1']]) {
+    const refusal = await apiClient[method](url, {}, { adapter }).then(() => null, (err) => err);
+    assert.equal(refusal?.errors?.code, 'IDENTITY_MISMATCH', url);
+  }
+  assert.deepEqual(sent, []);
+  assert.equal(rechecks, 0);
+  await apiClient.get('/auth/me', { adapter });
+  assert.deepEqual(sent, [{ url: '/auth/me', user: 'user_a' }]);
+  setSessionUser('user_a');
+  await apiClient.post('/assets/images?boardId=b1', {}, { adapter });
+  assert.deepEqual(sent[1], { url: '/assets/images?boardId=b1', user: 'user_a' });
+  const serverRefusal = async (config) => Promise.reject(Object.assign(new Error('409'), { config, response: { status: 409, data: { success: false, errors: { code: 'IDENTITY_MISMATCH' } } } }));
+  await apiClient.post('/sidekick/chat', {}, { adapter: serverRefusal }).catch(() => null);
+  assert.equal(rechecks, 1);
+  setSessionRefusedHandler(null);
+  setExpectedUser(null);
+  setSessionUser(undefined);
 });

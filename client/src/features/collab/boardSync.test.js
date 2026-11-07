@@ -2308,3 +2308,25 @@ test('recovery while the session is held submits nothing and leaves foreign reco
   assert.equal(find(server.objects, 'shape_a').left, 92);
   reloaded.controller.dispose();
 });
+
+test('a held conflict whose resolution is refused for a changed account stays held, never rejects even when board reads fail, and resolves once the owner is back', async () => {
+  const server = createServer();
+  const store = journalStore();
+  store.records.inst_dead = { ended: true, beat: 1, entries: [], held: [{ id: 'shape_a', mine: { id: 'shape_a', left: 95 } }], heldOrder: null };
+  let readsRefused = false;
+  const reloaded = createClient('A2', server, {}, { journalStore: store, instanceId: 'inst_a2', getBoard: () => { if (readsRefused) throw { success: false, errors: { code: 'IDENTITY_MISMATCH' } }; return server.getBoard(); } });
+  reloaded.failOps.push('IDENTITY_MISMATCH');
+  const refused = await reloaded.controller.resolveHeld('mine').then((value) => value, () => 'rejected');
+  assert.deepEqual(refused, { ok: false, code: 'IDENTITY_MISMATCH' });
+  assert.deepEqual(reloaded.sessionHeld, ['IDENTITY_MISMATCH']);
+  assert.deepEqual(heldItems(store), [{ id: 'shape_a', mine: { id: 'shape_a', left: 95 } }]);
+  readsRefused = true;
+  assert.notEqual(await reloaded.controller.resolveHeld('mine').then((value) => value, () => 'rejected'), 'rejected');
+  assert.equal(server.revision, 0);
+  readsRefused = false;
+  reloaded.controller.resumeSession();
+  assert.deepEqual(await reloaded.controller.resolveHeld('mine'), { ok: true });
+  assert.equal(find(server.objects, 'shape_a').left, 95);
+  assert.deepEqual(heldItems(store), []);
+  reloaded.controller.dispose();
+});

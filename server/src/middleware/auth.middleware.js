@@ -3,7 +3,7 @@ import userRepository from '../repositories/user.repository.js';
 import { error } from '../utils/apiResponse.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
 
-export const authenticate = async (req, res, next) => {
+export const authenticateSession = async (req, res, next) => {
   try {
     let token = null;
 
@@ -41,11 +41,13 @@ export const authenticate = async (req, res, next) => {
 export const EXPECTED_USER_HEADER = 'x-skribe-user';
 
 export const requireExpectedUser = (req, res, next) => {
-  const expected = req.get(EXPECTED_USER_HEADER);
+  const expected = req.headers?.[EXPECTED_USER_HEADER];
   if (expected && expected !== String(req.user?.id ?? '')) {
-    return error(res, 'This board was opened by a different account than the one now signed in. Nothing was changed.', 409, { code: 'IDENTITY_MISMATCH' });
+    return error(res, 'This page was opened by a different account than the one now signed in. Nothing was changed.', 409, { code: 'IDENTITY_MISMATCH' });
   }
   return next();
 };
+
+export const authenticate = (req, res, next) => authenticateSession(req, res, (err) => (err ? next(err) : requireExpectedUser(req, res, next)));
 
 export default authenticate;

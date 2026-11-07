@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import apiClient, { getExpectedUser, setExpectedUser } from '../api/apiClient';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import apiClient, { getExpectedUser, setExpectedUser, setSessionRefusedHandler, setSessionUser } from '../api/apiClient';
 import socketService from '../services/socket';
 
 const AuthContext = createContext(null);
@@ -22,14 +22,20 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sessionUserId, setSessionUserId] = useState(null);
+  const [sessionUserId, setSessionUserIdState] = useState(null);
+  const socketPausedRef = useRef(false);
+
+  const setSessionUserId = useCallback((id) => {
+    setSessionUser(id);
+    setSessionUserIdState(id);
+  }, []);
 
   const adoptUser = useCallback((next) => {
     const id = userIdOf(next);
     setExpectedUser(id);
     setUser(next);
     setSessionUserId(id);
-  }, []);
+  }, [setSessionUserId]);
 
   const recheckSession = useCallback(async () => {
     if (!getExpectedUser()) return undefined;
@@ -43,7 +49,7 @@ export const AuthProvider = ({ children }) => {
       setSessionUserId(null);
       return null;
     }
-  }, []);
+  }, [setSessionUserId]);
 
   useEffect(() => {
     let channel = null;
@@ -58,12 +64,26 @@ export const AuthProvider = ({ children }) => {
     };
     window.addEventListener('focus', recheckSession);
     document.addEventListener('visibilitychange', onVisible);
+    setSessionRefusedHandler(recheckSession);
     return () => {
+      setSessionRefusedHandler(null);
       channel?.close();
       window.removeEventListener('focus', recheckSession);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [recheckSession]);
+  }, [recheckSession, setSessionUserId]);
+
+  useEffect(() => {
+    const ownId = userIdOf(user);
+    if (!ownId) return;
+    if (sessionUserId !== ownId) {
+      socketPausedRef.current = true;
+      socketService.pause();
+    } else if (socketPausedRef.current) {
+      socketPausedRef.current = false;
+      socketService.connect();
+    }
+  }, [user, sessionUserId]);
 
   const checkAuth = useCallback(async () => {
     try {

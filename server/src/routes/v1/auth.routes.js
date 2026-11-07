@@ -3,7 +3,7 @@ import passport from 'passport';
 import authController from '../../controllers/auth.controller.js';
 import { validateRegister, validateLogin } from '../../validators/auth.validator.js';
 import { validatePreferences } from '../../validators/preference.validator.js';
-import { authenticate } from '../../middleware/auth.middleware.js';
+import { authenticate, authenticateSession } from '../../middleware/auth.middleware.js';
 import config from '../../config/env.js';
 
 const router = Router();
@@ -29,7 +29,7 @@ router.get(
   authController.googleCallback
 );
 
-router.get('/me', authenticate, authController.getMe);
+router.get('/me', authenticateSession, authController.getMe);
 
 router.patch('/me/preferences', authenticate, validatePreferences, authController.updatePreferences);
 

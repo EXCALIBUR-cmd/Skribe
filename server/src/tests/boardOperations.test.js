@@ -12,7 +12,8 @@ import { OPERATION_RATE_LIMIT, boardRoomName, registerBoardHandlers } from '../s
 import { OPERATION_LIMITS, applyCanvasOperation, commitCanvasOperation, operationFate, validateCanvasOperation } from '../services/boardOperation.service.js';
 import { RECENT_OPERATION_LIMIT } from '../repositories/board.repository.js';
 import { validateUpdateBoard } from '../validators/board.validator.js';
-import { authenticate, requireExpectedUser } from '../middleware/auth.middleware.js';
+import { authenticate, authenticateSession, requireExpectedUser } from '../middleware/auth.middleware.js';
+import apiRoutes from '../routes/v1/index.js';
 import { socketAuthMiddleware } from '../sockets/socketAuth.js';
 import { generateAccessToken } from '../utils/jwt.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
@@ -538,7 +539,7 @@ test('saves that carry an opId are attributed to their revision in both protocol
 
 const requestFor = (userId, expected, extra = {}) => ({
   user: { id: userId },
-  get: (name) => (name.toLowerCase() === 'x-skribe-user' ? expected : undefined),
+  headers: expected === undefined ? {} : { 'x-skribe-user': expected },
   ...extra
 });
 
@@ -596,4 +597,52 @@ test('an operation on a socket whose session has expired is refused without comm
   const ack = await send({ boardId, ...operation(0, { upserts: [{ id: 'shape_b', data: shape('shape_b', { left: 999 }), unset: [] }] }) });
   assert.deepEqual(ack, { ok: false, code: 'SESSION_EXPIRED' });
   assert.equal((await stored(boardId)).canvasRevision ?? 0, 0);
+});
+
+test('every authenticated request is refused when its expected user differs, while the session probe still reports the real account', needsMongo, async () => {
+  const owner = await User.create({ name: 'Probe Owner', email: `probe_${Date.now()}@test.local`, password: 'password123' });
+  const cookies = { [COOKIE_NAME]: generateAccessToken({ id: owner._id.toString() }) };
+  const run = (middleware, expected) => new Promise((resolve) => {
+    const res = fakeResponse();
+    const done = () => resolve({ passed: res.body === null, res });
+    const json = res.json.bind(res);
+    res.json = (body) => { json(body); done(); return res; };
+    middleware({ cookies, headers: expected ? { 'x-skribe-user': expected } : {} }, res, done);
+  });
+  const other = new mongoose.Types.ObjectId().toString();
+  const refused = await run(authenticate, other);
+  assert.equal(refused.passed, false);
+  assert.equal(refused.res.statusCode, 409);
+  assert.equal(refused.res.body.errors.code, 'IDENTITY_MISMATCH');
+  assert.equal((await run(authenticate, owner._id.toString())).passed, true);
+  assert.equal((await run(authenticate, null)).passed, true);
+  assert.equal((await run(authenticateSession, other)).passed, true);
+});
+
+test('every v1 route that authenticates also enforces the expected user, except the session probe', () => {
+  const OPEN = new Set(['POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /health']);
+  const found = [];
+  const mountOf = (layer) => (layer.regexp?.source || '').replace('^\\/', '/').replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/').replace('/?(?=/|$)', '');
+  const walk = (stack, prefix, guarded) => {
+    let isGuarded = guarded;
+    for (const layer of stack) {
+      if (!layer.route && layer.handle === authenticate) isGuarded = true;
+      if (layer.route) {
+        const handlers = layer.route.stack.map((entry) => entry.handle);
+        for (const method of Object.keys(layer.route.methods)) {
+          found.push({ key: `${method.toUpperCase()} ${prefix}${layer.route.path}`, guarded: isGuarded || handlers.includes(authenticate), probe: handlers.includes(authenticateSession) });
+        }
+      } else if (layer.handle?.stack) {
+        const mount = mountOf(layer);
+        walk(layer.handle.stack, prefix + (mount === '/' ? '' : mount), isGuarded);
+      }
+    }
+  };
+  walk(apiRoutes.stack, '', false);
+  const unguarded = found.filter((r) => !r.guarded && !r.probe && !OPEN.has(r.key) && !r.key.includes('google'));
+  assert.deepEqual(unguarded, []);
+  assert.deepEqual(found.filter((r) => r.probe).map((r) => r.key), ['GET /auth/me']);
+  for (const key of ['POST /assets/images', 'GET /assets/usage', 'POST /mess-cleanup/analyze', 'POST /sidekick/chat', 'POST /ai-assistant/generate', 'POST /voice-commands/interpret', 'PATCH /auth/me/preferences', 'GET /auth/me/landing', 'PATCH /boards/:id', 'GET /boards/:id', 'DELETE /boards/:id']) {
+    assert.equal(found.find((r) => r.key === key)?.guarded, true, key);
+  }
 });
