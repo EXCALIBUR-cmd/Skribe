@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 import { useAuth } from '../context/AuthContext';
 import { isReducedMotion } from '../animations/config';
@@ -191,6 +191,12 @@ export const WelcomePage = () => {
           </button>
         </div>
       </section>
+
+      <footer className="relative z-10 mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-6 pb-10 text-sm text-on-surface-variant lg:px-10">
+        <span>Skribe public beta</span>
+        <Link to="/terms" className="hover:underline">Terms of Service</Link>
+        <Link to="/privacy" className="hover:underline">Privacy Policy</Link>
+      </footer>
     </main>
   );
 };

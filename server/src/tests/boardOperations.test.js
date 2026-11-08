@@ -621,7 +621,7 @@ test('every authenticated request is refused when its expected user differs, whi
 });
 
 test('every v1 route that authenticates also enforces the expected user, except the session probe', () => {
-  const OPEN = new Set(['POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /health']);
+  const OPEN = new Set(['POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/providers', 'GET /health']);
   const found = [];
   const mountOf = (layer) => (layer.regexp?.source || '').replace('^\\/', '/').replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/').replace('/?(?=/|$)', '');
   const walk = (stack, prefix, guarded) => {

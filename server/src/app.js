@@ -13,13 +13,16 @@ import errorMiddleware from './middleware/errorMiddleware.js';
 
 const app = express();
 
+if (config.trustProxyHops > 0) app.set('trust proxy', config.trustProxyHops);
+app.set('query parser', 'simple');
+
 app.use(helmet());
 
 app.use(compression());
 
 app.use(
   cors({
-    origin: config.clientUrl,
+    origin: config.allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
   })

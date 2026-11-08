@@ -1,33 +1,21 @@
 import { Router } from 'express';
-import passport from 'passport';
 import authController from '../../controllers/auth.controller.js';
 import { validateRegister, validateLogin } from '../../validators/auth.validator.js';
 import { validatePreferences } from '../../validators/preference.validator.js';
 import { authenticate, authenticateSession } from '../../middleware/auth.middleware.js';
-import config from '../../config/env.js';
+import { loginAccountLimiter, loginAddressLimiter, registerAddressLimiter } from '../../middleware/rateLimit.middleware.js';
 
 const router = Router();
 
-router.post('/register', validateRegister, authController.register);
+router.post('/register', registerAddressLimiter, validateRegister, authController.register);
 
-router.post('/login', validateLogin, authController.login);
+router.post('/login', loginAddressLimiter, loginAccountLimiter, validateLogin, authController.login);
 
-router.get(
-  '/google',
-  passport.authenticate('google', {
-    scope: ['profile', 'email'],
-    session: false
-  })
-);
+router.get('/providers', authController.providers);
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', {
-    session: false,
-    failureRedirect: `${config.clientUrl}/signin?error=oauth_failed`
-  }),
-  authController.googleCallback
-);
+router.get('/google', authController.requireGoogle, authController.startGoogle);
+
+router.get('/google/callback', authController.requireGoogle, authController.googleCallback);
 
 router.get('/me', authenticateSession, authController.getMe);
 

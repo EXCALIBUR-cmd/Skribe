@@ -60,6 +60,8 @@ export const MainCanvasPage = () => {
   const [canvasBackground, setCanvasBackground] = useState('default');
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   const [boardTitle, setBoardTitle] = useState('Untitled Board');
   const [currentBoard, setCurrentBoard] = useState(null);
@@ -690,7 +692,7 @@ export const MainCanvasPage = () => {
 
     const handleAccessRevoked = (event) => {
       if (event?.boardId !== boardId) return;
-      navigate('/boards', { replace: true, state: { accessNotice: 'Access removed: the board owner removed you from that board.' } });
+      navigateRef.current('/boards', { replace: true, state: { accessNotice: 'Access removed: the board owner removed you from that board.' } });
     };
 
     socketService.on('board-joined', handleBoardJoined);

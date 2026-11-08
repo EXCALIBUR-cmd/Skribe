@@ -31,6 +31,7 @@
     "test:quick-dictation": "node --test src/features/voice/quickDictationLogic.test.js",
     "test:ai-assistant": "node --test src/features/aiAssistant/assistantActions.test.js",
     "test:sidekick": "node --test src/features/sidekick/sidekick.test.js",
+    "test:config": "node --test src/config/endpoints.test.js",
     "test:text-elements": "node --test src/features/textElements/textElements.test.js",
     "test:image-assets": "node --test src/features/imageAssets/imageAssets.test.js",
     "test:icon-gallery": "node --test src/features/iconGallery/iconGallery.test.js",
@@ -58,7 +59,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
-    "oxlint": "^1.75.0",
+    "oxlint": "^1.77.0",
     "tailwindcss": "^4.3.3",
     "vite": "^8.2.0"
   }

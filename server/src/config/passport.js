@@ -4,6 +4,7 @@ import config from './env.js';
 import authService from '../services/auth.service.js';
 
 export const configurePassport = () => {
+  if (!config.googleAuthEnabled) return;
 
   passport.use(
     new GoogleStrategy(
@@ -19,6 +20,10 @@ export const configurePassport = () => {
 
           if (!email) {
             return done(new Error('No email address associated with this Google account'), null);
+          }
+
+          if (profile.emails[0].verified !== true && profile.emails[0].verified !== 'true') {
+            return done(Object.assign(new Error('Google has not verified this email address'), { code: 'GOOGLE_EMAIL_UNVERIFIED' }), null);
           }
 
           const { user, token } = await authService.handleGoogleOAuthUser({

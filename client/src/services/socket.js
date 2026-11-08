@@ -1,7 +1,8 @@
 import { io } from 'socket.io-client';
 import { getExpectedUser } from '../api/apiClient';
+import { endpoints } from '../config/endpoints.js';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = endpoints.socketUrl;
 
 let socket = null;
 

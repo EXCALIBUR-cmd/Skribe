@@ -1,9 +1,11 @@
 import authService from '../services/auth.service.js';
 import boardService from '../services/board.service.js';
 import userRepository from '../repositories/user.repository.js';
-import { success } from '../utils/apiResponse.js';
+import { error, success } from '../utils/apiResponse.js';
 import { COOKIE_NAME, getCookieOptions, getClearCookieOptions } from '../utils/cookieOptions.js';
 import config from '../config/env.js';
+import passport from 'passport';
+import { consumeOAuthState, issueOAuthState } from '../services/oauthState.service.js';
 
 export class AuthController {
 
@@ -33,19 +35,36 @@ export class AuthController {
     }
   }
 
-  async googleCallback(req, res, next) {
-    try {
-      if (!req.user || !req.user.token) {
-        return res.redirect(`${config.clientUrl}/signin?error=oauth_failed`);
-      }
+  startGoogle(req, res, next) {
+    const state = issueOAuthState(res);
+    return passport.authenticate('google', { scope: ['profile', 'email'], session: false, state })(req, res, next);
+  }
 
-      res.cookie(COOKIE_NAME, req.user.token, getCookieOptions());
-
-      return res.redirect(`${config.clientUrl}/start`);
-    } catch (err) {
-      console.error('[AuthController] Google callback error:', err.message);
-      return res.redirect(`${config.clientUrl}/signin?error=oauth_failed`);
+  googleCallback(req, res, next) {
+    const fail = (code) => res.redirect(`${config.clientUrl}/signin?error=${code}`);
+    const verdict = consumeOAuthState(req, res);
+    if (verdict !== 'ok') {
+      console.warn(`[AuthController] Google callback refused: state ${verdict}`);
+      return fail('oauth_state');
     }
+    if (typeof req.query.error === 'string') return fail(req.query.error === 'access_denied' ? 'oauth_cancelled' : 'oauth_failed');
+    return passport.authenticate('google', { session: false }, (err, result) => {
+      if (err || !result?.token) {
+        if (err) console.error('[AuthController] Google sign-in failed:', err.code || err.name || 'error');
+        return fail(err?.code === 'GOOGLE_EMAIL_UNVERIFIED' ? 'oauth_email_unverified' : 'oauth_failed');
+      }
+      res.cookie(COOKIE_NAME, result.token, getCookieOptions());
+      return res.redirect(`${config.clientUrl}/start`);
+    })(req, res, next);
+  }
+
+  providers(req, res) {
+    return success(res, { google: config.googleAuthEnabled }, 'Sign-in options', 200);
+  }
+
+  requireGoogle(req, res, next) {
+    if (config.googleAuthEnabled) return next();
+    return error(res, 'Google sign-in is not available.', 404, { code: 'GOOGLE_AUTH_DISABLED' });
   }
 
   async getMe(req, res, next) {

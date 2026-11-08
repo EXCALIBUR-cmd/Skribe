@@ -10,17 +10,12 @@ export const getSocketServer = () => socketServer;
 export const initSocketIO = (httpServer) => {
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: [
-        config.clientUrl,
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:5174',
-        'http://127.0.0.1:5174'
-      ],
+      origin: config.allowedOrigins,
       credentials: true,
       methods: ['GET', 'POST']
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    allowRequest: (req, callback) => callback(null, !req.headers.origin || config.allowedOrigins.includes(req.headers.origin))
   });
 
   socketServer = io;

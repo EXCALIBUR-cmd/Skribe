@@ -1,6 +1,6 @@
 import { createServer } from 'http';
 import app from './app.js';
-import config from './config/env.js';
+import config, { validateConfig } from './config/env.js';
 import { connectDB, disconnectDB } from './config/db.js';
 import { initSocketIO } from './sockets/index.js';
 import { startAssetCleanupSchedule } from './services/asset.service.js';
@@ -9,6 +9,9 @@ import { assertJwtSecret } from './utils/jwt.js';
 const startServer = async () => {
   try {
     assertJwtSecret();
+    const { errors: configErrors, warnings: configWarnings } = validateConfig(config);
+    configWarnings.forEach((warning) => console.warn(`[Config] ${warning}`));
+    if (configErrors.length > 0) throw new Error(`Production configuration is incomplete. ${configErrors.join(' ')}`);
 
     await connectDB();
 

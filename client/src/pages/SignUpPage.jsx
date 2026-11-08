@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GOOGLE_SIGN_IN_URL, oauthErrorMessage, useAuthProviders } from '../api/authProviders.js';
 import SignUpIllustration from '../components/auth/SignUpIllustration';
 
 export const SignUpPage = () => {
   const { user, register } = useAuth();
   const navigate = useNavigate();
+  const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
 
   const [name, setName] = useState('');
@@ -18,9 +20,8 @@ export const SignUpPage = () => {
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
     const oauthError = searchParams.get('error');
-    if (oauthError === 'oauth_failed' || oauthError === 'google_auth_failed') {
-      setFormError('Google authentication was cancelled or failed. Please try again.');
-    }
+    const message = oauthErrorMessage(oauthError);
+    if (message) setFormError(message);
   }, [location.search]);
 
   useEffect(() => {
@@ -65,7 +66,7 @@ export const SignUpPage = () => {
   };
 
   const handleGoogleSignUp = () => {
-    window.location.href = 'http://localhost:5000/api/v1/auth/google';
+    window.location.href = GOOGLE_SIGN_IN_URL;
   };
 
   const handleWorkSignUp = () => {
@@ -159,7 +160,7 @@ export const SignUpPage = () => {
               onChange={(e) => setTerms(e.target.checked)}
             />
             <label className="ml-3 block font-body-md text-body-md text-on-surface-variant cursor-pointer" htmlFor="terms">
-              I agree to the <a className="text-primary hover:underline font-bold" href="#" onClick={(e) => e.preventDefault()}>Terms of Service</a>
+              I agree to the <Link className="text-primary hover:underline font-bold" to="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</Link> and have read the <Link className="text-primary hover:underline font-bold" to="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</Link>
             </label>
           </div>
 
@@ -197,6 +198,7 @@ export const SignUpPage = () => {
             <span className="material-symbols-outlined mr-2">work</span>
             Work Account
           </button>
+          {googleEnabled && (
           <button
             onClick={handleGoogleSignUp}
             className="flex justify-center items-center py-3 border-2 border-outline-variant rounded-full bg-surface-container-lowest hover:bg-surface-container-low transition-colors text-on-surface font-label-md text-label-md hover:border-primary cursor-pointer"
@@ -205,6 +207,7 @@ export const SignUpPage = () => {
             <span className="material-symbols-outlined mr-2 text-primary">public</span>
             Google
           </button>
+          )}
         </div>
 
         <p className="mt-8 text-center font-body-md text-body-md text-on-surface-variant">

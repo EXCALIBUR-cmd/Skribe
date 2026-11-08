@@ -8,6 +8,7 @@ import MainCanvasPage from '../pages/MainCanvasPage';
 import AIAssistPage from '../pages/AIAssistPage';
 import MobileCanvasPage from '../pages/MobileCanvasPage';
 import SettingsPage from '../pages/SettingsPage';
+import LegalPage from '../pages/LegalPage';
 import LandingRedirect from '../features/settings/LandingRedirect';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 
@@ -17,6 +18,8 @@ export const AppRoutes = () => {
       <Route path="/" element={<WelcomePage />} />
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
+      <Route path="/terms" element={<LegalPage kind="terms" />} />
+      <Route path="/privacy" element={<LegalPage kind="privacy" />} />
 
       <Route
         path="/boards"

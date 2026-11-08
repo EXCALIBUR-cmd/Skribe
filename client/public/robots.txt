@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /board/
+Disallow: /boards
+Disallow: /start
+Disallow: /settings
+Disallow: /canvas
+Disallow: /ai-assist
+Disallow: /mobile
+
+Sitemap: https://skribe.stream/sitemap.xml

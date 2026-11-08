@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GOOGLE_SIGN_IN_URL, oauthErrorMessage, useAuthProviders } from '../api/authProviders.js';
 import { resolvePostSignInPath } from '../features/settings/landing';
 
 export const SignInPage = () => {
   const { user, login } = useAuth();
   const navigate = useNavigate();
+  const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
 
   const [email, setEmail] = useState('');
@@ -17,9 +19,8 @@ export const SignInPage = () => {
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
     const oauthError = searchParams.get('error');
-    if (oauthError === 'oauth_failed' || oauthError === 'google_auth_failed') {
-      setFormError('Google authentication was cancelled or failed. Please try again.');
-    }
+    const message = oauthErrorMessage(oauthError);
+    if (message) setFormError(message);
   }, [location.search]);
 
   const destination = resolvePostSignInPath(location.state?.from);
@@ -51,7 +52,7 @@ export const SignInPage = () => {
   };
 
   const handleGoogleSignIn = () => {
-    window.location.href = 'http://localhost:5000/api/v1/auth/google';
+    window.location.href = GOOGLE_SIGN_IN_URL;
   };
 
   const handleAppleSignIn = () => {
@@ -158,6 +159,7 @@ export const SignInPage = () => {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
+          {googleEnabled && (
           <button
             onClick={handleGoogleSignIn}
             className="flex items-center justify-center py-3 bg-surface border-2 border-surface-container-high rounded-lg hover:border-primary hover:bg-surface-container transition-all group shadow-sm active:translate-y-[1px] active:shadow-none cursor-pointer"
@@ -171,6 +173,7 @@ export const SignInPage = () => {
             </svg>
             <span className="font-label-md text-label-md text-on-surface group-hover:text-primary transition-colors">Google</span>
           </button>
+          )}
           <button
             onClick={handleAppleSignIn}
             className="flex items-center justify-center py-3 bg-surface border-2 border-surface-container-high rounded-lg hover:border-outline-variant hover:bg-surface-container transition-all group shadow-sm active:translate-y-[1px] active:shadow-none cursor-pointer"
