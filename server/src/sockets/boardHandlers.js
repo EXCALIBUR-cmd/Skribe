@@ -18,6 +18,8 @@ const allowOperation = (socket) => {
 
 const roomPresenceMap = new Map();
 const socketRoomMap = new Map();
+const boardRevocations = new Map();
+const revocationKey = (boardId, userId) => `${boardId}:${userId}`;
 
 const removeSocketFromBoardPresence = (io, socket, boardId) => {
   const userIdKey = String(socket.user.id);
@@ -65,6 +67,20 @@ export const handleSocketDisconnect = (io, socket) => {
   socketRoomMap.delete(socketId);
 };
 
+export const revokeBoardAccess = async (io, boardId, userId) => {
+  const target = String(userId);
+  boardRevocations.set(revocationKey(boardId, target), Date.now());
+  if (!io?.sockets?.sockets) return 0;
+  const room = boardRoomName(boardId);
+  const evicted = [...io.sockets.sockets.values()].filter((socket) => String(socket.user?.id) === target && socket.rooms.has(room));
+  for (const socket of evicted) {
+    await socket.leave(room);
+    removeSocketFromBoardPresence(io, socket, boardId);
+    socket.emit('board:access-revoked', { boardId });
+  }
+  return evicted.length;
+};
+
 export const registerBoardHandlers = (io, socket) => {
   socket.on('join-board', async ({ boardId } = {}) => {
     if (!boardId || typeof boardId !== 'string') {
@@ -73,6 +89,7 @@ export const registerBoardHandlers = (io, socket) => {
     }
 
     try {
+      const joinStartedAt = Date.now();
       const board = await boardRepository.findBoardById(boardId);
 
       if (!board) {
@@ -93,6 +110,12 @@ export const registerBoardHandlers = (io, socket) => {
 
       const room = boardRoomName(boardId);
       await socket.join(room);
+
+      if ((boardRevocations.get(revocationKey(boardId, String(socket.user.id))) || 0) >= joinStartedAt) {
+        await socket.leave(room);
+        socket.emit('board:access-revoked', { boardId });
+        return;
+      }
 
       const userIdKey = String(socket.user.id);
       const socketId = String(socket.id);

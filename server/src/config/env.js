@@ -12,7 +12,7 @@ export const config = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
   mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/skribe',
-  jwtSecret: process.env.JWT_SECRET || 'fallback_jwt_secret_dev_key',
+  jwtSecret: process.env.JWT_SECRET || '',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   googleClientId: process.env.GOOGLE_CLIENT_ID || 'dummy_google_client_id',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || 'dummy_google_client_secret',
@@ -31,6 +31,7 @@ export const config = {
   imageKitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY || '',
   imageKitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY || '',
   imageKitUrlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || '',
+  imageKitSignedUrlTtlSeconds: Math.min(86400, Math.max(10, Number.parseInt(process.env.IMAGEKIT_SIGNED_URL_TTL_SECONDS, 10) || 3600)),
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 };

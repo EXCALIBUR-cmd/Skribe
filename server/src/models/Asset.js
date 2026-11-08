@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
 export const ASSET_STATUSES = Object.freeze(['pending', 'attached', 'orphaned', 'deleting', 'deleted']);
+export const ASSET_PRIVACY = Object.freeze(['public', 'private']);
 
 const assetSchema = new mongoose.Schema(
   {
@@ -9,6 +10,7 @@ const assetSchema = new mongoose.Schema(
     board: { type: mongoose.Schema.Types.ObjectId, ref: 'Board', required: true },
     boards: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Board' }],
     status: { type: String, enum: ASSET_STATUSES, default: 'pending', index: true },
+    privacy: { type: String, enum: ASSET_PRIVACY },
     imageKitFileId: { type: String, default: null },
     filePath: { type: String, default: null },
     url: { type: String, default: null, index: true },

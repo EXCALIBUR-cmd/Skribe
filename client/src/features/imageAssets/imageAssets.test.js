@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
-import { MAX_IMAGE_BYTES, detectImageType, formatFileSize, getInitialImageScale, installImageAssetLoading, uploadImageAsset, validateImageFile } from './imageAssets.js';
+import { MAX_IMAGE_BYTES, configureAssetDelivery, detectImageType, formatFileSize, getInitialImageScale, installImageAssetLoading, primeAssetDelivery, rehydrateAssetImages, resetAssetDelivery, uploadImageAsset, validateImageFile } from './imageAssets.js';
 import { captureCanvasHistory, restoreCanvasHistory } from '../../utils/canvasHistory.js';
 import { TOOL_REGISTRY } from '../../components/config/ToolRegistry.js';
 import apiClient, { setExpectedUser, setSessionRefusedHandler, setSessionUser } from '../../api/apiClient.js';
@@ -43,7 +43,7 @@ const fakeImage = () => {
   return image;
 };
 const document = { createElement: (tag) => (tag === 'img' ? fakeImage() : fakeCanvas()), documentElement: { style: {} }, defaultView: null };
-const window = { devicePixelRatio: 1, document, addEventListener() {}, removeEventListener() {}, getComputedStyle: () => ({}) };
+const window = { devicePixelRatio: 1, document, addEventListener() {}, removeEventListener() {}, getComputedStyle: () => ({}), requestAnimationFrame: (fn) => setTimeout(fn, 0), cancelAnimationFrame: (id) => clearTimeout(id) };
 document.defaultView = window;
 fabric.setEnv({ document, window, isTouchSupported: false, WebGLProbe: { queryWebGL() {}, isSupported() { return false; } }, dispose() {}, copyPasteData: {} });
 installImageAssetLoading(fabric);
@@ -183,4 +183,110 @@ test('while another account is signed in, uploads and other user requests are re
   setSessionRefusedHandler(null);
   setExpectedUser(null);
   setSessionUser(undefined);
+});
+
+const deliveryHarness = (answer) => {
+  let clock = 1_000_000;
+  const scheduled = [];
+  const calls = [];
+  const timers = {
+    setTimeout: (fn, ms) => (ms <= 0 ? setTimeout(fn, 0) : scheduled.push({ fn, at: clock + ms })),
+    clearTimeout: (id) => { if (typeof id === 'number' && scheduled[id - 1]) scheduled[id - 1].fn = null; else clearTimeout(id); }
+  };
+  const signed = (id, tag = 'a') => ({ url: `https://cdn.test/skribe/assets/${id}.png?ik-t=${Math.floor((clock + 60000) / 1000)}&ik-s=${tag}${calls.length}`, expiresAt: clock + 60000 });
+  configureAssetDelivery({ scope: `board_${Math.random()}`, sign: async (ids) => { calls.push([...ids]); return answer(ids, signed, calls.length); }, now: () => clock, timers });
+  return {
+    calls,
+    signed,
+    advance: async (ms) => {
+      clock += ms;
+      for (const job of scheduled) {
+        if (job.fn && job.at <= clock) {
+          const fn = job.fn;
+          job.fn = null;
+          fn();
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+};
+const privateImage = (id, extra = {}) => ({ type: 'Image', version: '7.4.0', left: 10, top: 10, width: 640, height: 480, src: `skribe-asset:${id}`, crossOrigin: 'anonymous', metadata: { assetId: id }, ...extra });
+
+test('private images hydrate from one batched signing request, render from signed URLs and save only their stable asset reference', async () => {
+  const h = deliveryHarness((ids, signed) => ({ urls: Object.fromEntries(ids.map((id) => [id, signed(id)])) }));
+  const board = { version: '7.4.0', objects: [privateImage('p1'), privateImage('p2', { scaleX: 0.5, angle: 30 }), privateImage('p3'), { type: 'Image', version: '7.4.0', left: 0, top: 0, width: 640, height: 480, src: URL_OK, crossOrigin: 'anonymous', metadata: { assetId: 'legacy' } }] };
+  const canvas = new fabric.StaticCanvas(undefined, { width: 1600, height: 900, renderOnAddRemove: false });
+  await restoreCanvasHistory(canvas, JSON.stringify(board));
+  assert.deepEqual(h.calls, [['p1', 'p2', 'p3']]);
+  const objects = canvas.getObjects();
+  assert.equal(objects.filter((o) => o.skribeImageUnavailable).length, 0);
+  assert.match(objects[0]._element.src, /ik-s=/);
+  assert.equal(objects[3]._element.src, URL_OK);
+  const saved = captureCanvasHistory(canvas);
+  assert.equal(/ik-s|ik-t|cdn\.test/.test(saved), false);
+  const persisted = JSON.parse(saved).objects;
+  assert.deepEqual(persisted.map((o) => o.src), ['skribe-asset:p1', 'skribe-asset:p2', 'skribe-asset:p3', URL_OK]);
+  assert.deepEqual(persisted.map((o) => o.metadata.assetId), ['p1', 'p2', 'p3', 'legacy']);
+  assert.equal(persisted[1].scaleX, 0.5);
+  assert.equal(persisted[1].angle, 30);
+  assert.equal(persisted[0].crossOrigin, 'anonymous');
+  const again = new fabric.StaticCanvas(undefined, { width: 1600, height: 900, renderOnAddRemove: false });
+  await restoreCanvasHistory(again, saved);
+  assert.equal(h.calls.length, 1);
+  assert.equal(captureCanvasHistory(again), saved);
+  resetAssetDelivery();
+});
+
+test('signed URLs are renewed at 80% of their life without touching the canvas, and a failed load is re-signed once', async () => {
+  const h = deliveryHarness((ids, signed, n) => ({ urls: Object.fromEntries(ids.map((id) => [id, n === 1 && id === 'p401' ? { ...signed(id), url: 'https://cdn.test/broken.png?ik-s=old' } : signed(id)])) }));
+  const canvas = new fabric.StaticCanvas(undefined, { width: 1600, height: 900, renderOnAddRemove: false });
+  let events = 0;
+  canvas.on('object:modified', () => { events += 1; });
+  await restoreCanvasHistory(canvas, JSON.stringify({ version: '7.4.0', objects: [privateImage('p401'), privateImage('ok')] }));
+  assert.deepEqual(h.calls, [['p401', 'ok'], ['p401']]);
+  assert.equal(canvas.getObjects().filter((o) => o.skribeImageUnavailable).length, 0);
+  const before = captureCanvasHistory(canvas);
+  await h.advance(47000);
+  assert.equal(h.calls.length, 2);
+  await h.advance(2000);
+  assert.equal(h.calls.length, 3);
+  assert.deepEqual([...h.calls[2]].sort(), ['ok', 'p401']);
+  assert.equal(captureCanvasHistory(canvas), before);
+  assert.equal(events, 0);
+  resetAssetDelivery();
+});
+
+test('an image the server will not sign stays a placeholder that keeps its reference, and is restored in place once signing succeeds', async () => {
+  let allow = false;
+  deliveryHarness((ids, signed) => ({ urls: allow ? Object.fromEntries(ids.map((id) => [id, signed(id)])) : {}, rejected: allow ? [] : ids }));
+  const canvas = new fabric.StaticCanvas(undefined, { width: 1600, height: 900, renderOnAddRemove: false });
+  await restoreCanvasHistory(canvas, JSON.stringify({ version: '7.4.0', objects: [privateImage('late', { scaleX: 0.25 }), { type: 'Image', version: '7.4.0', width: 10, height: 10, src: 'skribe-asset:', crossOrigin: 'anonymous' }] }));
+  const [late, corrupt] = canvas.getObjects();
+  assert.equal(late.skribeImageUnavailable, true);
+  assert.equal(corrupt.skribeImageUnavailable, true);
+  const before = captureCanvasHistory(canvas);
+  assert.equal(JSON.parse(before).objects[0].src, 'skribe-asset:late');
+  allow = true;
+  assert.equal(await rehydrateAssetImages(canvas), 1);
+  assert.equal(late.skribeImageUnavailable, undefined);
+  assert.match(late._element.src, /ik-s=/);
+  assert.equal(late.width, 640);
+  assert.equal(late.scaleX, 0.25);
+  assert.equal(captureCanvasHistory(canvas), before);
+  resetAssetDelivery();
+});
+
+test('a fresh upload previews from the URL it was issued with and is placed by its stable reference', async () => {
+  const h = deliveryHarness(() => ({ urls: {} }));
+  assert.equal(primeAssetDelivery('fresh', { url: 'https://cdn.test/skribe/assets/fresh.png?ik-t=1&ik-s=x', expiresAt: 1_000_000 + 60000 }), true);
+  const image = await fabric.FabricImage.fromObject({ src: 'skribe-asset:fresh', crossOrigin: 'anonymous' });
+  assert.equal(h.calls.length, 0);
+  assert.equal(image.skribeImageUnavailable, undefined);
+  image.set({ metadata: { assetId: 'fresh' } });
+  const object = image.toObject(['metadata']);
+  assert.equal(object.src, 'skribe-asset:fresh');
+  assert.equal(object.crossOrigin, 'anonymous');
+  assert.equal(JSON.stringify(object).includes('ik-s'), false);
+  resetAssetDelivery();
 });

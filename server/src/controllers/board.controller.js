@@ -2,7 +2,7 @@ import boardService from '../services/board.service.js';
 import config from '../config/env.js';
 import { error, success } from '../utils/apiResponse.js';
 import { getSocketServer } from '../sockets/index.js';
-import { boardRoomName } from '../sockets/boardHandlers.js';
+import { boardRoomName, revokeBoardAccess } from '../sockets/boardHandlers.js';
 import { syncBoardReferences } from '../services/asset.service.js';
 import { operationFate } from '../services/boardOperation.service.js';
 
@@ -12,7 +12,7 @@ export class BoardController {
       const userId = req.user.id;
       const { title, canvasData, thumbnail } = req.body || {};
       const board = await boardService.createBoard(userId, { title, canvasData, thumbnail });
-      if (canvasData) void syncBoardReferences(board.id, canvasData);
+      if (canvasData) await syncBoardReferences(board.id, canvasData, userId);
 
       return success(res, { board }, 'Board created successfully', 201);
     } catch (err) {
@@ -72,7 +72,7 @@ export class BoardController {
       const board = await boardService.updateBoard(boardId, userId, updatePayload);
 
       if (updatePayload.canvasData !== undefined) {
-        void syncBoardReferences(boardId, updatePayload.canvasData);
+        await syncBoardReferences(boardId, updatePayload.canvasData, userId);
         getSocketServer()?.to(boardRoomName(boardId)).emit('board:revision', { boardId, revision: board.canvasRevision, source: 'save' });
       }
       if (updatePayload.canvasBackground !== undefined) {
@@ -134,6 +134,7 @@ export class BoardController {
       const { id: boardId, userId: collaboratorUserId } = req.params;
 
       await boardService.removeCollaborator(boardId, userId, collaboratorUserId);
+      await revokeBoardAccess(getSocketServer(), boardId, collaboratorUserId);
 
       return success(res, null, 'Collaborator removed successfully', 200);
     } catch (err) {

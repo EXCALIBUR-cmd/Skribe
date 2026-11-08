@@ -135,7 +135,7 @@ export class BoardRepository {
   async softDeleteBoard(id) {
     return await Board.findOneAndUpdate(
       { _id: id, isDeleted: false },
-      { $set: { isDeleted: true } },
+      { $set: { isDeleted: true, deletedAt: new Date() } },
       { new: true }
     ).exec();
   }

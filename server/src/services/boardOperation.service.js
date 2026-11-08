@@ -165,7 +165,7 @@ export const commitCanvasOperation = async ({ boardId, userId, op }) => {
 
   const committed = await boardRepository.commitCanvasOperation(boardId, { baseRevision: op.baseRevision, opId: op.opId, canvasData: applied.canvasData });
   if (committed) {
-    void syncBoardReferences(boardId, applied.canvasData);
+    await syncBoardReferences(boardId, applied.canvasData, userId);
     return { status: 'committed', revision: committed.canvasRevision };
   }
 

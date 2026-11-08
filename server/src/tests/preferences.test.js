@@ -13,6 +13,8 @@ import { initSocketIO } from '../sockets/index.js';
 import { boardRoomName } from '../sockets/boardHandlers.js';
 import { CANVAS_BACKGROUNDS, DEFAULT_PREFERENCES } from '../constants/preferences.js';
 
+config.jwtSecret = 'skribe-test-only-jwt-secret-for-preference-tests-0001';
+
 const TEST_DB_NAME = `skribe_preferences_test_${process.pid}_${Date.now()}`;
 const TEST_MONGO_BASE = process.env.TEST_MONGODB_URI || 'mongodb://127.0.0.1:27017';
 let mongoAvailable = false;

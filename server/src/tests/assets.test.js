@@ -7,8 +7,13 @@ import Asset from '../models/Asset.js';
 import Board from '../models/Board.js';
 import { inspectImage, MAX_IMAGE_BYTES } from '../utils/imageFormat.js';
 import { createUploadHandler, limitConcurrentUploads, receiveImageBody } from '../controllers/asset.controller.js';
+import crypto from 'node:crypto';
 import {
+  DELETED_BOARD_RETENTION_MS,
+  MAX_SIGN_BATCH,
   ORPHAN_GRACE_MS,
+  signBoardAssets,
+  signDeliveryUrl,
   UPLOAD_LIMITS,
   collectAssetReferences,
   reserveUploadSlot,
@@ -119,10 +124,17 @@ const strangerId = new mongoose.Types.ObjectId();
 const imageKitFetch = (overrides = {}) => {
   const calls = [];
   const fetchImpl = async (url, init) => {
-    calls.push({ url, method: init.method, auth: init.headers.Authorization });
-    if (init.method === 'DELETE') return new Response(null, { status: 204 });
-    const file = init.body.get('file');
-    const fileName = init.body.get('fileName');
+    if (init.method === 'DELETE') {
+      calls.push({ url, method: init.method, auth: init.headers.Authorization });
+      return new Response(null, { status: 204 });
+    }
+    const multipart = new Response(init.body);
+    const contentType = multipart.headers.get('content-type') || '';
+    const form = await multipart.formData();
+    const requestedFields = String(form.get('responseFields') || '').split(',').map((field) => field.trim()).filter(Boolean);
+    calls.push({ url, method: init.method, auth: init.headers.Authorization, multipart: contentType.startsWith('multipart/form-data'), privateFlag: form.get('isPrivateFile'), responseFields: requestedFields });
+    const file = form.get('file');
+    const fileName = form.get('fileName');
     if (overrides.status) return new Response(JSON.stringify({ message: overrides.message }), { status: overrides.status });
     const image = inspectImage(Buffer.from(await file.arrayBuffer()));
     return new Response(JSON.stringify({
@@ -134,6 +146,7 @@ const imageKitFetch = (overrides = {}) => {
       size: file.size,
       width: image.width,
       height: image.height,
+      ...(requestedFields.includes('isPrivateFile') ? { isPrivateFile: form.get('isPrivateFile') === 'true' } : {}),
       ...overrides.body
     }), { status: 200 });
   };
@@ -287,7 +300,7 @@ test('an asset placed on a board during the grace period is protected by the sav
   await seedAsset('placed', { status: 'pending', orphanedAt: daysAgo(6) });
   const canvasData = { objects: [imageObject('placed')] };
   await Board.updateOne({ _id: board._id }, { $set: { canvasData } });
-  assert.equal(await syncBoardReferences(board._id, canvasData), 1);
+  assert.equal(await syncBoardReferences(board._id, canvasData, ownerId), 1);
   const stored = await Asset.findOne({ assetId: 'placed' }).lean();
   assert.equal(stored.status, 'attached');
   assert.equal(stored.orphanedAt, null);
@@ -336,4 +349,151 @@ test('a run interrupted mid-delete is picked up again after a restart', needsMon
   await runOrphanCleanup({ now: NOW, deleteFile: async (fileId) => { deleted.push(fileId); return 'deleted'; }, logger: {} });
   assert.deepEqual(deleted, ['fid_interrupted']);
   assert.equal(await statusOf('in-flight'), 'deleting');
+});
+
+const memberId = new mongoose.Types.ObjectId();
+
+test('new uploads are sent to ImageKit as private files, recorded as private and returned with a stable reference and a short-lived preview URL', needsMongo, async () => {
+  const board = await createBoard();
+  const fetchImpl = imageKitFetch();
+  const before = Math.floor(Date.now() / 1000);
+  const asset = await uploadBoardImage({ userId: ownerId, boardId: board._id, buffer: PNG, originalName: 'private.png' }, { fetch: fetchImpl });
+  assert.equal(fetchImpl.calls[0].multipart, true);
+  assert.equal(fetchImpl.calls[0].privateFlag, 'true');
+  assert.deepEqual(fetchImpl.calls[0].responseFields, ['isPrivateFile']);
+  assert.equal(asset.privacy, 'private');
+  assert.equal(asset.src, `skribe-asset:${asset.assetId}`);
+  const stored = await Asset.findOne({ assetId: asset.assetId }).lean();
+  assert.equal(stored.privacy, 'private');
+  assert.equal(stored.filePath, `/skribe/assets/${asset.assetId}.png`);
+  const delivery = new URL(asset.delivery.url);
+  assert.equal(delivery.pathname, `/skribe-test/skribe/assets/${asset.assetId}.png`);
+  const expiry = Number(delivery.searchParams.get('ik-t'));
+  assert.ok(expiry >= before + config.imageKitSignedUrlTtlSeconds && expiry <= before + config.imageKitSignedUrlTtlSeconds + 5);
+  assert.equal(asset.delivery.expiresAt, expiry * 1000);
+  assert.equal(JSON.stringify(asset).includes('private_test'), false);
+  assert.equal(JSON.stringify(stored).includes('ik-s'), false);
+
+  const publicResponse = imageKitFetch({ body: { isPrivateFile: false } });
+  await assert.rejects(uploadBoardImage({ userId: ownerId, boardId: board._id, buffer: PNG }, { fetch: publicResponse }), (err) => err.code === 'PROVIDER_UNVERIFIED');
+  assert.deepEqual(publicResponse.calls.map((call) => call.method), ['POST', 'DELETE']);
+  assert.equal(await Asset.countDocuments({ assetId: { $ne: asset.assetId }, owner: ownerId, board: board._id, privacy: { $exists: false }, status: 'pending' }), 0);
+
+  const fake = imageKitFetch();
+  const withoutResponseFields = async (url, init) => {
+    if (init.method !== 'POST') return fake(url, init);
+    const stripped = new FormData();
+    for (const [key, value] of init.body.entries()) if (key !== 'responseFields') stripped.append(key, value);
+    const response = await fake(url, { ...init, body: stripped });
+    const body = await response.clone().json();
+    assert.equal('isPrivateFile' in body, false);
+    return response;
+  };
+  const recordsBefore = await Asset.countDocuments({});
+  await assert.rejects(uploadBoardImage({ userId: ownerId, boardId: board._id, buffer: PNG }, { fetch: withoutResponseFields }), (err) => err.code === 'PROVIDER_UNVERIFIED' && err.statusCode === 502);
+  assert.deepEqual(fake.calls.map((call) => call.method), ['POST', 'DELETE']);
+  assert.deepEqual(fake.calls[0].responseFields, []);
+  assert.equal(await Asset.countDocuments({}), recordsBefore);
+});
+
+test('delivery URLs are signed with the documented ImageKit algorithm over the path and expiry', () => {
+  const issued = signDeliveryUrl('/skribe/assets/abc.png', { ttlSeconds: 60 });
+  const url = new URL(issued.url);
+  const expiry = url.searchParams.get('ik-t');
+  const unsigned = `${url.origin}${url.pathname}`;
+  const stringToSign = unsigned.replace('https://ik.imagekit.io/skribe-test/', '') + expiry;
+  assert.equal(url.searchParams.get('ik-s'), crypto.createHmac('sha1', 'private_test').update(stringToSign).digest('hex'));
+  assert.ok(Math.abs(Number(expiry) - (Math.floor(Date.now() / 1000) + 60)) <= 2);
+  assert.equal(issued.expiresAt, Number(expiry) * 1000);
+  assert.equal(issued.url.includes('private_test'), false);
+});
+
+test('signed URLs are issued only to board members, only for private assets attached to that board, in bounded batches', needsMongo, async () => {
+  await Asset.deleteMany({});
+  const board = await createBoard({ objects: [] }, { members: [memberId] });
+  const other = await createBoard();
+  const make = (assetId, fields) => Asset.create({ assetId, owner: ownerId, board: board._id, status: 'attached', imageKitFileId: `fid_${assetId}`, filePath: `/skribe/assets/${assetId}.png`, url: `https://ik.imagekit.io/skribe-test/skribe/assets/${assetId}.png`, privacy: 'private', ...fields });
+  await make('mine-private', {});
+  await make('reused', { board: other._id, boards: [other._id, board._id] });
+  await make('legacy-public', { privacy: undefined });
+  await make('other-board', { board: other._id, boards: [other._id] });
+  await make('gone', { status: 'deleted' });
+  await make('foreign', { owner: strangerId, board: other._id, boards: [other._id] });
+  const ask = (userId, assetIds, boardId = board._id) => signBoardAssets({ boardId: String(boardId), userId, assetIds });
+  for (const userId of [ownerId, memberId]) {
+    const result = await ask(userId, ['mine-private', 'reused', 'legacy-public', 'other-board', 'gone', 'foreign', 'unknown', 'mine-private']);
+    assert.deepEqual(Object.keys(result.urls).sort(), ['mine-private', 'reused']);
+    assert.match(result.urls['mine-private'].url, /\/skribe\/assets\/mine-private\.png\?ik-t=\d+&ik-s=[0-9a-f]{40}$/);
+    assert.deepEqual(result.publicAssets, ['legacy-public']);
+    assert.deepEqual(result.rejected.sort(), ['foreign', 'gone', 'other-board', 'unknown']);
+  }
+  await assert.rejects(ask(strangerId, ['mine-private']), (err) => err.statusCode === 403);
+  assert.deepEqual(Object.keys((await ask(ownerId, ['other-board', 'reused', 'mine-private'], other._id)).urls).sort(), ['other-board', 'reused']);
+  for (const bad of [[], 'mine-private', [''], ['../x'], [{}], Array.from({ length: MAX_SIGN_BATCH + 1 }, (_, i) => `a${i}`)]) {
+    await assert.rejects(ask(ownerId, bad), (err) => err.statusCode === 400 && err.code === 'INVALID_ASSET_IDS');
+  }
+  await Board.updateOne({ _id: board._id }, { $set: { members: [] } });
+  await assert.rejects(ask(memberId, ['mine-private']), (err) => err.statusCode === 403);
+});
+
+test('a board save can link only assets its author owns or can already reach, never another user\'s asset by URL, id or reference', needsMongo, async () => {
+  await Asset.deleteMany({});
+  const victimBoard = await createBoard({ objects: [] }, { members: [memberId] });
+  const strangerBoard = await Board.create({ owner: strangerId, title: 'Stranger', canvasData: { objects: [] } });
+  const memberBoard = await Board.create({ owner: memberId, title: 'Member', canvasData: { objects: [] } });
+  await seedAsset('victim', { status: 'attached', board: victimBoard._id, boards: [victimBoard._id], orphanedAt: null });
+  const boardsOf = async (assetId) => (await Asset.findOne({ assetId }).lean()).boards.map(String).sort();
+  const victimUrl = 'https://ik.imagekit.io/skribe-test/skribe/assets/victim.png';
+  for (const object of [{ type: 'Image', src: victimUrl }, imageObject('victim'), { type: 'Image', src: 'skribe-asset:victim' }]) {
+    assert.equal(await syncBoardReferences(strangerBoard._id, { objects: [object] }, strangerId), 0);
+  }
+  assert.deepEqual(await boardsOf('victim'), [String(victimBoard._id)]);
+  assert.equal(await syncBoardReferences(strangerBoard._id, { objects: [imageObject('victim')] }), 0);
+  assert.equal(await syncBoardReferences(victimBoard._id, { objects: [imageObject('victim')] }, memberId), 1);
+  assert.equal(await syncBoardReferences(memberBoard._id, { objects: [{ type: 'Image', src: 'skribe-asset:victim' }] }, memberId), 1);
+  assert.deepEqual(await boardsOf('victim'), [String(victimBoard._id), String(memberBoard._id)].sort());
+  await seedAsset('own', { status: 'pending', board: new mongoose.Types.ObjectId() });
+  assert.equal(await syncBoardReferences(strangerBoard._id, { objects: [imageObject('own')] }, ownerId), 1);
+  await Board.updateOne({ _id: victimBoard._id }, { $set: { members: [] } });
+  const outsider = await Board.create({ owner: memberId, title: 'Later', canvasData: { objects: [] } });
+  assert.equal(await syncBoardReferences(outsider._id, { objects: [imageObject('victim')] }, memberId), 1);
+  assert.equal((await boardsOf('victim')).includes(String(outsider._id)), true);
+});
+
+test('deleted boards protect their images for the 30-day retention period, then their images follow the seven-day orphan grace period', needsMongo, async () => {
+  await Board.deleteMany({});
+  await Asset.deleteMany({});
+  await createBoard({ objects: [imageObject('active')] });
+  await createBoard({ objects: [imageObject('recoverable')] }, { isDeleted: true, deletedAt: daysAgo(5) });
+  await createBoard({ objects: [imageObject('expired')] }, { isDeleted: true, deletedAt: daysAgo(31) });
+  const legacy = await createBoard({ objects: [imageObject('legacy-deleted')] }, { isDeleted: true });
+  await Board.collection.updateOne({ _id: legacy._id }, { $set: { updatedAt: daysAgo(40) }, $unset: { deletedAt: '' } });
+  const gone = await createBoard({ objects: [imageObject('hard-deleted')] });
+  await Board.deleteOne({ _id: gone._id });
+  for (const id of ['active', 'recoverable', 'expired', 'legacy-deleted', 'hard-deleted']) await seedAsset(id, { status: 'attached', orphanedAt: null, attachedAt: daysAgo(60) });
+  const deleted = [];
+  const deleteFile = async (fileId) => { deleted.push(fileId); return 'deleted'; };
+  const first = await runOrphanCleanup({ now: NOW, deleteFile, logger: {} });
+  assert.equal(first.deleted, 0);
+  for (const id of ['active', 'recoverable']) assert.equal(await statusOf(id), 'attached', id);
+  for (const id of ['expired', 'legacy-deleted', 'hard-deleted']) assert.equal(await statusOf(id), 'orphaned', id);
+  const withinGrace = await runOrphanCleanup({ now: new Date(NOW.getTime() + ORPHAN_GRACE_MS - 1000), deleteFile, logger: {} });
+  assert.equal(withinGrace.deleted, 0);
+  const afterGrace = await runOrphanCleanup({ now: new Date(NOW.getTime() + ORPHAN_GRACE_MS), deleteFile, logger: {} });
+  assert.deepEqual(deleted.sort(), ['fid_expired', 'fid_hard-deleted', 'fid_legacy-deleted']);
+  assert.equal(afterGrace.deleted, 3);
+  assert.equal(await statusOf('recoverable'), 'attached');
+  const afterRetention = await runOrphanCleanup({ now: new Date(daysAgo(5).getTime() + DELETED_BOARD_RETENTION_MS + 1000), deleteFile, logger: {} });
+  assert.equal(afterRetention.newlyOrphaned, 1);
+  assert.equal(await statusOf('recoverable'), 'orphaned');
+  assert.equal(await statusOf('active'), 'attached');
+});
+
+test('soft-deleting a board records when it was deleted', needsMongo, async () => {
+  const board = await createBoard();
+  const { default: boardRepository } = await import('../repositories/board.repository.js');
+  await boardRepository.softDeleteBoard(board._id);
+  const stored = await Board.findById(board._id).lean();
+  assert.equal(stored.isDeleted, true);
+  assert.ok(stored.deletedAt instanceof Date && Date.now() - stored.deletedAt.getTime() < 60000);
 });

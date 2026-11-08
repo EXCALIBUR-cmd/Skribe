@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 import { ANIMATION_CONFIG, isReducedMotion } from '../animations/config';
 import { CommandPalette } from '../components/ui/CommandPalette';
@@ -49,6 +49,8 @@ const BoardCardTitleInput = ({ initialTitle, onSave, onCancel }) => {
 export const BoardsPage = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const accessNotice = typeof location.state?.accessNotice === 'string' ? location.state.accessNotice : '';
   const t = useT();
 
   const [boards, setBoards] = useState([]);
@@ -435,6 +437,17 @@ export const BoardsPage = () => {
 
       <main ref={mainContentRef} className={`pt-8 pb-16 pr-8 w-full min-h-[calc(100vh-64px)] relative z-10 ${isSidebarCollapsed ? 'pl-[104px]' : 'pl-[288px]'}`}>
         <div className="relative z-10 max-w-7xl mx-auto">
+          {accessNotice && (
+            <div role="status" data-access-notice className="mb-6 flex items-start justify-between gap-4 rounded-xl border-2 border-outline bg-surface-container px-4 py-3 text-sm text-on-surface">
+              <span className="flex items-start gap-2">
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">lock</span>
+                <span>{accessNotice}</span>
+              </span>
+              <button type="button" onClick={() => navigate(location.pathname, { replace: true, state: null })} className="min-h-11 shrink-0 rounded-lg px-3 font-medium text-on-surface hover:bg-surface-container-high">
+                Dismiss
+              </button>
+            </div>
+          )}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
             <div>
               <h1 className="font-headline text-3xl font-bold text-on-surface flex items-center gap-3">

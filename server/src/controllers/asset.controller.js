@@ -1,7 +1,7 @@
 import express from 'express';
 import { error, success } from '../utils/apiResponse.js';
 import { MAX_IMAGE_BYTES } from '../utils/imageFormat.js';
-import { getStorageUsage, reserveUploadSlot, uploadBoardImage } from '../services/asset.service.js';
+import { getStorageUsage, reserveUploadSlot, signBoardAssets, uploadBoardImage } from '../services/asset.service.js';
 
 const readImageBody = express.raw({ type: () => true, limit: MAX_IMAGE_BYTES });
 
@@ -53,4 +53,16 @@ export const usage = async (req, res, next) => {
   }
 };
 
-export default { limitConcurrentUploads, receiveImageBody, upload: createUploadHandler(), usage };
+export const signBoardAssetUrls = async (req, res, next) => {
+  try {
+    const result = await signBoardAssets({ boardId: req.params.id, userId: req.user.id, assetIds: req.body?.assetIds });
+    res.set('Cache-Control', 'no-store');
+    return success(res, result, 'Asset delivery URLs issued', 200);
+  } catch (err) {
+    if (err.statusCode && err.statusCode < 500) return error(res, err.message, err.statusCode, err.code ? { code: err.code } : null);
+    if (err.code) return error(res, err.message, err.statusCode, { code: err.code });
+    next(err);
+  }
+};
+
+export default { limitConcurrentUploads, receiveImageBody, upload: createUploadHandler(), usage, signBoardAssetUrls };

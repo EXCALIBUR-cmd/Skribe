@@ -38,6 +38,7 @@ import { runVoiceCommand, confirmVoiceCommandProposal, requestVoiceCommandInterp
 import { registerDictationCanvas } from '../features/voice/dictationCanvasBridge.js';
 import { runBindingDiagnostic } from '../features/messCleanup/bindingDiagnostics.js';
 import { createBoardSyncController } from '../features/collab/boardSyncController.js';
+import { configureAssetDelivery, rehydrateAssetImages, resetAssetDelivery } from '../features/imageAssets/imageAssets.js';
 import { countPendingChanges, createPendingJournal } from '../features/collab/pendingJournal.js';
 import { PendingRecoveryNotice } from '../components/ui/PendingRecoveryNotice.jsx';
 
@@ -429,6 +430,7 @@ export const MainCanvasPage = () => {
               } else if (kind === 'journal-unavailable') {
                 addToast('Unsaved work is at risk', 'This browser cannot keep a local copy of your changes. Stay on this page until they are saved.', 'warning', 'warning');
               } else if (kind === 'synced') {
+                rehydrateAssetImages(fabricCanvasRef.current?.getCanvas?.());
                 setSaveStatus('saved');
               }
             },
@@ -436,6 +438,11 @@ export const MainCanvasPage = () => {
           });
           syncControllerRef.current.load({ revision: res.data.board.canvasRevision ?? 0, objects: initialJson.objects || [], enabled: res.data.collaboration?.operationsEnabled === true });
           if (journalUserId && sessionUserIdRef.current !== journalUserId) syncControllerRef.current.holdSession('SESSION_CHANGED');
+
+          configureAssetDelivery({
+            scope: boardId,
+            sign: async (assetIds) => (await apiClient.post(`/boards/${boardId}/assets/urls`, { assetIds }))?.data || null
+          });
 
           const applyCanvasData = () => {
             if (!isMounted) return;
@@ -497,6 +504,7 @@ export const MainCanvasPage = () => {
 
     return () => {
       isMounted = false;
+      resetAssetDelivery();
     };
   }, [boardId, addToast]);
 
@@ -675,10 +683,18 @@ export const MainCanvasPage = () => {
     };
 
     const handleBoardJoined = (event) => {
-      if (event?.boardId === boardId) boardSync()?.reconnect();
+      if (event?.boardId !== boardId) return;
+      boardSync()?.reconnect();
+      rehydrateAssetImages(fabricCanvasRef.current?.getCanvas?.());
+    };
+
+    const handleAccessRevoked = (event) => {
+      if (event?.boardId !== boardId) return;
+      navigate('/boards', { replace: true, state: { accessNotice: 'Access removed: the board owner removed you from that board.' } });
     };
 
     socketService.on('board-joined', handleBoardJoined);
+    socketService.on('board:access-revoked', handleAccessRevoked);
     socketService.on('canvas:op-committed', handleRemoteOperation);
     socketService.on('board:revision', handleRemoteRevision);
     socketService.on('disconnect', handleSocketDisconnect);
@@ -687,6 +703,7 @@ export const MainCanvasPage = () => {
 
     return () => {
       socketService.off('board-joined', handleBoardJoined);
+      socketService.off('board:access-revoked', handleAccessRevoked);
       socketService.off('canvas:op-committed', handleRemoteOperation);
       socketService.off('board:revision', handleRemoteRevision);
       socketService.off('disconnect', handleSocketDisconnect);

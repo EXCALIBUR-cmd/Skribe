@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import ImageKit from '@imagekit/nodejs';
 import mongoose from 'mongoose';
 import config from '../config/env.js';
 import Asset from '../models/Asset.js';
@@ -13,6 +14,10 @@ export const ASSET_FOLDER = '/skribe/assets';
 export const ORPHAN_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const STALE_DELETING_MS = 60 * 60 * 1000;
 export const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const DELETED_BOARD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const ASSET_REF_PREFIX = 'skribe-asset:';
+export const MAX_SIGN_BATCH = 100;
+const ASSET_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 export const UPLOAD_LIMITS = Object.freeze({ global: 4, perUser: 2, timeoutMs: 30000 });
 const MAX_REFERENCE_DEPTH = 64;
 
@@ -28,6 +33,8 @@ export const uploadToImageKit = async ({ buffer, fileName, mimeType }, { fetch: 
   form.append('fileName', fileName);
   form.append('folder', ASSET_FOLDER);
   form.append('useUniqueFileName', 'true');
+  form.append('isPrivateFile', 'true');
+  form.append('responseFields', 'isPrivateFile');
   let response;
   try {
     response = await fetchImpl(IMAGEKIT_UPLOAD_URL, {
@@ -77,9 +84,31 @@ export const reserveUploadSlot = (userId) => {
   };
 };
 
+let imageKitClient = null;
+let imageKitClientKey = null;
+
+const signingClient = () => {
+  if (!imageKitClient || imageKitClientKey !== config.imageKitPrivateKey) {
+    imageKitClient = new ImageKit({ privateKey: config.imageKitPrivateKey });
+    imageKitClientKey = config.imageKitPrivateKey;
+  }
+  return imageKitClient;
+};
+
+export const signDeliveryUrl = (filePath, { ttlSeconds = config.imageKitSignedUrlTtlSeconds } = {}) => {
+  if (!isImageKitConfigured()) throw httpError(503, 'Image storage is not configured on this server', 'STORAGE_NOT_CONFIGURED');
+  const url = signingClient().helper.buildSrc({ urlEndpoint: config.imageKitUrlEndpoint, src: filePath, signed: true, expiresIn: ttlSeconds });
+  const expiresAt = Number(new URL(url).searchParams.get('ik-t')) * 1000;
+  return { url, expiresAt };
+};
+
+export const assetSource = (asset) => (asset.privacy === 'private' ? `${ASSET_REF_PREFIX}${asset.assetId}` : asset.url);
+
 export const toPublicAsset = (asset) => ({
   assetId: asset.assetId,
   url: asset.url,
+  src: assetSource(asset),
+  privacy: asset.privacy === 'private' ? 'private' : 'public',
   width: asset.width,
   height: asset.height,
   mimeType: asset.mimeType,
@@ -125,7 +154,7 @@ export const uploadBoardImage = async ({ userId, boardId, buffer, originalName }
   }
 
   const verified = stored && typeof stored.fileId === 'string' && typeof stored.filePath === 'string'
-    && stored.fileType === 'image' && Number(stored.size) === buffer.length && Number(stored.width) > 0 && Number(stored.height) > 0;
+    && stored.fileType === 'image' && stored.isPrivateFile === true && Number(stored.size) === buffer.length && Number(stored.width) > 0 && Number(stored.height) > 0;
   if (!verified) {
     if (typeof stored?.fileId === 'string') await deleteFromImageKit(stored.fileId, { fetch: fetchImpl }).catch(() => null);
     await AssetModel.deleteOne({ _id: asset._id });
@@ -140,6 +169,7 @@ export const uploadBoardImage = async ({ userId, boardId, buffer, originalName }
         imageKitFileId: stored.fileId,
         filePath: stored.filePath,
         url: `${config.imageKitUrlEndpoint.replace(/\/+$/, '')}${stored.filePath}`,
+        privacy: 'private',
         width: Number(stored.width),
         height: Number(stored.height),
         uploadedAt,
@@ -148,7 +178,13 @@ export const uploadBoardImage = async ({ userId, boardId, buffer, originalName }
     },
     { new: true }
   );
-  return toPublicAsset(saved);
+  let delivery = null;
+  try {
+    delivery = signDeliveryUrl(saved.filePath);
+  } catch {
+    delivery = null;
+  }
+  return { ...toPublicAsset(saved), delivery };
 };
 
 const isRemoteUrl = (value) => typeof value === 'string' && value.length <= 2048 && /^https?:\/\//i.test(value);
@@ -161,6 +197,7 @@ export const collectAssetReferences = (value, refs = { assetIds: new Set(), urls
     return refs;
   }
   if (typeof value.assetId === 'string' && value.assetId) refs.assetIds.add(value.assetId);
+  if (typeof value.src === 'string' && value.src.startsWith(ASSET_REF_PREFIX) && value.src.length > ASSET_REF_PREFIX.length) refs.assetIds.add(value.src.slice(ASSET_REF_PREFIX.length));
   if (isRemoteUrl(value.src)) refs.urls.add(value.src);
   for (const key of Object.keys(value)) {
     const child = value[key];
@@ -181,11 +218,23 @@ const attachUpdate = (now, boardId) => [{
   }
 }];
 
-export const syncBoardReferences = async (boardId, canvasData, { AssetModel = Asset, now = new Date() } = {}) => {
+const linkedBoardIds = (asset) => [asset.board, ...(asset.boards || [])].filter(Boolean).map(String);
+
+export const syncBoardReferences = async (boardId, canvasData, userId, { AssetModel = Asset, BoardModel = Board, now = new Date() } = {}) => {
   try {
     const refs = collectAssetReferences(canvasData);
     if (refs.assetIds.size === 0 && refs.urls.size === 0) return 0;
-    const result = await AssetModel.updateMany({ ...referenceFilter(refs), status: { $ne: 'deleted' } }, attachUpdate(now, boardId));
+    const target = String(boardId);
+    const candidates = await AssetModel.find({ ...referenceFilter(refs), status: { $ne: 'deleted' } }, { _id: 1, owner: 1, board: 1, boards: 1 }).lean();
+    if (candidates.length === 0) return 0;
+    const user = userId ? String(userId) : null;
+    const elsewhere = [...new Set(candidates.flatMap(linkedBoardIds))].filter((id) => id !== target && mongoose.isValidObjectId(id));
+    const reachable = user && elsewhere.length > 0
+      ? new Set((await BoardModel.find({ _id: { $in: elsewhere }, isDeleted: { $ne: true }, $or: [{ owner: user }, { members: user }] }, { _id: 1 }).lean()).map((board) => String(board._id)))
+      : new Set();
+    const allowed = candidates.filter((asset) => (user && String(asset.owner) === user) || linkedBoardIds(asset).some((id) => id === target || reachable.has(id)));
+    if (allowed.length === 0) return 0;
+    const result = await AssetModel.updateMany({ _id: { $in: allowed.map((asset) => asset._id) }, status: { $ne: 'deleted' } }, attachUpdate(now, boardId));
     return result.modifiedCount || 0;
   } catch (err) {
     console.error('[AssetService] Failed to record board image references:', err.message);
@@ -193,9 +242,14 @@ export const syncBoardReferences = async (boardId, canvasData, { AssetModel = As
   }
 };
 
-export const scanBoardReferences = async ({ BoardModel = Board } = {}) => {
+export const retainedBoardFilter = (now = new Date()) => {
+  const keepAfter = new Date(now.getTime() - DELETED_BOARD_RETENTION_MS);
+  return { $or: [{ isDeleted: { $ne: true } }, { deletedAt: { $gt: keepAfter } }, { deletedAt: null, updatedAt: { $gt: keepAfter } }] };
+};
+
+export const scanBoardReferences = async ({ BoardModel = Board, now = new Date() } = {}) => {
   const refs = { assetIds: new Set(), urls: new Set() };
-  for await (const board of BoardModel.find({}, { canvasData: 1 }).lean().cursor()) {
+  for await (const board of BoardModel.find(retainedBoardFilter(now), { canvasData: 1 }).lean().cursor()) {
     collectAssetReferences(board.canvasData, refs);
   }
   return refs;
@@ -234,7 +288,7 @@ export const runOrphanCleanup = async ({
 
   let refs;
   try {
-    refs = await scanReferences();
+    refs = await scanReferences({ now });
   } catch (err) {
     await AssetModel.updateMany({ status: 'deleting', cleanupRunId: runId }, { $set: { status: 'orphaned', cleanupRunId: null, lastCleanupError: 'reference check failed' } });
     summary.aborted = 'reference_check_failed';
@@ -300,6 +354,28 @@ export const getStorageUsage = async (userId, { AssetModel = Asset } = {}) => {
   return { totalBytes: rows.reduce((sum, row) => sum + row.bytes, 0), totalCount: rows.reduce((sum, row) => sum + row.count, 0), byStatus, maxUploadBytes: MAX_IMAGE_BYTES };
 };
 
+export const signBoardAssets = async ({ boardId, userId, assetIds }, { AssetModel = Asset, findBoard = (id) => boardRepository.findBoardAccess(id), sign = signDeliveryUrl } = {}) => {
+  if (!mongoose.isValidObjectId(boardId)) throw httpError(400, 'A valid board is required', 'INVALID_BOARD');
+  if (!Array.isArray(assetIds) || assetIds.length === 0 || assetIds.length > MAX_SIGN_BATCH || !assetIds.every((id) => typeof id === 'string' && ASSET_ID_PATTERN.test(id))) {
+    throw httpError(400, `Provide between 1 and ${MAX_SIGN_BATCH} valid asset ids`, 'INVALID_ASSET_IDS');
+  }
+  boardService._verifyAccess(await findBoard(boardId), userId);
+  const wanted = [...new Set(assetIds)];
+  const board = new mongoose.Types.ObjectId(String(boardId));
+  const assets = await AssetModel.find(
+    { assetId: { $in: wanted }, status: { $nin: ['deleted', 'deleting'] }, $or: [{ board }, { boards: board }] },
+    { assetId: 1, privacy: 1, filePath: 1 }
+  ).lean();
+  const urls = {};
+  const publicAssets = [];
+  for (const asset of assets) {
+    if (asset.privacy === 'private' && typeof asset.filePath === 'string' && asset.filePath) urls[asset.assetId] = sign(asset.filePath);
+    else if (asset.privacy !== 'private') publicAssets.push(asset.assetId);
+  }
+  const answered = new Set([...Object.keys(urls), ...publicAssets]);
+  return { urls, publicAssets, rejected: wanted.filter((id) => !answered.has(id)) };
+};
+
 export const startAssetCleanupSchedule = ({ intervalMs = CLEANUP_INTERVAL_MS, firstRunDelayMs = 60 * 1000 } = {}) => {
   let running = false;
   const run = async () => {
@@ -323,4 +399,4 @@ export const startAssetCleanupSchedule = ({ intervalMs = CLEANUP_INTERVAL_MS, fi
   };
 };
 
-export default { uploadBoardImage, syncBoardReferences, runOrphanCleanup, getStorageUsage, startAssetCleanupSchedule };
+export default { uploadBoardImage, syncBoardReferences, runOrphanCleanup, getStorageUsage, startAssetCleanupSchedule, signBoardAssets };

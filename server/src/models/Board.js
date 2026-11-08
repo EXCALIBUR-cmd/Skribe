@@ -73,6 +73,10 @@ const boardSchema = new mongoose.Schema(
       default: false,
       index: true
     },
+    deletedAt: {
+      type: Date,
+      default: null
+    },
     lastOpenedAt: {
       type: Date,
       default: Date.now

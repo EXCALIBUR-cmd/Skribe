@@ -36,7 +36,7 @@ import { isConnectorPath, isTemporaryObject } from '../../features/messCleanup/c
 import { SHAPE_DEFAULT_STYLES } from './shapeDefaults.js';
 import { applyCanvasTheme, installThemeRendering, isDarkSurface } from '../../features/settings/canvasTheme.js';
 import { createTextElement, getTextKind, installTextElementRendering } from '../../features/textElements/textElements.js';
-import { getInitialImageScale, installImageAssetLoading } from '../../features/imageAssets/imageAssets.js';
+import { getInitialImageScale, installImageAssetLoading, primeAssetDelivery } from '../../features/imageAssets/imageAssets.js';
 import ImageUploadDialog from '../../features/imageAssets/ImageUploadDialog.jsx';
 import { applyIconStyle, createIconObject, getIconSelectionProps, isLucideIcon, prepareIconObject, setIconSize } from '../../features/iconGallery/iconObjects.js';
 import AnimatedModal from '../ui/AnimatedModal';
@@ -2037,7 +2037,9 @@ export const FabricCanvas = forwardRef(({
   const addUploadedImage = async (asset) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) throw new Error('Canvas is not ready');
-    const image = await fabric.FabricImage.fromURL(asset.url, { crossOrigin: 'anonymous' });
+    if (asset.delivery) primeAssetDelivery(asset.assetId, asset.delivery);
+    const image = await fabric.FabricImage.fromObject({ src: asset.src || asset.url, crossOrigin: 'anonymous' });
+    if (image.skribeImageUnavailable) throw new Error('The uploaded image could not be displayed.');
     if (fabricCanvasRef.current !== canvas) throw new Error('Canvas changed during upload');
     const zoom = canvas.getZoom() || 1;
     const scale = getInitialImageScale(image.width, image.height, canvas.getWidth() / zoom, canvas.getHeight() / zoom);

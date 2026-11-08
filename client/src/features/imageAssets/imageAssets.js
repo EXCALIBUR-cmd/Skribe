@@ -3,6 +3,129 @@ import apiClient from '../../api/apiClient.js';
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const ACCEPTED_IMAGE_TYPES = 'image/png,image/jpeg,image/webp';
 export const MAX_INITIAL_VIEWPORT_SHARE = 0.6;
+export const ASSET_REF_PREFIX = 'skribe-asset:';
+
+const DELIVERY_BATCH = 100;
+const REFRESH_SHARE = 0.8;
+const STALE_MARGIN_MS = 5000;
+
+export const assetIdFromSource = (src) => (typeof src === 'string' && src.startsWith(ASSET_REF_PREFIX) && src.length > ASSET_REF_PREFIX.length ? src.slice(ASSET_REF_PREFIX.length) : null);
+
+const delivery = {
+  scope: null,
+  sign: null,
+  cache: new Map(),
+  waiting: new Map(),
+  flushTimer: null,
+  refreshTimer: null,
+  generation: 0,
+  fabric: null,
+  now: () => Date.now(),
+  timers: { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) }
+};
+
+const remember = (assetId, entry) => {
+  if (!entry || typeof entry.url !== 'string' || !entry.url || !Number.isFinite(entry.expiresAt)) return null;
+  const issuedAt = delivery.now();
+  delivery.cache.set(assetId, { url: entry.url, expiresAt: entry.expiresAt, refreshAt: issuedAt + Math.max(0, entry.expiresAt - issuedAt) * REFRESH_SHARE });
+  return entry.url;
+};
+
+const scheduleRefresh = () => {
+  if (delivery.refreshTimer) delivery.timers.clearTimeout(delivery.refreshTimer);
+  delivery.refreshTimer = null;
+  if (!delivery.sign || delivery.cache.size === 0) return;
+  const next = Math.min(...[...delivery.cache.values()].map((entry) => entry.refreshAt));
+  delivery.refreshTimer = delivery.timers.setTimeout(() => {
+    delivery.refreshTimer = null;
+    const due = [...delivery.cache.entries()].filter(([, entry]) => entry.refreshAt <= delivery.now() + 1000).map(([id]) => id);
+    if (due.length > 0) requestUrls(due);
+    else scheduleRefresh();
+  }, Math.max(1000, next - delivery.now()));
+};
+
+const requestUrls = async (ids) => {
+  const { sign, generation } = delivery;
+  const issued = {};
+  if (!sign || ids.length === 0) return issued;
+  for (let start = 0; start < ids.length; start += DELIVERY_BATCH) {
+    const chunk = ids.slice(start, start + DELIVERY_BATCH);
+    const answer = await Promise.resolve().then(() => sign(chunk)).catch(() => null);
+    if (generation !== delivery.generation) return {};
+    chunk.forEach((id) => {
+      const url = remember(id, answer?.urls?.[id]);
+      if (url) issued[id] = url;
+      else delivery.cache.delete(id);
+    });
+  }
+  scheduleRefresh();
+  return issued;
+};
+
+const flushDelivery = async () => {
+  delivery.flushTimer = null;
+  const batch = new Map(delivery.waiting);
+  delivery.waiting.clear();
+  const issued = await requestUrls([...batch.keys()]);
+  batch.forEach((waiters, id) => waiters.forEach((done) => done(issued[id] || null)));
+};
+
+export const resolveAssetUrl = (assetId, { force = false } = {}) => {
+  const cached = delivery.cache.get(assetId);
+  if (!force && cached && delivery.now() < cached.expiresAt - STALE_MARGIN_MS) return Promise.resolve(cached.url);
+  if (force) delivery.cache.delete(assetId);
+  if (!delivery.sign || !assetId) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    delivery.waiting.set(assetId, [...(delivery.waiting.get(assetId) || []), resolve]);
+    if (!delivery.flushTimer) delivery.flushTimer = delivery.timers.setTimeout(flushDelivery, 0);
+  });
+};
+
+export const resetAssetDelivery = () => {
+  delivery.generation += 1;
+  if (delivery.flushTimer) delivery.timers.clearTimeout(delivery.flushTimer);
+  if (delivery.refreshTimer) delivery.timers.clearTimeout(delivery.refreshTimer);
+  delivery.flushTimer = null;
+  delivery.refreshTimer = null;
+  const waiting = [...delivery.waiting.values()];
+  delivery.waiting.clear();
+  waiting.forEach((waiters) => waiters.forEach((done) => done(null)));
+  delivery.cache.clear();
+  delivery.scope = null;
+  delivery.sign = null;
+};
+
+export const configureAssetDelivery = ({ scope = null, sign = null, now = null, timers = null } = {}) => {
+  if (delivery.scope !== scope) resetAssetDelivery();
+  delivery.scope = scope;
+  delivery.sign = typeof sign === 'function' ? sign : null;
+  if (now) delivery.now = now;
+  if (timers) delivery.timers = timers;
+};
+
+export const primeAssetDelivery = (assetId, entry) => {
+  if (!assetId || !remember(assetId, entry)) return false;
+  scheduleRefresh();
+  return true;
+};
+
+export const rehydrateAssetImages = async (canvas) => {
+  const fabric = delivery.fabric;
+  if (!canvas || !fabric || typeof canvas.getObjects !== 'function') return 0;
+  const pending = canvas.getObjects().filter((object) => object.skribeImageUnavailable && assetIdFromSource(object.getSrc?.()));
+  let restored = 0;
+  await Promise.all(pending.map(async (image) => {
+    const url = await resolveAssetUrl(assetIdFromSource(image.getSrc()));
+    if (!url) return;
+    const element = await fabric.util.loadImage(url, { crossOrigin: image.crossOrigin ?? 'anonymous' }).catch(() => null);
+    if (!element || !image.skribeImageUnavailable) return;
+    image.setElement(element, { width: image.width, height: image.height });
+    delete image.skribeImageUnavailable;
+    restored += 1;
+  }));
+  if (restored > 0) canvas.requestRenderAll?.();
+  return restored;
+};
 
 const startsWith = (bytes, signature, offset = 0) => signature.every((byte, index) => bytes[offset + index] === byte);
 const ascii = (text) => [...text].map((char) => char.charCodeAt(0));
@@ -32,7 +155,7 @@ export const uploadImageAsset = async ({ file, boardId, onProgress, client = api
     }
   });
   const asset = response?.data?.asset;
-  if (!asset?.assetId || !asset?.url) throw new Error('The upload finished without an image reference.');
+  if (!asset?.assetId || !(asset.src || asset.url)) throw new Error('The upload finished without an image reference.');
   return asset;
 };
 
@@ -60,15 +183,37 @@ export const installImageAssetLoading = (fabric) => {
   const { FabricImage } = fabric;
   if (FabricImage.__skribeImageFallbackInstalled) return;
   FabricImage.__skribeImageFallbackInstalled = true;
+  delivery.fabric = fabric;
   const load = FabricImage.fromObject.bind(FabricImage);
-  FabricImage.fromObject = (object, options) => load(object, options).catch((err) => {
-    if (options?.signal?.aborted || typeof object?.src !== 'string' || !object.src) throw err;
-    return load({ ...object, src: '' }, options).then((image) => {
-      image.setElement(createImagePlaceholder(fabric, object.width, object.height));
-      image.getSrc = () => object.src;
-      image.getCrossOrigin = () => object.crossOrigin ?? null;
-      image.skribeImageUnavailable = true;
-      return image;
+  const keepSource = (src) => (image) => {
+    image.getSrc = () => src;
+    return image;
+  };
+  const loadAsset = async (object, options, assetId) => {
+    const url = await resolveAssetUrl(assetId);
+    if (!url) throw new Error('Image delivery is unavailable');
+    try {
+      return keepSource(object.src)(await load({ ...object, src: url }, options));
+    } catch (err) {
+      if (options?.signal?.aborted) throw err;
+      const fresh = await resolveAssetUrl(assetId, { force: true });
+      if (!fresh) throw err;
+      return keepSource(object.src)(await load({ ...object, src: fresh }, options));
+    }
+  };
+  FabricImage.fromObject = (object, options) => {
+    const assetId = assetIdFromSource(object?.src);
+    const isReference = typeof object?.src === 'string' && object.src.startsWith(ASSET_REF_PREFIX);
+    const attempt = assetId ? loadAsset(object, options, assetId) : isReference ? Promise.reject(new Error('Invalid asset reference')) : load(object, options);
+    return attempt.catch((err) => {
+      if (options?.signal?.aborted || typeof object?.src !== 'string' || !object.src) throw err;
+      return load({ ...object, src: '' }, options).then((image) => {
+        image.setElement(createImagePlaceholder(fabric, object.width, object.height));
+        image.getSrc = () => object.src;
+        image.getCrossOrigin = () => object.crossOrigin ?? null;
+        image.skribeImageUnavailable = true;
+        return image;
+      });
     });
-  });
+  };
 };

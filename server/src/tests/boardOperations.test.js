@@ -28,6 +28,7 @@ try {
   mongoAvailable = false;
 }
 const needsMongo = { skip: mongoAvailable ? false : `MongoDB is not reachable at ${TEST_MONGO_BASE}` };
+config.jwtSecret = 'skribe-test-only-jwt-secret-for-board-operation-tests';
 const originalCollabFlag = config.collabOperationsEnabled;
 config.collabOperationsEnabled = true;
 
