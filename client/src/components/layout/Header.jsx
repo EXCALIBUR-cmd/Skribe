@@ -5,7 +5,7 @@ import { useT } from '../../context/PreferencesContext';
 import { Button } from '../ui/Button';
 
 export const Header = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, isGuest } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const t = useT();
@@ -94,6 +94,17 @@ export const Header = () => {
                 <span className="material-symbols-outlined text-base" aria-hidden="true">settings</span>
               </button>
             )}
+            {isGuest ? (
+              !['/signup', '/signin'].includes(location.pathname) && (
+                <button
+                  onClick={() => navigate('/signup', { state: { from: location } })}
+                  className="bg-primary text-on-primary font-label text-xs font-bold px-3.5 py-1.5 rounded-full border-2 border-on-primary-fixed transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-base" aria-hidden="true">bookmark_add</span>
+                  <span>Sign up to keep this board</span>
+                </button>
+              )
+            ) : (
             <button
               onClick={logout}
               className="bg-error-container/40 text-on-error-container hover:bg-error-container text-xs font-bold px-3 py-1.5 rounded-full border border-error/20 transition-all cursor-pointer flex items-center gap-1"
@@ -101,6 +112,7 @@ export const Header = () => {
               <span className="material-symbols-outlined text-base">logout</span>
               <span className="hidden sm:inline">{t('nav.logout')}</span>
             </button>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2">
