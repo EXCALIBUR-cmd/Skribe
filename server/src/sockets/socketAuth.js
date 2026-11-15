@@ -1,6 +1,7 @@
 import { verifyAccessToken } from '../utils/jwt.js';
 import userRepository from '../repositories/user.repository.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
+import { guestPrincipal, isGuestClaims } from '../utils/guest.js';
 
 const parseCookies = (cookieHeader = '') => {
   const result = {};
@@ -29,6 +30,16 @@ export const socketAuthMiddleware = async (socket, next) => {
       decoded = verifyAccessToken(token);
     } catch (jwtErr) {
       return next(new Error('Authentication required: token invalid or expired'));
+    }
+
+    if (isGuestClaims(decoded)) {
+      const guest = guestPrincipal(decoded);
+      if (!guest) return next(new Error('Authentication required: token invalid or expired'));
+      const expectedGuestId = socket.handshake.auth?.expectedUserId;
+      if (expectedGuestId && String(expectedGuestId) !== guest.id) return next(new Error('IDENTITY_MISMATCH'));
+      socket.data.tokenExp = decoded.exp;
+      socket.user = { id: guest.id, name: guest.name, email: null, avatar: null, role: guest.role };
+      return next();
     }
 
     const user = await userRepository.findById(decoded.id);

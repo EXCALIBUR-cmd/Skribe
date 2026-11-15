@@ -12,7 +12,7 @@ import { OPERATION_RATE_LIMIT, boardRoomName, registerBoardHandlers } from '../s
 import { OPERATION_LIMITS, applyCanvasOperation, commitCanvasOperation, operationFate, validateCanvasOperation } from '../services/boardOperation.service.js';
 import { RECENT_OPERATION_LIMIT } from '../repositories/board.repository.js';
 import { validateUpdateBoard } from '../validators/board.validator.js';
-import { authenticate, authenticateSession, requireExpectedUser } from '../middleware/auth.middleware.js';
+import { authenticate, authenticateAllowingGuests, authenticateSession, rejectGuests, requireExpectedUser } from '../middleware/auth.middleware.js';
 import apiRoutes from '../routes/v1/index.js';
 import { socketAuthMiddleware } from '../sockets/socketAuth.js';
 import { generateAccessToken } from '../utils/jwt.js';
@@ -621,21 +621,24 @@ test('every authenticated request is refused when its expected user differs, whi
 });
 
 test('every v1 route that authenticates also enforces the expected user, except the session probe', () => {
-  const OPEN = new Set(['POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/providers', 'GET /health']);
+  const OPEN = new Set(['POST /auth/guest', 'POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/providers', 'GET /health']);
   const found = [];
   const mountOf = (layer) => (layer.regexp?.source || '').replace('^\\/', '/').replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/').replace('/?(?=/|$)', '');
-  const walk = (stack, prefix, guarded) => {
+  const GUEST_ROUTES = ['GET /boards/:id', 'PATCH /boards/:id', 'GET /boards/:id/operations/:opId', 'POST /boards/:id/assets/urls', 'PATCH /boards/:id/viewport'];
+  const walk = (stack, prefix, guarded, guestAware = false) => {
     let isGuarded = guarded;
+    let admitsGuests = guestAware;
     for (const layer of stack) {
       if (!layer.route && layer.handle === authenticate) isGuarded = true;
+      if (!layer.route && layer.handle === authenticateAllowingGuests) { isGuarded = true; admitsGuests = true; }
       if (layer.route) {
         const handlers = layer.route.stack.map((entry) => entry.handle);
         for (const method of Object.keys(layer.route.methods)) {
-          found.push({ key: `${method.toUpperCase()} ${prefix}${layer.route.path}`, guarded: isGuarded || handlers.includes(authenticate), probe: handlers.includes(authenticateSession) });
+          found.push({ key: `${method.toUpperCase()} ${prefix}${layer.route.path}`, guarded: isGuarded || handlers.includes(authenticate), probe: handlers.includes(authenticateSession), guests: admitsGuests && !handlers.includes(rejectGuests) });
         }
       } else if (layer.handle?.stack) {
         const mount = mountOf(layer);
-        walk(layer.handle.stack, prefix + (mount === '/' ? '' : mount), isGuarded);
+        walk(layer.handle.stack, prefix + (mount === '/' ? '' : mount), isGuarded, admitsGuests);
       }
     }
   };
@@ -643,6 +646,7 @@ test('every v1 route that authenticates also enforces the expected user, except 
   const unguarded = found.filter((r) => !r.guarded && !r.probe && !OPEN.has(r.key) && !r.key.includes('google'));
   assert.deepEqual(unguarded, []);
   assert.deepEqual(found.filter((r) => r.probe).map((r) => r.key), ['GET /auth/me']);
+  assert.deepEqual(found.filter((r) => r.guests).map((r) => r.key).sort(), [...GUEST_ROUTES].sort());
   for (const key of ['POST /assets/images', 'GET /assets/usage', 'POST /mess-cleanup/analyze', 'POST /sidekick/chat', 'POST /ai-assistant/generate', 'POST /voice-commands/interpret', 'PATCH /auth/me/preferences', 'GET /auth/me/landing', 'PATCH /boards/:id', 'GET /boards/:id', 'DELETE /boards/:id']) {
     assert.equal(found.find((r) => r.key === key)?.guarded, true, key);
   }

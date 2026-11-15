@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import config from '../config/env.js';
 import boardRepository from '../repositories/board.repository.js';
+import boardService from '../services/board.service.js';
 import { commitCanvasOperation, validateCanvasOperation } from '../services/boardOperation.service.js';
 
 export const boardRoomName = (boardId) => `board:${boardId}`;
@@ -97,10 +98,7 @@ export const registerBoardHandlers = (io, socket) => {
         return;
       }
 
-      const isOwner = (board.owner._id?.toString() || board.owner.toString()) === socket.user.id.toString();
-      const isMember = Array.isArray(board.members) && board.members.some((m) => (m._id?.toString() || m.toString()) === socket.user.id.toString());
-
-      if (!isOwner && !isMember) {
+      if (!boardService._isOwner(board, socket.user.id) && !boardService._isMember(board, socket.user.id)) {
         socket.emit('board-error', {
           event: 'join-board',
           message: 'You do not have permission to access this board'

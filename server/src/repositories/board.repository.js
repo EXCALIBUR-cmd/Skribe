@@ -12,6 +12,10 @@ export class BoardRepository {
     return await board.save();
   }
 
+  async findGuestBoard(guestId) {
+    return await Board.findOne({ isGuest: true, ownerGuestId: guestId, isDeleted: false });
+  }
+
   async findBoardById(id, includeDeleted = false) {
     const query = { _id: id };
     if (!includeDeleted) {
@@ -24,7 +28,7 @@ export class BoardRepository {
   }
 
   async findBoardAccess(id) {
-    return await Board.findOne({ _id: id, isDeleted: false }, { owner: 1, members: 1 }).lean();
+    return await Board.findOne({ _id: id, isDeleted: false }, { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1 }).lean();
   }
 
   async findUserBoards(userId, options = {}) {
@@ -88,7 +92,7 @@ export class BoardRepository {
   async findBoardRevisionState(id) {
     return await Board.findOne(
       { _id: id, isDeleted: false },
-      { owner: 1, members: 1, canvasData: 1, canvasRevision: 1, lastOperationRevision: 1, recentOperations: 1 }
+      { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1, canvasData: 1, canvasRevision: 1, lastOperationRevision: 1, recentOperations: 1 }
     ).lean();
   }
 

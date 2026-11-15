@@ -1,18 +1,25 @@
 import boardRepository from '../repositories/board.repository.js';
 import userRepository from '../repositories/user.repository.js';
 import config from '../config/env.js';
+import { GUEST_BOARD_LIFETIME_MS, GUEST_ID_PATTERN } from '../utils/guest.js';
 
 const UPDATABLE_BOARD_FIELDS = Object.freeze(['title', 'canvasData', 'isArchived', 'thumbnail', 'canvasBackground']);
 
 export class BoardService {
+  _isExpired(board, now = Date.now()) {
+    return Boolean(board?.isGuest && (!board.expiresAt || new Date(board.expiresAt).getTime() <= now));
+  }
+
   _isOwner(board, userId) {
-    if (!board || !board.owner) return false;
+    if (!board || userId === undefined || userId === null || this._isExpired(board)) return false;
+    if (board.isGuest) return typeof board.ownerGuestId === 'string' && board.ownerGuestId === String(userId);
+    if (!board.owner) return false;
     const ownerId = board.owner._id ? board.owner._id.toString() : board.owner.toString();
     return ownerId === userId.toString();
   }
 
   _isMember(board, userId) {
-    if (!board || !Array.isArray(board.members)) return false;
+    if (!board || !Array.isArray(board.members) || this._isExpired(board)) return false;
     return board.members.some((m) => {
       const memberId = m._id ? m._id.toString() : m.toString();
       return memberId === userId.toString();
@@ -20,7 +27,7 @@ export class BoardService {
   }
 
   _verifyAccess(board, userId) {
-    if (!board) {
+    if (!board || this._isExpired(board)) {
       const err = new Error('Board not found');
       err.statusCode = 404;
       throw err;
@@ -68,6 +75,26 @@ export class BoardService {
     return newBoard.toJSON();
   }
 
+  async startGuestBoard(guest) {
+    const active = await boardRepository.findGuestBoard(guest.id);
+    if (active) return this._isExpired(active) ? { expired: true } : { board: active.toJSON(), created: false };
+    try {
+      const board = await boardRepository.createBoard({
+        isGuest: true,
+        ownerGuestId: guest.id,
+        expiresAt: new Date(Date.now() + GUEST_BOARD_LIFETIME_MS),
+        title: 'Guest board'
+      });
+      console.log(JSON.stringify({ event: 'guest_board_created', guestId: guest.id, boardId: String(board._id), at: new Date().toISOString() }));
+      return { board: board.toJSON(), created: true };
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+      const winner = await boardRepository.findGuestBoard(guest.id);
+      if (!winner || this._isExpired(winner)) return { expired: true };
+      return { board: winner.toJSON(), created: false };
+    }
+  }
+
   async getUserBoards(userId, options = {}) {
     const boards = await boardRepository.findUserBoards(userId, options);
     return boards.map((b) => b.toJSON());
@@ -80,9 +107,11 @@ export class BoardService {
     const updatedBoard = await boardRepository.updateBoard(boardId, {
       lastOpenedAt: new Date()
     });
-    await userRepository.updateUser(userId, { lastOpenedBoard: board._id }).catch((err) => {
-      console.error('[BoardService] Failed to record last opened board:', err.message);
-    });
+    if (!GUEST_ID_PATTERN.test(String(userId))) {
+      await userRepository.updateUser(userId, { lastOpenedBoard: board._id }).catch((err) => {
+        console.error('[BoardService] Failed to record last opened board:', err.message);
+      });
+    }
 
     const boardJson = (updatedBoard || board).toJSON();
     boardJson.viewportStates = (boardJson.viewportStates || []).filter(

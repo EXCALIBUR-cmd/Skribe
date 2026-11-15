@@ -2,6 +2,7 @@ import { verifyAccessToken } from '../utils/jwt.js';
 import userRepository from '../repositories/user.repository.js';
 import { error } from '../utils/apiResponse.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
+import { guestPrincipal, isGuestClaims, isGuestUser } from '../utils/guest.js';
 
 export const authenticateSession = async (req, res, next) => {
   try {
@@ -26,6 +27,13 @@ export const authenticateSession = async (req, res, next) => {
       return error(res, 'Authentication token is invalid or expired. Please log in again.', 401, { code: 'UNAUTHENTICATED' });
     }
 
+    if (isGuestClaims(decoded)) {
+      const guest = guestPrincipal(decoded);
+      if (!guest) return error(res, 'Authentication token is invalid or expired. Please log in again.', 401, { code: 'UNAUTHENTICATED' });
+      req.user = guest;
+      return next();
+    }
+
     const user = await userRepository.findById(decoded.id);
     if (!user) {
       return error(res, 'Authenticated user account no longer exists.', 401, { code: 'UNAUTHENTICATED' });
@@ -48,6 +56,13 @@ export const requireExpectedUser = (req, res, next) => {
   return next();
 };
 
-export const authenticate = (req, res, next) => authenticateSession(req, res, (err) => (err ? next(err) : requireExpectedUser(req, res, next)));
+export const rejectGuests = (req, res, next) => {
+  if (isGuestUser(req.user)) return error(res, 'Sign up free to use this feature.', 403, { code: 'GUEST_NOT_ALLOWED' });
+  return next();
+};
+
+export const authenticateAllowingGuests = (req, res, next) => authenticateSession(req, res, (err) => (err ? next(err) : requireExpectedUser(req, res, next)));
+
+export const authenticate = (req, res, next) => authenticateSession(req, res, (err) => (err ? next(err) : rejectGuests(req, res, (guestErr) => (guestErr ? next(guestErr) : requireExpectedUser(req, res, next)))));
 
 export default authenticate;

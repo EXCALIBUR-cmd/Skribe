@@ -3,11 +3,13 @@ import authController from '../../controllers/auth.controller.js';
 import { validateRegister, validateLogin } from '../../validators/auth.validator.js';
 import { validatePreferences } from '../../validators/preference.validator.js';
 import { authenticate, authenticateSession } from '../../middleware/auth.middleware.js';
-import { loginAccountLimiter, loginAddressLimiter, registerAddressLimiter } from '../../middleware/rateLimit.middleware.js';
+import { guestBoardAddressLimiter, loginAccountLimiter, loginAddressLimiter, registerAddressLimiter } from '../../middleware/rateLimit.middleware.js';
 
 const router = Router();
 
 router.post('/register', registerAddressLimiter, validateRegister, authController.register);
+
+router.post('/guest', guestBoardAddressLimiter, authController.startGuest);
 
 router.post('/login', loginAddressLimiter, loginAccountLimiter, validateLogin, authController.login);
 

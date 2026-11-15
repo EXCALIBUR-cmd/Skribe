@@ -48,6 +48,13 @@ export const loginAccountLimiter = createRateLimiter({
   message: 'Too many sign-in attempts for this account. Please wait a few minutes and try again.'
 });
 
+export const guestBoardAddressLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  key: (req) => `guest-board-ip:${clientAddress(req)}`,
+  message: 'Too many guest boards were started from this network recently. Sign up free or try again later.'
+});
+
 export const registerAddressLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 30,

@@ -6,6 +6,8 @@ import { COOKIE_NAME, getCookieOptions, getClearCookieOptions } from '../utils/c
 import config from '../config/env.js';
 import passport from 'passport';
 import { consumeOAuthState, issueOAuthState } from '../services/oauthState.service.js';
+import { verifyAccessToken } from '../utils/jwt.js';
+import { GUEST_BOARD_LIFETIME_MS, GUEST_ROLE, createGuestIdentity, guestPrincipal, isGuestClaims, issueGuestToken } from '../utils/guest.js';
 
 export class AuthController {
 
@@ -17,6 +19,36 @@ export class AuthController {
       res.cookie(COOKIE_NAME, token, getCookieOptions());
 
       return success(res, { user }, 'User registered successfully', 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async startGuest(req, res, next) {
+    try {
+      const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null;
+      const token = req.cookies?.[COOKIE_NAME] || bearer;
+      let claims = null;
+      if (token) {
+        try {
+          claims = verifyAccessToken(token);
+        } catch {
+          claims = null;
+        }
+      }
+      if (claims && !isGuestClaims(claims)) return error(res, 'You are already signed in.', 409, { code: 'ALREADY_SIGNED_IN' });
+      const freshGuest = () => guestPrincipal({ role: GUEST_ROLE, ...createGuestIdentity() });
+      let guest = claims ? guestPrincipal(claims) : null;
+      let issue = !guest;
+      if (!guest) guest = freshGuest();
+      let result = await boardService.startGuestBoard(guest);
+      if (result.expired) {
+        guest = freshGuest();
+        issue = true;
+        result = await boardService.startGuestBoard(guest);
+      }
+      if (issue) res.cookie(COOKIE_NAME, issueGuestToken({ guestId: guest.id, name: guest.name }), { ...getCookieOptions(), maxAge: GUEST_BOARD_LIFETIME_MS });
+      return success(res, { user: guest, board: result.board }, 'Guest board ready', result.created ? 201 : 200);
     } catch (err) {
       next(err);
     }

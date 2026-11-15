@@ -6,8 +6,20 @@ const boardSchema = new mongoose.Schema(
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: [true, 'Board owner is required'],
+      required: [function requiresOwner() { return !this.isGuest; }, 'Board owner is required'],
       index: true
+    },
+    isGuest: {
+      type: Boolean,
+      default: false
+    },
+    ownerGuestId: {
+      type: String,
+      default: undefined
+    },
+    expiresAt: {
+      type: Date,
+      default: undefined
     },
     members: [
       {
@@ -100,5 +112,14 @@ boardSchema.index({ owner: 1, isDeleted: 1, updatedAt: -1 });
 boardSchema.index({ members: 1, isDeleted: 1, updatedAt: -1 });
 boardSchema.index({ owner: 1, _id: 1, isDeleted: 1 });
 
+export const GUEST_BOARD_INDEXES = Object.freeze([
+  { key: { expiresAt: 1 }, name: 'guest_board_expiry', expireAfterSeconds: 0 },
+  { key: { ownerGuestId: 1 }, name: 'guest_board_single_owner', unique: true, partialFilterExpression: { isGuest: true } }
+]);
+
+GUEST_BOARD_INDEXES.forEach(({ key, ...options }) => boardSchema.index(key, options));
+
 export const Board = mongoose.model('Board', boardSchema);
+
+export const ensureGuestBoardIndexes = () => Board.collection.createIndexes(GUEST_BOARD_INDEXES.map((index) => ({ ...index })));
 export default Board;

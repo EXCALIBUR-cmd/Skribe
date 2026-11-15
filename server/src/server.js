@@ -5,6 +5,7 @@ import { connectDB, disconnectDB } from './config/db.js';
 import { initSocketIO } from './sockets/index.js';
 import { startAssetCleanupSchedule } from './services/asset.service.js';
 import { assertJwtSecret } from './utils/jwt.js';
+import { ensureGuestBoardIndexes } from './models/Board.js';
 
 const startServer = async () => {
   try {
@@ -14,6 +15,10 @@ const startServer = async () => {
     if (configErrors.length > 0) throw new Error(`Production configuration is incomplete. ${configErrors.join(' ')}`);
 
     await connectDB();
+
+    await ensureGuestBoardIndexes().catch((err) => {
+      console.error(`[MongoDB] Guest board indexes could not be created: ${err.message}`);
+    });
 
     startAssetCleanupSchedule();
 

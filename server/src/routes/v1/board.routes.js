@@ -2,15 +2,15 @@ import { Router } from 'express';
 import boardController from '../../controllers/board.controller.js';
 import assetController from '../../controllers/asset.controller.js';
 import { validateBoardId, validateCreateBoard, validateUpdateBoard, validateViewport } from '../../validators/board.validator.js';
-import { authenticate } from '../../middleware/auth.middleware.js';
+import { authenticateAllowingGuests, rejectGuests } from '../../middleware/auth.middleware.js';
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticateAllowingGuests);
 
-router.post('/', validateCreateBoard, boardController.create);
+router.post('/', rejectGuests, validateCreateBoard, boardController.create);
 
-router.get('/', boardController.getAll);
+router.get('/', rejectGuests, boardController.getAll);
 
 router.get('/:id', validateBoardId, boardController.getById);
 
@@ -22,12 +22,12 @@ router.post('/:id/assets/urls', validateBoardId, assetController.signBoardAssetU
 
 router.patch('/:id/viewport', validateBoardId, validateViewport, boardController.saveViewport);
 
-router.delete('/:id', validateBoardId, boardController.delete);
+router.delete('/:id', rejectGuests, validateBoardId, boardController.delete);
 
-router.get('/:id/collaborators', validateBoardId, boardController.getCollaborators);
+router.get('/:id/collaborators', rejectGuests, validateBoardId, boardController.getCollaborators);
 
-router.post('/:id/collaborators', validateBoardId, boardController.addCollaborator);
+router.post('/:id/collaborators', rejectGuests, validateBoardId, boardController.addCollaborator);
 
-router.delete('/:id/collaborators/:userId', validateBoardId, boardController.removeCollaborator);
+router.delete('/:id/collaborators/:userId', rejectGuests, validateBoardId, boardController.removeCollaborator);
 
 export default router;
