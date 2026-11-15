@@ -1,6 +1,8 @@
 import config from '../config/env.js';
 import { error, success } from '../utils/apiResponse.js';
 import { analyzeWithGroq } from '../services/messCleanupGroqService.js';
+import boardService from '../services/board.service.js';
+import { isGuestUser } from '../utils/guest.js';
 
 export const analyze = async (req, res, next) => {
   const ctrlStart = Date.now();
@@ -16,6 +18,7 @@ export const analyze = async (req, res, next) => {
     res.on('close', handleClientClose);
   }
 
+  let reservation = null;
   try {
     const { workspaceModel, image } = req.body || {};
 
@@ -33,6 +36,13 @@ export const analyze = async (req, res, next) => {
     if (!image || typeof image !== 'string' || !image.trim()) {
       console.log('[MessCleanup Diagnostic] Controller validation failed: missing or invalid image/screenshot');
       return error(res, 'Missing or invalid image/screenshot payload', 400);
+    }
+
+    try {
+      reservation = await boardService.reserveGuestCleanup(req.user, req.body?.boardId);
+    } catch (quotaErr) {
+      if (quotaErr.code && quotaErr.statusCode >= 400 && quotaErr.statusCode < 500) return error(res, quotaErr.message, quotaErr.statusCode, { code: quotaErr.code });
+      throw quotaErr;
     }
 
     let organizationPlan;
@@ -90,6 +100,11 @@ export const analyze = async (req, res, next) => {
     console.log(`[MessCleanup Diagnostic] Validation passed: ${groupsOrSections.length} groups/sections, ${relationshipCount} relationships, workspaceType=${organizationPlan.workspaceType || 'unset'}`);
     console.log(`[MessCleanup Diagnostic] Controller completed in ${Date.now() - ctrlStart}ms`);
 
+    if (reservation) {
+      console.log(JSON.stringify({ event: 'guest_used_cleanup', boardId: reservation.boardId, uses: reservation.uses, by: isGuestUser(req.user) ? 'guest' : 'account', at: new Date().toISOString() }));
+      reservation = null;
+    }
+
     return success(res, {
       organizationPlan,
       model: organizationPlan?.source?.model || config.messCleanupModel
@@ -103,6 +118,11 @@ export const analyze = async (req, res, next) => {
   } finally {
     if (typeof res.removeListener === 'function') {
       res.removeListener('close', handleClientClose);
+    }
+    if (reservation) {
+      await boardService.releaseGuestCleanup(reservation).catch((releaseErr) => {
+        console.error('[MessCleanupController] Failed to return an unused guest cleanup:', releaseErr.message);
+      });
     }
   }
 };

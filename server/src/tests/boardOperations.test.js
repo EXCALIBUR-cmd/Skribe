@@ -621,10 +621,10 @@ test('every authenticated request is refused when its expected user differs, whi
 });
 
 test('every v1 route that authenticates also enforces the expected user, except the session probe', () => {
-  const OPEN = new Set(['POST /auth/guest', 'POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/providers', 'GET /health']);
+  const OPEN = new Set(['POST /auth/guest', 'POST /boards/:id/join', 'POST /auth/register', 'POST /auth/login', 'POST /auth/logout', 'GET /auth/providers', 'GET /health']);
   const found = [];
   const mountOf = (layer) => (layer.regexp?.source || '').replace('^\\/', '/').replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/').replace('/?(?=/|$)', '');
-  const GUEST_ROUTES = ['GET /boards/:id', 'PATCH /boards/:id', 'GET /boards/:id/operations/:opId', 'POST /boards/:id/assets/urls', 'PATCH /boards/:id/viewport'];
+  const GUEST_ROUTES = ['POST /mess-cleanup/analyze', 'POST /boards/:id/share-link', 'GET /boards/:id', 'PATCH /boards/:id', 'GET /boards/:id/operations/:opId', 'POST /boards/:id/assets/urls', 'PATCH /boards/:id/viewport'];
   const walk = (stack, prefix, guarded, guestAware = false) => {
     let isGuarded = guarded;
     let admitsGuests = guestAware;

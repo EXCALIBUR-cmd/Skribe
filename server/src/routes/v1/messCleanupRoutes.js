@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import messCleanupController from '../../controllers/messCleanupController.js';
-import { authenticate } from '../../middleware/auth.middleware.js';
+import { authenticateAllowingGuests } from '../../middleware/auth.middleware.js';
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticateAllowingGuests);
 
 router.post('/analyze', messCleanupController.analyze);
 

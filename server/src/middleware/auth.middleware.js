@@ -4,43 +4,54 @@ import { error } from '../utils/apiResponse.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
 import { guestPrincipal, isGuestClaims, isGuestUser } from '../utils/guest.js';
 
+const INVALID_SESSION = 'Authentication token is invalid or expired. Please log in again.';
+
+const resolveSession = async (req) => {
+  let token = null;
+
+  if (req.cookies && req.cookies[COOKIE_NAME]) {
+    token = req.cookies[COOKIE_NAME];
+  }
+
+  else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) return { message: 'Authentication token missing. Please log in.' };
+
+  let decoded;
+  try {
+    decoded = verifyAccessToken(token);
+  } catch (jwtErr) {
+    return { message: INVALID_SESSION };
+  }
+
+  if (isGuestClaims(decoded)) {
+    const guest = guestPrincipal(decoded);
+    return guest ? { user: guest } : { message: INVALID_SESSION };
+  }
+
+  const user = await userRepository.findById(decoded.id);
+  if (!user) return { message: 'Authenticated user account no longer exists.' };
+  return { user: user.toJSON() };
+};
+
 export const authenticateSession = async (req, res, next) => {
   try {
-    let token = null;
-
-    if (req.cookies && req.cookies[COOKIE_NAME]) {
-      token = req.cookies[COOKIE_NAME];
-    }
-
-    else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-
-    if (!token) {
-      return error(res, 'Authentication token missing. Please log in.', 401, { code: 'UNAUTHENTICATED' });
-    }
-
-    let decoded;
-    try {
-      decoded = verifyAccessToken(token);
-    } catch (jwtErr) {
-      return error(res, 'Authentication token is invalid or expired. Please log in again.', 401, { code: 'UNAUTHENTICATED' });
-    }
-
-    if (isGuestClaims(decoded)) {
-      const guest = guestPrincipal(decoded);
-      if (!guest) return error(res, 'Authentication token is invalid or expired. Please log in again.', 401, { code: 'UNAUTHENTICATED' });
-      req.user = guest;
-      return next();
-    }
-
-    const user = await userRepository.findById(decoded.id);
-    if (!user) {
-      return error(res, 'Authenticated user account no longer exists.', 401, { code: 'UNAUTHENTICATED' });
-    }
-
-    req.user = user.toJSON();
+    const { user, message } = await resolveSession(req);
+    if (!user) return error(res, message, 401, { code: 'UNAUTHENTICATED' });
+    req.user = user;
     next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const optionalSession = async (req, res, next) => {
+  try {
+    req.user = (await resolveSession(req)).user || null;
+    if (!req.user) return next();
+    return requireExpectedUser(req, res, next);
   } catch (err) {
     next(err);
   }

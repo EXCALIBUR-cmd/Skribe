@@ -28,7 +28,31 @@ export class BoardRepository {
   }
 
   async findBoardAccess(id) {
-    return await Board.findOne({ _id: id, isDeleted: false }, { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1 }).lean();
+    return await Board.findOne({ _id: id, isDeleted: false }, { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1, guestMembers: 1 }).lean();
+  }
+
+  async findBoardShareState(id) {
+    return await Board.findOne({ _id: id, isDeleted: false }).select('+shareLinkHash owner members guestMembers isGuest ownerGuestId expiresAt').lean();
+  }
+
+  async setShareLinkHash(id, shareLinkHash) {
+    return await Board.updateOne({ _id: id, isDeleted: false }, { $set: { shareLinkHash } });
+  }
+
+  async addLinkMember(id, update) {
+    return await Board.findOneAndUpdate({ _id: id, isDeleted: false }, { $addToSet: update }, { new: true });
+  }
+
+  async reserveGuestCleanup(id, limit, now = new Date()) {
+    return await Board.findOneAndUpdate(
+      { _id: id, isGuest: true, isDeleted: false, expiresAt: { $gt: now }, cleanupUses: { $lt: limit } },
+      { $inc: { cleanupUses: 1 } },
+      { new: true, projection: { cleanupUses: 1 } }
+    ).lean();
+  }
+
+  async releaseGuestCleanup(id) {
+    return await Board.updateOne({ _id: id, isGuest: true, cleanupUses: { $gt: 0 } }, { $inc: { cleanupUses: -1 } });
   }
 
   async findUserBoards(userId, options = {}) {
@@ -92,7 +116,7 @@ export class BoardRepository {
   async findBoardRevisionState(id) {
     return await Board.findOne(
       { _id: id, isDeleted: false },
-      { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1, canvasData: 1, canvasRevision: 1, lastOperationRevision: 1, recentOperations: 1 }
+      { owner: 1, members: 1, isGuest: 1, ownerGuestId: 1, expiresAt: 1, guestMembers: 1, canvasData: 1, canvasRevision: 1, lastOperationRevision: 1, recentOperations: 1 }
     ).lean();
   }
 

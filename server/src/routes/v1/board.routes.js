@@ -2,11 +2,16 @@ import { Router } from 'express';
 import boardController from '../../controllers/board.controller.js';
 import assetController from '../../controllers/asset.controller.js';
 import { validateBoardId, validateCreateBoard, validateUpdateBoard, validateViewport } from '../../validators/board.validator.js';
-import { authenticateAllowingGuests, rejectGuests } from '../../middleware/auth.middleware.js';
+import { authenticateAllowingGuests, optionalSession, rejectGuests } from '../../middleware/auth.middleware.js';
+import { joinAttemptAddressLimiter, joinAttemptBoardLimiter } from '../../middleware/rateLimit.middleware.js';
 
 const router = Router();
 
+router.post('/:id/join', validateBoardId, joinAttemptAddressLimiter, joinAttemptBoardLimiter, optionalSession, boardController.joinWithShareLink);
+
 router.use(authenticateAllowingGuests);
+
+router.post('/:id/share-link', validateBoardId, boardController.rotateShareLink);
 
 router.post('/', rejectGuests, validateCreateBoard, boardController.create);
 

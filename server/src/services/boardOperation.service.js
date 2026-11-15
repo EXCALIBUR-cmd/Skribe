@@ -1,6 +1,7 @@
 import boardRepository from '../repositories/board.repository.js';
 import boardService from './board.service.js';
 import { syncBoardReferences } from './asset.service.js';
+import { MAX_GUEST_BOARD_OBJECTS, hasImageContent } from '../utils/guest.js';
 
 export const OPERATION_KINDS = Object.freeze(['apply', 'undo', 'redo', 'edit']);
 
@@ -162,6 +163,8 @@ export const commitCanvasOperation = async ({ boardId, userId, op }) => {
 
   const applied = applyCanvasOperation(board.canvasData, op);
   if (!applied.ok) return { status: 'conflict', code: applied.code, currentRevision };
+  if (board.isGuest && applied.canvasData.objects.length > MAX_GUEST_BOARD_OBJECTS) return { status: 'conflict', code: 'GUEST_OBJECT_LIMIT', currentRevision };
+  if (board.isGuest && hasImageContent(op.upserts)) return { status: 'conflict', code: 'GUEST_IMAGES_DISABLED', currentRevision };
 
   const committed = await boardRepository.commitCanvasOperation(boardId, { baseRevision: op.baseRevision, opId: op.opId, canvasData: applied.canvasData });
   if (committed) {

@@ -7,7 +7,7 @@ import config from '../config/env.js';
 import passport from 'passport';
 import { consumeOAuthState, issueOAuthState } from '../services/oauthState.service.js';
 import { verifyAccessToken } from '../utils/jwt.js';
-import { GUEST_BOARD_LIFETIME_MS, GUEST_ROLE, createGuestIdentity, guestPrincipal, isGuestClaims, issueGuestToken } from '../utils/guest.js';
+import { guestPrincipal, isGuestClaims, newGuestPrincipal, setGuestSessionCookie } from '../utils/guest.js';
 
 export class AuthController {
 
@@ -37,17 +37,16 @@ export class AuthController {
         }
       }
       if (claims && !isGuestClaims(claims)) return error(res, 'You are already signed in.', 409, { code: 'ALREADY_SIGNED_IN' });
-      const freshGuest = () => guestPrincipal({ role: GUEST_ROLE, ...createGuestIdentity() });
       let guest = claims ? guestPrincipal(claims) : null;
       let issue = !guest;
-      if (!guest) guest = freshGuest();
+      if (!guest) guest = newGuestPrincipal();
       let result = await boardService.startGuestBoard(guest);
       if (result.expired) {
-        guest = freshGuest();
+        guest = newGuestPrincipal();
         issue = true;
         result = await boardService.startGuestBoard(guest);
       }
-      if (issue) res.cookie(COOKIE_NAME, issueGuestToken({ guestId: guest.id, name: guest.name }), { ...getCookieOptions(), maxAge: GUEST_BOARD_LIFETIME_MS });
+      if (issue) setGuestSessionCookie(res, guest);
       return success(res, { user: guest, board: result.board }, 'Guest board ready', result.created ? 201 : 200);
     } catch (err) {
       next(err);

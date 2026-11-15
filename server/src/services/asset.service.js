@@ -122,7 +122,9 @@ const cleanFileName = (name) => String(name || '').replace(/[^\w .()-]/g, '').tr
 
 export const uploadBoardImage = async ({ userId, boardId, buffer, originalName }, { fetch: fetchImpl = fetch, AssetModel = Asset, findBoard = (id) => boardRepository.findBoardAccess(id) } = {}) => {
   if (!mongoose.isValidObjectId(boardId)) throw httpError(400, 'A valid board is required for uploads', 'INVALID_BOARD');
-  boardService._verifyAccess(await findBoard(boardId), userId);
+  const board = await findBoard(boardId);
+  boardService._verifyAccess(board, userId);
+  if (board.isGuest) throw httpError(403, 'Images cannot be added to guest boards. Sign up free to add images.', 'GUEST_UPLOADS_DISABLED');
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw httpError(400, 'The selected file is empty', 'EMPTY_FILE');
   if (buffer.length > MAX_IMAGE_BYTES) throw httpError(413, 'Images must be 5 MB or smaller', 'FILE_TOO_LARGE');
   const image = inspectImage(buffer);

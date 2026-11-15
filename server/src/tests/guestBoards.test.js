@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
@@ -10,7 +11,8 @@ import Board, { ensureGuestBoardIndexes } from '../models/Board.js';
 import User from '../models/User.js';
 import boardService from '../services/board.service.js';
 import { initSocketIO } from '../sockets/index.js';
-import { guestBoardAddressLimiter } from '../middleware/rateLimit.middleware.js';
+import { guestBoardAddressLimiter, guestJoinAddressLimiter, joinAttemptAddressLimiter, joinAttemptBoardLimiter } from '../middleware/rateLimit.middleware.js';
+import Asset from '../models/Asset.js';
 import { generateAccessToken } from '../utils/jwt.js';
 import { COOKIE_NAME } from '../utils/cookieOptions.js';
 
@@ -20,6 +22,16 @@ const TEST_MONGO_BASE = process.env.TEST_MONGODB_URI || 'mongodb://127.0.0.1:270
 config.jwtSecret = TEST_SECRET;
 const originalCollabFlag = config.collabOperationsEnabled;
 config.collabOperationsEnabled = true;
+const originalGroqKey = config.groqMessCleanupApiKey;
+config.groqMessCleanupApiKey = 'test-only-groq-key';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const realFetch = globalThis.fetch;
+const groq = { calls: 0, reply: null };
+globalThis.fetch = async (url, init) => {
+  if (String(url) !== GROQ_URL) return realFetch(url, init);
+  groq.calls += 1;
+  return groq.reply();
+};
 
 let mongoAvailable = false;
 try {
@@ -39,6 +51,8 @@ const clients = [];
 
 test.after(async () => {
   config.collabOperationsEnabled = originalCollabFlag;
+  config.groqMessCleanupApiKey = originalGroqKey;
+  globalThis.fetch = realFetch;
   clients.forEach((client) => client.disconnect());
   io.close();
   await new Promise((resolve) => httpServer.close(resolve));
@@ -46,7 +60,8 @@ test.after(async () => {
   await mongoose.disconnect();
 });
 
-test.beforeEach(() => guestBoardAddressLimiter.reset());
+const resetJoinAttempts = () => { joinAttemptAddressLimiter.reset(); joinAttemptBoardLimiter.reset(); };
+test.beforeEach(() => { guestBoardAddressLimiter.reset(); guestJoinAddressLimiter.reset(); resetJoinAttempts(); });
 
 const call = async (method, path, { token, body } = {}) => {
   const headers = { 'Content-Type': 'application/json' };
@@ -181,7 +196,6 @@ test('a guest reaches its own board and nothing else over the REST API', needsMo
     ['DELETE', `/boards/${boardId}`],
     ['GET', `/boards/${boardId}/collaborators`],
     ['POST', `/boards/${boardId}/collaborators`, { email: 'a@example.com' }],
-    ['POST', '/mess-cleanup/analyze', {}],
     ['POST', '/ai-assistant/generate', {}],
     ['POST', '/sidekick/chat', {}],
     ['POST', '/voice-commands/interpret', {}],
@@ -261,4 +275,311 @@ test('guest board creation is logged as a structured event without the token or 
   const text = lines.join('\n');
   assert.ok(!text.includes(res.token), 'the token was logged');
   assert.ok(!/127\.0\.0\.1|::1|::ffff/.test(text.split('\n').filter((line) => line.includes('guest_board_created')).join('\n')), 'the address was logged');
+});
+
+const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const createLink = (boardId, token) => call('POST', `/boards/${boardId}/share-link`, { token });
+const joinBoard = (boardId, secret, token) => call('POST', `/boards/${boardId}/join`, { token, body: { secret } });
+const workspace = { version: 1, board: { objects: [{ id: 't1', type: 'text', text: 'Notes', position: { x: 1, y: 1 }, size: { width: 10, height: 10 } }] } };
+const screenshot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const plan = { version: 1, workspaceType: 'notes', hierarchy: [{ type: 'document_root', titleObjectId: 't1', sections: ['section_1'] }], sections: [{ id: 'section_1', type: 'notes', titleObjectId: 't1', purpose: 'Notes', layoutHint: 'grid', objectIds: ['t1'] }], relationships: [] };
+const groqOk = () => new Response(JSON.stringify({ model: 'test', choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(plan) }, finish_reason: 'stop' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+const groqDown = () => new Response(JSON.stringify({ error: { message: 'upstream down' } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+const cleanup = (boardId, token) => call('POST', '/mess-cleanup/analyze', { token, body: { workspaceModel: workspace, image: screenshot, ...(boardId ? { boardId } : {}) } });
+const captureLogs = async (fn) => {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => { lines.push(args.join(' ')); };
+  try {
+    await fn();
+  } finally {
+    console.log = original;
+  }
+  return lines.map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+};
+const objectsOf = (count, prefix = 'o') => Array.from({ length: count }, (_, index) => ({ id: `${prefix}_${index}`, type: 'rect', left: index, top: 1, width: 5, height: 5 }));
+
+test('the guest owner creates a share link whose secret is returned once and stored only as a hash', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const res = await createLink(boardId, mine.token);
+  assert.equal(res.status, 200);
+  const { secret } = res.body.data;
+  assert.match(secret, /^[A-Za-z0-9_-]{43}$/);
+  const stored = await Board.findById(boardId).select('+shareLinkHash').lean();
+  assert.equal(stored.shareLinkHash, sha256(secret));
+  assert.ok(!JSON.stringify(stored).includes(secret), 'the raw secret was stored');
+  const fetched = await call('GET', `/boards/${boardId}`, { token: mine.token });
+  assert.ok(!('shareLinkHash' in fetched.body.data.board), 'the hash was sent to the client');
+  assert.ok(!JSON.stringify(fetched.body).includes(sha256(secret)));
+});
+
+test('anyone with the link joins and draws: a visitor without a session becomes a guest, a signed-in user becomes a member', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  const visitor = await joinBoard(boardId, secret);
+  assert.equal(visitor.status, 200);
+  assert.ok(visitor.token, 'the visitor got no guest session');
+  const visitorClaims = jwt.verify(visitor.token, TEST_SECRET);
+  assert.equal(visitorClaims.role, 'guest');
+  assert.notEqual(visitorClaims.guestId, jwt.verify(mine.token, TEST_SECRET).guestId);
+  assert.equal(visitor.body.data.board.id, boardId);
+  assert.equal((await call('GET', `/boards/${boardId}`, { token: visitor.token })).status, 200);
+  assert.equal(await Board.countDocuments({ ownerGuestId: visitorClaims.guestId }), 0);
+  const visitorSocket = await connectWith(visitor.token);
+  assert.equal(await join(visitorSocket, boardId), 'joined');
+  const ack = await new Promise((resolve) => visitorSocket.emit('canvas:op', { boardId, opId: `op_visitor_${Date.now()}`, baseRevision: 0, kind: 'edit', upserts: [{ id: 'shape_v', data: { id: 'shape_v', type: 'rect', left: 1, top: 1, width: 5, height: 5 }, unset: [] }], deletes: [] }, resolve));
+  assert.equal(ack?.ok, true, JSON.stringify(ack));
+  const { user, token: userToken } = await makeUser('linkjoiner');
+  const member = await joinBoard(boardId, secret, userToken);
+  assert.equal(member.status, 200);
+  assert.equal(member.token, null, 'a signed-in user had their session replaced');
+  const stored = await Board.findById(boardId).lean();
+  assert.ok(stored.members.some((id) => String(id) === String(user._id)));
+  assert.ok(stored.guestMembers.includes(visitorClaims.guestId));
+  assert.equal((await call('GET', `/boards/${boardId}`, { token: userToken })).status, 200);
+  const again = await joinBoard(boardId, secret, visitor.token);
+  assert.equal(again.status, 200);
+  assert.equal((await Board.findById(boardId).lean()).guestMembers.filter((id) => id === visitorClaims.guestId).length, 1);
+});
+
+test('a wrong secret, a board without a link and normal boards are all refused', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const before = await joinBoard(boardId, 'x'.repeat(43));
+  assert.equal(before.status, 403);
+  assert.equal(before.body.errors?.code, 'INVALID_SHARE_LINK');
+  assert.equal(before.token, null, 'a refused visitor still got a guest session');
+  await createLink(boardId, mine.token);
+  const wrong = await joinBoard(boardId, 'y'.repeat(43));
+  assert.equal(wrong.status, 403);
+  assert.equal(wrong.body.errors?.code, 'INVALID_SHARE_LINK');
+  assert.equal((await joinBoard(boardId, 123)).status, 403);
+  const { user, token } = await makeUser('normallink');
+  const normal = await boardService.createBoard(user._id, { title: 'Normal' });
+  const refused = await createLink(normal.id, token);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.errors?.code, 'SHARE_LINKS_UNAVAILABLE');
+  assert.equal((await joinBoard(normal.id, 'z'.repeat(43))).status, 403);
+});
+
+test('revoking rotates the secret: the old link stops admitting people, the new one works, and only the owner can rotate', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const first = (await createLink(boardId, mine.token)).body.data.secret;
+  const early = await joinBoard(boardId, first);
+  assert.equal(early.status, 200);
+  assert.equal((await createLink(boardId, early.token)).status, 403);
+  const second = (await createLink(boardId, mine.token)).body.data.secret;
+  assert.notEqual(second, first);
+  const stale = await joinBoard(boardId, first);
+  assert.equal(stale.status, 403);
+  assert.equal(stale.body.errors?.code, 'INVALID_SHARE_LINK');
+  assert.equal((await joinBoard(boardId, second)).status, 200);
+  assert.equal((await call('GET', `/boards/${boardId}`, { token: early.token })).status, 200);
+});
+
+test('an expired guest board refuses both joining and rotating its link', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  await Board.updateOne({ _id: boardId }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  const late = await joinBoard(boardId, secret);
+  assert.equal(late.status, 404);
+  assert.equal(late.token, null);
+  assert.equal((await createLink(boardId, mine.token)).status, 404);
+});
+
+test('visitors who join through links are rate limited when they need a new guest session', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  for (let i = 0; i < 20; i += 1) assert.equal((await joinBoard(boardId, secret)).status, 200, `join ${i + 1}`);
+  resetJoinAttempts();
+  const blocked = await joinBoard(boardId, secret);
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.token, null);
+  assert.equal((await joinBoard(boardId, secret, mine.token)).status, 200);
+});
+
+test('join attempts are limited to 20 per 10 minutes from one address, even with the right secret afterwards', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  for (let i = 0; i < 20; i += 1) assert.equal((await joinBoard(boardId, 'q'.repeat(43))).status, 403, `attempt ${i + 1}`);
+  const blocked = await joinBoard(boardId, secret);
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.body.errors?.code, 'RATE_LIMITED');
+  assert.equal(blocked.token, null);
+  const other = await startGuest();
+  assert.equal((await joinBoard(other.body.data.board.id, secret)).status, 429, 'the address limit is per address, across boards');
+});
+
+test('join attempts on one board are limited to 60 per 10 minutes across addresses, without affecting other boards', () => {
+  const res = () => ({ statusCode: 200, body: null, headers: {}, set(key, value) { this.headers[key] = value; return this; }, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
+  const attempt = (board, ip) => { let passed = false; const r = res(); joinAttemptBoardLimiter({ ip, params: { id: board } }, r, () => { passed = true; }); return passed ? 'passed' : r.statusCode; };
+  for (let i = 0; i < 60; i += 1) assert.equal(attempt('board_a', `10.0.0.${i}`), 'passed', `attempt ${i + 1}`);
+  assert.equal(attempt('board_a', '10.0.1.1'), 429);
+  assert.equal(attempt('board_b', '10.0.1.1'), 'passed');
+});
+
+test('joining a guest board through its link is logged as guest_invited_someone', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  const events = await captureLogs(() => joinBoard(boardId, secret));
+  const event = events.find((entry) => entry.event === 'guest_invited_someone');
+  assert.ok(event, 'no guest_invited_someone event');
+  assert.equal(event.boardId, boardId);
+  assert.equal(event.ownerGuestId, jwt.verify(mine.token, TEST_SECRET).guestId);
+  assert.equal(event.joinedAs, 'guest');
+  assert.ok(!JSON.stringify(event).includes(secret), 'the secret was logged');
+});
+
+test('Mess Cleanup allows 3 uses per guest board, enforced on the server', needsMongo, async () => {
+  groq.reply = groqOk;
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  let events = [];
+  for (let i = 1; i <= 3; i += 1) {
+    let res;
+    events = events.concat(await captureLogs(async () => { res = await cleanup(boardId, mine.token); }));
+    assert.equal(res.status, 200, `use ${i}: ${JSON.stringify(res.body)}`);
+  }
+  const callsBefore = groq.calls;
+  const fourth = await cleanup(boardId, mine.token);
+  assert.equal(fourth.status, 403);
+  assert.equal(fourth.body.errors?.code, 'GUEST_CLEANUP_LIMIT');
+  assert.equal(fourth.body.message, 'Sign up free to keep using Mess Cleanup.');
+  assert.equal(groq.calls, callsBefore, 'the AI was called after the limit');
+  assert.equal((await Board.findById(boardId).lean()).cleanupUses, 3);
+  const used = events.filter((entry) => entry.event === 'guest_used_cleanup');
+  assert.deepEqual(used.map((entry) => entry.uses), [1, 2, 3]);
+  assert.ok(used.every((entry) => entry.boardId === boardId));
+});
+
+test('concurrent Mess Cleanup requests on a guest board never exceed 3 uses', needsMongo, async () => {
+  groq.reply = groqOk;
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const results = await Promise.all(Array.from({ length: 6 }, () => cleanup(boardId, mine.token)));
+  assert.equal(results.filter((res) => res.status === 200).length, 3, results.map((res) => res.status).join(','));
+  assert.equal(results.filter((res) => res.body?.errors?.code === 'GUEST_CLEANUP_LIMIT').length, 3);
+  assert.equal((await Board.findById(boardId).lean()).cleanupUses, 3);
+});
+
+test('a failed Mess Cleanup call gives the use back, and guests must name a board they can use', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  groq.reply = groqDown;
+  const failed = await cleanup(boardId, mine.token);
+  assert.ok(failed.status >= 500, `status ${failed.status}`);
+  assert.equal((await Board.findById(boardId).lean()).cleanupUses, 0);
+  groq.reply = groqOk;
+  const missing = await cleanup(null, mine.token);
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.errors?.code, 'BOARD_REQUIRED');
+  const other = await startGuest();
+  assert.equal((await cleanup(other.body.data.board.id, mine.token)).status, 403);
+  assert.equal((await Board.findById(other.body.data.board.id).lean()).cleanupUses, 0);
+  const invalid = await call('POST', '/mess-cleanup/analyze', { token: mine.token, body: { boardId, workspaceModel: {}, image: screenshot } });
+  assert.equal(invalid.status, 400);
+  assert.equal((await Board.findById(boardId).lean()).cleanupUses, 0, 'an invalid request used up a cleanup');
+});
+
+test('registered collaborators on a guest board share its cleanup limit, and normal boards are unlimited', needsMongo, async () => {
+  groq.reply = groqOk;
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  const { user, token } = await makeUser('cleanupmember');
+  await joinBoard(boardId, secret, token);
+  await Board.updateOne({ _id: boardId }, { $set: { cleanupUses: 3 } });
+  const blocked = await cleanup(boardId, token);
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.errors?.code, 'GUEST_CLEANUP_LIMIT');
+  const normal = await boardService.createBoard(user._id, { title: 'Normal' });
+  for (let i = 0; i < 4; i += 1) assert.equal((await cleanup(normal.id, token)).status, 200);
+  assert.equal((await cleanup(null, token)).status, 200);
+});
+
+test('a guest board holds at most 500 objects over both sockets and saves, while normal boards are not capped', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  await Board.updateOne({ _id: boardId }, { $set: { 'canvasData.objects': objectsOf(499) } });
+  const socket = await connectWith(mine.token);
+  assert.equal(await join(socket, boardId), 'joined');
+  const op = (id, revision) => ({ boardId, opId: `op_cap_${id}_${Date.now()}`, baseRevision: revision, kind: 'edit', upserts: [{ id, data: { id, type: 'rect', left: 1, top: 1, width: 5, height: 5 }, unset: [] }], deletes: [] });
+  const fills = await new Promise((resolve) => socket.emit('canvas:op', op('cap_500', 0), resolve));
+  assert.equal(fills?.ok, true, JSON.stringify(fills));
+  const over = await new Promise((resolve) => socket.emit('canvas:op', op('cap_501', 1), resolve));
+  assert.equal(over?.ok, false);
+  assert.equal(over?.code, 'GUEST_OBJECT_LIMIT');
+  assert.equal((await Board.findById(boardId).lean()).canvasData.objects.length, 500);
+  const edit = await new Promise((resolve) => socket.emit('canvas:op', op('o_0', 1), resolve));
+  assert.equal(edit?.ok, true, 'editing an existing object at the cap was refused');
+  const save = await call('PATCH', `/boards/${boardId}`, { token: mine.token, body: { canvasData: { version: '6.5.1', objects: objectsOf(501) }, baseRevision: 2 } });
+  assert.equal(save.status, 403);
+  assert.equal(save.body.errors?.code, 'GUEST_OBJECT_LIMIT');
+  const { user, token } = await makeUser('bignormal');
+  const normal = await boardService.createBoard(user._id, { title: 'Big' });
+  const bigSave = await call('PATCH', `/boards/${normal.id}`, { token, body: { canvasData: { version: '6.5.1', objects: objectsOf(600) }, baseRevision: 0 } });
+  assert.equal(bigSave.status, 200, JSON.stringify(bigSave.body));
+});
+
+test('images cannot be uploaded to a guest board, even by a registered collaborator', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  const { token } = await makeUser('uploader');
+  await joinBoard(boardId, secret, token);
+  const png = Buffer.from(screenshot.split(',')[1], 'base64');
+  const res = await realFetch(`${base}/api/v1/assets/images?boardId=${boardId}`, { method: 'POST', headers: { cookie: `${COOKIE_NAME}=${token}`, 'Content-Type': 'image/png', 'x-file-name': 'a.png' }, body: png });
+  const body = await res.json();
+  assert.equal(res.status, 403, JSON.stringify(body));
+  assert.equal(body.errors?.code, 'GUEST_UPLOADS_DISABLED');
+});
+
+const imageObject = (extra = {}) => ({ id: 'img_1', type: 'image', left: 1, top: 1, width: 10, height: 10, src: 'https://ik.imagekit.io/skribe/a.png', ...extra });
+
+test('a guest board refuses image content over sockets and saves, including images copied from another board', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const socket = await connectWith(mine.token);
+  assert.equal(await join(socket, boardId), 'joined');
+  const send = (data, revision = 0) => new Promise((resolve) => socket.emit('canvas:op', { boardId, opId: `op_img_${Math.random().toString(16).slice(2)}`, baseRevision: revision, kind: 'edit', upserts: [{ id: data.id, data, unset: [] }], deletes: [] }, resolve));
+  for (const data of [imageObject(), imageObject({ type: 'Image' }), imageObject({ src: undefined, assetId: 'asset_123' }), { id: 'grp', type: 'group', objects: [imageObject()] }, { id: 'rect_src', type: 'rect', src: 'data:image/png;base64,AAAA' }]) {
+    const ack = await send(data);
+    assert.equal(ack?.ok, false, JSON.stringify(data));
+    assert.equal(ack?.code, 'GUEST_IMAGES_DISABLED', JSON.stringify(data));
+  }
+  assert.equal((await send({ id: 'plain', type: 'rect', left: 1, top: 1, width: 5, height: 5 }))?.ok, true);
+  const save = await call('PATCH', `/boards/${boardId}`, { token: mine.token, body: { canvasData: { version: '6.5.1', objects: [imageObject()] }, baseRevision: 1 } });
+  assert.equal(save.status, 403);
+  assert.equal(save.body.errors?.code, 'GUEST_IMAGES_DISABLED');
+  const stored = await Board.findById(boardId).lean();
+  assert.ok(!stored.canvasData.objects.some((object) => object.type === 'image'));
+});
+
+test('an image asset from another board is never attached to a guest board', needsMongo, async () => {
+  const { user, token } = await makeUser('assetowner');
+  const source = await boardService.createBoard(user._id, { title: 'Source' });
+  const assetId = `asset_${Date.now()}`;
+  const url = `https://ik.imagekit.io/skribe/${assetId}.png`;
+  await Asset.collection.insertOne({ assetId, url, owner: user._id, board: new mongoose.Types.ObjectId(source.id), boards: [new mongoose.Types.ObjectId(source.id)], status: 'attached', createdAt: new Date(), updatedAt: new Date() });
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const { secret } = (await createLink(boardId, mine.token)).body.data;
+  await joinBoard(boardId, secret, token);
+  const pasted = await call('PATCH', `/boards/${boardId}`, { token, body: { canvasData: { version: '6.5.1', objects: [imageObject({ src: url, assetId })] }, baseRevision: 0 } });
+  assert.equal(pasted.status, 403);
+  assert.equal(pasted.body.errors?.code, 'GUEST_IMAGES_DISABLED');
+  const memberSocket = await connectWith(token);
+  assert.equal(await join(memberSocket, boardId), 'joined');
+  const ack = await new Promise((resolve) => memberSocket.emit('canvas:op', { boardId, opId: `op_paste_${Date.now()}`, baseRevision: 0, kind: 'edit', upserts: [{ id: 'img_paste', data: imageObject({ id: 'img_paste', src: url, assetId }), unset: [] }], deletes: [] }, resolve));
+  assert.equal(ack?.code, 'GUEST_IMAGES_DISABLED');
+  const asset = await Asset.collection.findOne({ assetId });
+  assert.ok(!(asset.boards || []).some((id) => String(id) === boardId), 'the asset was attached to the guest board');
+  assert.notEqual(String(asset.board), boardId);
 });

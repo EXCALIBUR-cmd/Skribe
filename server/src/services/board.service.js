@@ -1,7 +1,17 @@
 import boardRepository from '../repositories/board.repository.js';
 import userRepository from '../repositories/user.repository.js';
 import config from '../config/env.js';
-import { GUEST_BOARD_LIFETIME_MS, GUEST_ID_PATTERN } from '../utils/guest.js';
+import crypto from 'node:crypto';
+import mongoose from 'mongoose';
+import { GUEST_BOARD_LIFETIME_MS, GUEST_CLEANUP_LIMIT, GUEST_ID_PATTERN, MAX_GUEST_BOARD_OBJECTS, hasImageContent, isGuestUser } from '../utils/guest.js';
+
+const httpError = (statusCode, message, code) => Object.assign(new Error(message), { statusCode, code });
+const hashShareSecret = (secret) => crypto.createHash('sha256').update(secret).digest('hex');
+const SHARE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+export const guestImagesError = () => httpError(403, 'Images cannot be added to guest boards. Sign up free to add images.', 'GUEST_IMAGES_DISABLED');
+
+export const guestObjectLimitError = () => httpError(403, `Guest boards can hold up to ${MAX_GUEST_BOARD_OBJECTS} objects. Sign up free to keep adding more.`, 'GUEST_OBJECT_LIMIT');
 
 const UPDATABLE_BOARD_FIELDS = Object.freeze(['title', 'canvasData', 'isArchived', 'thumbnail', 'canvasBackground']);
 
@@ -19,7 +29,9 @@ export class BoardService {
   }
 
   _isMember(board, userId) {
-    if (!board || !Array.isArray(board.members) || this._isExpired(board)) return false;
+    if (!board || userId === undefined || userId === null || this._isExpired(board)) return false;
+    if (Array.isArray(board.guestMembers) && board.guestMembers.includes(String(userId))) return true;
+    if (!Array.isArray(board.members)) return false;
     return board.members.some((m) => {
       const memberId = m._id ? m._id.toString() : m.toString();
       return memberId === userId.toString();
@@ -95,6 +107,59 @@ export class BoardService {
     }
   }
 
+  async rotateShareLink(boardId, userId) {
+    const board = await boardRepository.findBoardShareState(boardId);
+    this._verifyAccess(board, userId);
+    this._verifyOwner(board, userId);
+    if (!board.isGuest && !board.shareLinkHash) throw httpError(403, 'Share links are available on guest boards only.', 'SHARE_LINKS_UNAVAILABLE');
+    const secret = crypto.randomBytes(32).toString('base64url');
+    await boardRepository.setShareLinkHash(boardId, hashShareSecret(secret));
+    return { secret };
+  }
+
+  async verifyShareLink(boardId, secret) {
+    const board = await boardRepository.findBoardShareState(boardId);
+    if (!board || this._isExpired(board)) throw httpError(404, 'Board not found', 'BOARD_NOT_FOUND');
+    const valid = typeof secret === 'string' && SHARE_SECRET_PATTERN.test(secret) && typeof board.shareLinkHash === 'string'
+      && crypto.timingSafeEqual(Buffer.from(hashShareSecret(secret), 'hex'), Buffer.from(board.shareLinkHash, 'hex'));
+    if (!valid) throw httpError(403, 'This share link is not valid. Ask the board owner for a new one.', 'INVALID_SHARE_LINK');
+    return board;
+  }
+
+  async joinWithShareLink(board, user) {
+    const boardId = String(board._id);
+    const alreadyIn = this._isOwner(board, user.id) || this._isMember(board, user.id);
+    const joined = alreadyIn
+      ? await boardRepository.findBoardById(boardId)
+      : await boardRepository.addLinkMember(boardId, isGuestUser(user) ? { guestMembers: user.id } : { members: user.id });
+    if (!joined) throw httpError(404, 'Board not found', 'BOARD_NOT_FOUND');
+    if (!alreadyIn && board.isGuest) {
+      console.log(JSON.stringify({ event: 'guest_invited_someone', boardId, ownerGuestId: board.ownerGuestId, joinedAs: isGuestUser(user) ? 'guest' : 'account', at: new Date().toISOString() }));
+    }
+    return joined.toJSON();
+  }
+
+  async reserveGuestCleanup(user, boardId) {
+    if (!boardId) {
+      if (isGuestUser(user)) throw httpError(400, 'Mess Cleanup needs the board it is cleaning up.', 'BOARD_REQUIRED');
+      return null;
+    }
+    if (typeof boardId !== 'string' || !mongoose.isValidObjectId(boardId)) throw httpError(400, 'A valid board is required', 'INVALID_BOARD');
+    const board = await boardRepository.findBoardAccess(boardId);
+    this._verifyAccess(board, user?.id);
+    if (!board.isGuest) {
+      if (isGuestUser(user)) throw httpError(403, 'Sign up free to use this feature.', 'GUEST_NOT_ALLOWED');
+      return null;
+    }
+    const reserved = await boardRepository.reserveGuestCleanup(boardId, GUEST_CLEANUP_LIMIT);
+    if (!reserved) throw httpError(403, 'Sign up free to keep using Mess Cleanup.', 'GUEST_CLEANUP_LIMIT');
+    return { boardId, uses: reserved.cleanupUses };
+  }
+
+  async releaseGuestCleanup(reservation) {
+    if (reservation) await boardRepository.releaseGuestCleanup(reservation.boardId);
+  }
+
   async getUserBoards(userId, options = {}) {
     const boards = await boardRepository.findUserBoards(userId, options);
     return boards.map((b) => b.toJSON());
@@ -152,6 +217,13 @@ export class BoardService {
 
     if (allowedUpdates.title && typeof allowedUpdates.title === 'string') {
       allowedUpdates.title = allowedUpdates.title.trim();
+    }
+
+    if (board.isGuest && Array.isArray(allowedUpdates.canvasData?.objects) && allowedUpdates.canvasData.objects.length > MAX_GUEST_BOARD_OBJECTS) {
+      throw guestObjectLimitError();
+    }
+    if (board.isGuest && allowedUpdates.canvasData !== undefined && hasImageContent(allowedUpdates.canvasData)) {
+      throw guestImagesError();
     }
 
     if (allowedUpdates.canvasData === undefined) {

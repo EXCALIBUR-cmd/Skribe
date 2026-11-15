@@ -5,6 +5,8 @@ import { getSocketServer } from '../sockets/index.js';
 import { boardRoomName, revokeBoardAccess } from '../sockets/boardHandlers.js';
 import { syncBoardReferences } from '../services/asset.service.js';
 import { operationFate } from '../services/boardOperation.service.js';
+import { guestJoinAddressLimiter } from '../middleware/rateLimit.middleware.js';
+import { newGuestPrincipal, setGuestSessionCookie } from '../utils/guest.js';
 
 export class BoardController {
   async create(req, res, next) {
@@ -138,6 +140,36 @@ export class BoardController {
 
       return success(res, null, 'Collaborator removed successfully', 200);
     } catch (err) {
+      next(err);
+    }
+  }
+
+  async rotateShareLink(req, res, next) {
+    try {
+      const { secret } = await boardService.rotateShareLink(req.params.id, req.user.id);
+      res.set('Cache-Control', 'no-store');
+      return success(res, { secret }, 'Share link ready', 200);
+    } catch (err) {
+      if (err.code && err.statusCode >= 400 && err.statusCode < 500) return error(res, err.message, err.statusCode, { code: err.code });
+      next(err);
+    }
+  }
+
+  async joinWithShareLink(req, res, next) {
+    try {
+      const board = await boardService.verifyShareLink(req.params.id, req.body?.secret);
+      let user = req.user;
+      if (!user) {
+        let allowed = false;
+        guestJoinAddressLimiter(req, res, () => { allowed = true; });
+        if (!allowed) return res;
+        user = newGuestPrincipal();
+        setGuestSessionCookie(res, user);
+      }
+      const joined = await boardService.joinWithShareLink(board, user);
+      return success(res, { board: joined, user }, 'Joined board', 200);
+    } catch (err) {
+      if (err.code && err.statusCode >= 400 && err.statusCode < 500) return error(res, err.message, err.statusCode, { code: err.code });
       next(err);
     }
   }

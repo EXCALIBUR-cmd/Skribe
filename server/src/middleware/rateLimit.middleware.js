@@ -55,6 +55,27 @@ export const guestBoardAddressLimiter = createRateLimiter({
   message: 'Too many guest boards were started from this network recently. Sign up free or try again later.'
 });
 
+export const guestJoinAddressLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  key: (req) => `guest-join-ip:${clientAddress(req)}`,
+  message: 'Too many people joined boards as guests from this network recently. Sign up free or try again later.'
+});
+
+export const joinAttemptAddressLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 20,
+  key: (req) => `join-ip:${clientAddress(req)}`,
+  message: 'Too many attempts to join boards from this network. Please wait a few minutes and try again.'
+});
+
+export const joinAttemptBoardLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 60,
+  key: (req) => (req.params?.id ? `join-board:${req.params.id}` : null),
+  message: 'Too many attempts to join this board. Please wait a few minutes and try again.'
+});
+
 export const registerAddressLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 30,

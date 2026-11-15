@@ -21,6 +21,20 @@ const boardSchema = new mongoose.Schema(
       type: Date,
       default: undefined
     },
+    shareLinkHash: {
+      type: String,
+      select: false,
+      default: undefined
+    },
+    guestMembers: {
+      type: [String],
+      default: []
+    },
+    cleanupUses: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     members: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -102,6 +116,7 @@ const boardSchema = new mongoose.Schema(
         delete ret._id;
         delete ret.__v;
         delete ret.recentOperations;
+        delete ret.shareLinkHash;
         return ret;
       }
     }
