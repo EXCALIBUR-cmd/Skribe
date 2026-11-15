@@ -1,8 +1,9 @@
 import config from '../config/env.js';
 import { error, success } from '../utils/apiResponse.js';
 import { analyzeWithGroq } from '../services/messCleanupGroqService.js';
-import boardService from '../services/board.service.js';
 import { isGuestUser } from '../utils/guest.js';
+
+const loadBoardService = async () => (await import('../services/board.service.js')).default;
 
 export const analyze = async (req, res, next) => {
   const ctrlStart = Date.now();
@@ -38,11 +39,13 @@ export const analyze = async (req, res, next) => {
       return error(res, 'Missing or invalid image/screenshot payload', 400);
     }
 
-    try {
-      reservation = await boardService.reserveGuestCleanup(req.user, req.body?.boardId);
-    } catch (quotaErr) {
-      if (quotaErr.code && quotaErr.statusCode >= 400 && quotaErr.statusCode < 500) return error(res, quotaErr.message, quotaErr.statusCode, { code: quotaErr.code });
-      throw quotaErr;
+    if (req.body?.boardId || isGuestUser(req.user)) {
+      try {
+        reservation = await (await loadBoardService()).reserveGuestCleanup(req.user, req.body?.boardId);
+      } catch (quotaErr) {
+        if (quotaErr.code && quotaErr.statusCode >= 400 && quotaErr.statusCode < 500) return error(res, quotaErr.message, quotaErr.statusCode, { code: quotaErr.code });
+        throw quotaErr;
+      }
     }
 
     let organizationPlan;
@@ -120,7 +123,7 @@ export const analyze = async (req, res, next) => {
       res.removeListener('close', handleClientClose);
     }
     if (reservation) {
-      await boardService.releaseGuestCleanup(reservation).catch((releaseErr) => {
+      await (await loadBoardService()).releaseGuestCleanup(reservation).catch((releaseErr) => {
         console.error('[MessCleanupController] Failed to return an unused guest cleanup:', releaseErr.message);
       });
     }
