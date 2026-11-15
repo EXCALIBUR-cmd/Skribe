@@ -139,6 +139,15 @@ export class BoardService {
     return joined.toJSON();
   }
 
+  async claimGuestWork(guest, userId, via) {
+    const ownedBoards = (await boardRepository.findClaimableGuestBoards(guest.id)).map((board) => String(board._id));
+    if (ownedBoards.length > 0) await boardRepository.transferGuestBoards(ownedBoards, guest.id, userId);
+    const joinedBoards = (await boardRepository.findGuestMemberships(guest.id)).map((board) => String(board._id));
+    if (joinedBoards.length > 0) await boardRepository.convertGuestMemberships(guest.id, userId);
+    console.log(JSON.stringify({ event: 'guest_converted_to_account', guestId: guest.id, userId: String(userId), ownedBoards, joinedBoards, via, at: new Date().toISOString() }));
+    return { ownedBoards, joinedBoards };
+  }
+
   async reserveGuestCleanup(user, boardId) {
     if (!boardId) {
       if (isGuestUser(user)) throw httpError(400, 'Mess Cleanup needs the board it is cleaning up.', 'BOARD_REQUIRED');

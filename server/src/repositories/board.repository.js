@@ -51,6 +51,25 @@ export class BoardRepository {
     ).lean();
   }
 
+  async findClaimableGuestBoards(guestId, now = new Date()) {
+    return await Board.find({ isGuest: true, ownerGuestId: guestId, isDeleted: false, expiresAt: { $gt: now } }, { _id: 1 }).lean();
+  }
+
+  async transferGuestBoards(ids, guestId, userId) {
+    return await Board.updateMany(
+      { _id: { $in: ids }, isGuest: true, ownerGuestId: guestId },
+      { $set: { owner: userId, isGuest: false }, $unset: { ownerGuestId: '', expiresAt: '' } }
+    );
+  }
+
+  async findGuestMemberships(guestId) {
+    return await Board.find({ guestMembers: guestId, isDeleted: false }, { _id: 1 }).lean();
+  }
+
+  async convertGuestMemberships(guestId, userId) {
+    return await Board.updateMany({ guestMembers: guestId, isDeleted: false }, { $pull: { guestMembers: guestId }, $addToSet: { members: userId } });
+  }
+
   async releaseGuestCleanup(id) {
     return await Board.updateOne({ _id: id, isGuest: true, cleanupUses: { $gt: 0 } }, { $inc: { cleanupUses: -1 } });
   }

@@ -203,3 +203,33 @@ test('email and password registration and sign-in still work', needsMongo, async
   const wrong = await fetch(`${base}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'Wrong12345!' }) });
   assert.equal(wrong.status, 401);
 });
+
+test('signing in with Google from a guest board transfers it, carrying the guest session through a short-lived callback-only cookie', needsMongo, async () => {
+  const { default: Board } = await import('../models/Board.js');
+  google.exchange = 'ok';
+  google.profile = profileFor('google-guest-1', `guestconvert_${Date.now()}@example.com`);
+  const guestStart = await fetch(`${base}/guest`, { method: 'POST' });
+  assert.equal(guestStart.status, 201);
+  const guestCookie = cookiePair(setCookies(guestStart).find((c) => c.startsWith('skribe_token=')));
+  const boardId = (await guestStart.json()).data.board.id;
+  const start = await fetch(`${base}/google`, { redirect: 'manual', headers: { cookie: guestCookie } });
+  const claim = setCookies(start).find((c) => c.startsWith('skribe_guest_claim='));
+  assert.ok(claim, 'no guest claim cookie was set');
+  assert.match(claim, /HttpOnly/i);
+  assert.match(claim, /SameSite=Lax/i);
+  assert.match(claim, new RegExp(`Path=${GOOGLE_CALLBACK_PATH.replace(/\//g, '\\/')}`));
+  assert.match(claim, /Max-Age=600/);
+  const stateCookie = setCookies(start).find((c) => c.startsWith('skribe_oauth_'));
+  const state = new URL(start.headers.get('location')).searchParams.get('state');
+  const done = await fetch(`${base}/google/callback?${new URLSearchParams({ code: 'auth-code', state })}`, { redirect: 'manual', headers: { cookie: `${cookiePair(stateCookie)}; ${cookiePair(claim)}` } });
+  assert.equal(done.status, 302);
+  assert.equal(done.headers.get('location'), `${config.clientUrl}/start`);
+  assert.ok(setCookies(done).some((c) => /^skribe_guest_claim=;/.test(c)), 'the claim cookie was not cleared');
+  const stored = await Board.findById(boardId).lean();
+  assert.equal(stored.isGuest, false);
+  assert.equal(stored.expiresAt, undefined);
+  const user = await User.findOne({ email: google.profile.emails[0].value }).lean();
+  assert.equal(String(stored.owner), String(user._id));
+  const plain = await fetch(`${base}/google`, { redirect: 'manual' });
+  assert.ok(!setCookies(plain).some((c) => c.startsWith('skribe_guest_claim=')), 'a claim cookie was set without a guest session');
+});
