@@ -1,18 +1,21 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useT } from '../../context/PreferencesContext';
+import { useAuth } from '../../context/AuthContext';
+import { navItemsFor } from '../../features/guest/guestSession.js';
 
 export const FloatingNavBar = ({ isWheelOpen = false }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const t = useT();
+  const { isGuest } = useAuth();
 
-  const navItems = [
+  const navItems = navItemsFor([
     { label: t('nav.home'), icon: 'home', path: '/' },
     { label: t('nav.boards'), icon: 'dashboard', path: '/boards' },
     { label: t('nav.aiAssist'), icon: 'auto_awesome', path: '/ai-assist' },
     { label: t('nav.mobile'), icon: 'smartphone', path: '/mobile' }
-  ];
+  ], isGuest);
 
   return (
     <nav

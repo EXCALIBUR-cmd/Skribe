@@ -50,3 +50,7 @@ export const takeReturnPath = () => {
   safely(() => storage('session')?.removeItem(RETURN_KEY));
   return BOARD_PATH_PATTERN.test(String(path)) ? path : null;
 };
+
+export const GUEST_HIDDEN_NAV_PATHS = new Set(['/boards', '/ai-assist']);
+
+export const navItemsFor = (items, isGuest) => (isGuest ? items.filter((item) => !GUEST_HIDDEN_NAV_PATHS.has(item.path)) : items);

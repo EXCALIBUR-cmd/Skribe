@@ -55,7 +55,7 @@ export const Header = () => {
       }`}
     >
       <div className="flex items-center gap-3">
-        <Link to={user ? "/boards" : "/"} className="flex items-center gap-2 group">
+        <Link to={user && !isGuest ? "/boards" : "/"} className="flex items-center gap-2 group">
           <span className="material-symbols-outlined text-primary text-3xl font-bold transition-transform group-hover:rotate-12">
             draw
           </span>
@@ -74,6 +74,7 @@ export const Header = () => {
             <span className="text-xs font-bold text-on-surface-variant hidden md:inline-block">
               {user.email}
             </span>
+            {!isGuest && (
             <button
               onClick={() => navigate('/boards')}
               className="bg-surface-container hover:bg-surface-container-high border-2 border-outline rounded-full px-3.5 py-1.5 font-label text-xs font-bold text-on-surface transition-all cursor-pointer flex items-center gap-1.5"
@@ -81,6 +82,7 @@ export const Header = () => {
               <span className="material-symbols-outlined text-base">dashboard</span>
               <span>{t('nav.boards')}</span>
             </button>
+            )}
             {!isCanvasRoute && (
               <button
                 onClick={() => navigate('/settings')}

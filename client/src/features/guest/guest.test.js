@@ -72,3 +72,10 @@ test('a used-up guest Mess Cleanup shows the server message instead of falling b
   );
   assert.equal(sent[0].boardId, '0123456789abcdef01234567');
 });
+
+test('guests do not see Boards or AI Assist in the navigation, and accounts see everything', async () => {
+  const { navItemsFor } = await import('./guestSession.js');
+  const items = [{ path: '/' }, { path: '/boards' }, { path: '/ai-assist' }, { path: '/mobile' }];
+  assert.deepEqual(navItemsFor(items, true).map((item) => item.path), ['/', '/mobile']);
+  assert.deepEqual(navItemsFor(items, false).map((item) => item.path), ['/', '/boards', '/ai-assist', '/mobile']);
+});
