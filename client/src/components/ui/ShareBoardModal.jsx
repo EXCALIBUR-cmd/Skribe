@@ -169,7 +169,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
                 Share "{board.title || 'Board'}"
               </h2>
               <p className="font-body text-xs text-on-surface-variant">
-                Manage board collaborators
+                {isGuest ? 'Invite people with a share link' : 'Manage board collaborators'}
               </p>
             </div>
           </div>
