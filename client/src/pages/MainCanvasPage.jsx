@@ -54,7 +54,7 @@ const isValidViewport = (viewport) => (
 
 export const MainCanvasPage = () => {
   const { id: boardId } = useParams();
-  const { user, sessionUserId, recheckSession } = useAuth();
+  const { user, sessionUserId, recheckSession, isGuest } = useAuth();
   const { resolvedTheme, t, preferences } = usePreferences();
   const boardOpenViewRef = useRef(preferences.boardOpenView);
   boardOpenViewRef.current = preferences.boardOpenView;
@@ -1176,7 +1176,8 @@ export const MainCanvasPage = () => {
         layoutProposal: null,
         loading: false,
         isApplying: false,
-        error: errorMessage
+        error: errorMessage,
+        errorCode: error?.code || null
       });
     }
   };
@@ -1380,6 +1381,7 @@ export const MainCanvasPage = () => {
         loading={messCleanupPreview.loading}
         isApplying={messCleanupPreview.isApplying}
         error={messCleanupPreview.error}
+        errorAction={isGuest && messCleanupPreview.errorCode === 'GUEST_CLEANUP_LIMIT' ? { label: 'Sign up free', onClick: handleKeepBoard } : null}
         onApply={handleApplyMessCleanup}
         onCancel={handleCancelMessCleanupPreview}
       />

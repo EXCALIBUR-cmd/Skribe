@@ -131,6 +131,7 @@ export const MessCleanupPreviewModal = ({
   loading = false,
   isApplying = false,
   error = '',
+  errorAction = null,
   onApply,
   onCancel
 }) => {
@@ -593,7 +594,16 @@ export const MessCleanupPreviewModal = ({
             }}
           >
           {loading && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-on-surface-variant">Preparing preview...</div>}
-          {!loading && error && <div className="flex min-h-80 items-center justify-center text-sm font-bold text-error">{error}</div>}
+          {!loading && error && (
+            <div className="flex min-h-80 flex-col items-center justify-center gap-4 text-center">
+              <p className="m-0 text-sm font-bold text-error">{error}</p>
+              {errorAction && (
+                <button type="button" onClick={errorAction.onClick} className="rounded-full bg-primary px-5 py-2 font-label text-sm font-bold text-on-primary transition-transform active:scale-95 cursor-pointer">
+                  {errorAction.label}
+                </button>
+              )}
+            </div>
+          )}
           {!loading && !error && (!layoutProposal || !cleanupResult || renderModel.objects.length === 0) && (
             <div className="flex min-h-80 flex-col items-center justify-center gap-2 text-center text-sm text-on-surface-variant">
               <span className="material-symbols-outlined text-3xl text-slate-400">info</span>
