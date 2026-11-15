@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
-import { applyHistoryEntry, conflictHistoryState, createHistoryEntry, rebaseHistoryState, serializeHistoryState, restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable } from './canvasHistory.js';
+import { applyHistoryEntry, conflictHistoryState, createHistoryEntry, rebaseHistoryState, serializeHistoryState, restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable, captureHistoryState } from './canvasHistory.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { playStickyEntrance } from './stickyEntrance.js';
 import { createSerializationMemo, isMemoizable } from './serializationMemo.js';
@@ -445,6 +445,42 @@ historyCases.forEach(([name, change, changed]) => {
   });
 });
 
+test('undo keeps a collaborator in-progress stroke preview out of history and on the canvas, without a full rebuild', async () => {
+  const { canvas, memo, other } = undoBoard();
+  const before = captureHistoryState(canvas, memo);
+  canvas.remove(other);
+  const after = captureHistoryState(canvas, memo);
+  const preview = new fabric.Path('M 10 10 L 90 10', { stroke: '#000', strokeId: 'remote_stream', isTemporaryDrawPath: true, excludeFromExport: true });
+  canvas.add(preview);
+  const withPreview = captureHistoryState(canvas, memo);
+  assert.deepEqual(withPreview.keys, after.keys);
+  const undone = await restoreHistoryIncrementally(canvas, before, memo);
+  assert.ok(undone.fresh, 'undo fell back to a full canvas rebuild');
+  assert.deepEqual(undone.diff.added, ['u_circle']);
+  assert.ok(canvas.getObjects().includes(preview), 'undo removed the in-progress preview');
+  assert.equal(preview.canvas, canvas);
+  assert.deepEqual(captureHistoryState(canvas, memo).keys, before.keys);
+  const redone = await restoreHistoryIncrementally(canvas, after, memo);
+  assert.ok(redone.fresh);
+  assert.ok(canvas.getObjects().includes(preview));
+  assert.ok(canvas._objectsToRender === undefined, 'redo left a stale render list');
+});
+
+test('undo and redo invalidate the interactive render list so removed objects stop drawing and restored ones draw at once', async () => {
+  const { canvas, memo, other } = undoBoard();
+  const before = captureCanvasHistory(canvas, memo);
+  canvas.remove(other);
+  const after = captureCanvasHistory(canvas, memo);
+  canvas._objectsToRender = canvas.getObjects().slice();
+  await restoreHistoryIncrementally(canvas, before, memo);
+  assert.ok(canvas._objectsToRender === undefined, 'undo left a stale render list');
+  assert.ok(canvas.getObjects().some((object) => object.id === 'u_circle' && object.canvas === canvas));
+  canvas._objectsToRender = canvas.getObjects().slice();
+  await restoreHistoryIncrementally(canvas, after, memo);
+  assert.ok(canvas._objectsToRender === undefined, 'redo left a stale render list');
+  assert.ok(!canvas.getObjects().some((object) => object.id === 'u_circle'));
+});
+
 test('undo restores a deleted object at its old layer and redo removes it again, with no duplicates', async () => {
   const { canvas, memo, other } = undoBoard();
   const before = captureCanvasHistory(canvas, memo);
@@ -510,8 +546,7 @@ test('a full restore is used when an incremental one cannot be proven safe, and 
     ['most of the board changed', ({ canvas }) => canvas.getObjects().forEach((object) => object.set({ top: object.top + 1 }))],
     ['duplicate ids', ({ other, shape }) => { other.id = shape.id; }],
     ['object without an id', ({ other }) => { other.id = undefined; }],
-    ['canvas background changed', ({ canvas }) => { canvas.backgroundColor = '#123456'; }],
-    ['temporary object on the canvas', ({ canvas }) => { canvas.add(new fabric.Rect({ id: 'u_temp', width: 5, height: 5, excludeFromExport: true })); }]
+    ['canvas background changed', ({ canvas }) => { canvas.backgroundColor = '#123456'; }]
   ];
   for (const [name, change] of cases) {
     const board = undoBoard();

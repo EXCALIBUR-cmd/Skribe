@@ -358,7 +358,8 @@ export const FabricCanvas = forwardRef(({
           selectable: false,
           evented: false,
           strokeId,
-          isTemporaryDrawPath: true
+          isTemporaryDrawPath: true,
+          excludeFromExport: true
         });
         canvas.add(pathObj);
         remoteDrawPathsRef.current[strokeId] = pathObj;
@@ -3818,7 +3819,8 @@ export const FabricCanvas = forwardRef(({
           fill: '',
           selectable: false,
           evented: false,
-          objectCaching: false
+          objectCaching: false,
+          excludeFromExport: true
         });
 
         tempPath.isTemporaryDrawPath = true;

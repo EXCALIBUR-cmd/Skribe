@@ -262,7 +262,7 @@ const planHistoryRestore = (canvas, target, memo, current) => {
   const live = current || captureHistoryState(canvas, memo);
   if (target.head !== live.head) return null;
   const exported = canvas._objects.filter((object) => !object.excludeFromExport);
-  if (exported.length !== canvas._objects.length || !hasUniqueKeys(live.keys) || !hasUniqueKeys(target.keys)) return null;
+  if (!hasUniqueKeys(live.keys) || !hasUniqueKeys(target.keys)) return null;
   const liveIndex = new Map(live.keys.map((key, index) => [key, index]));
   const freshIndices = [];
   target.keys.forEach((key, index) => {
@@ -298,7 +298,8 @@ export const restoreHistoryIncrementally = async (canvas, snapshot, memo, curren
   } catch {
     return full();
   }
-  const unchangedMeanwhile = canvas._objects.length === plan.live.length && canvas._objects.every((object, index) => object === plan.live[index]);
+  const exportedNow = canvas._objects.filter((object) => !object.excludeFromExport);
+  const unchangedMeanwhile = exportedNow.length === plan.live.length && exportedNow.every((object, index) => object === plan.live[index]);
   if (enlivened.length !== plan.fresh.length || !unchangedMeanwhile) return full();
   const replacements = new Map(plan.freshKeys.map((key, index) => [key, enlivened[index]]));
   const liveByKey = new Map(plan.liveKeys.map((key, index) => [key, plan.live[index]]));
@@ -312,7 +313,8 @@ export const restoreHistoryIncrementally = async (canvas, snapshot, memo, curren
     object.setCoords();
     hydrateRestoredObject(object, raw);
   });
-  canvas._objects = next;
+  canvas._objects = [...next, ...canvas._objects.filter((object) => object.excludeFromExport)];
+  canvas._objectsToRender = undefined;
   return { objects: next, fresh: enlivened, diff: plan.diff };
 };
 
