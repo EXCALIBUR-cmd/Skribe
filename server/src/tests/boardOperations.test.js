@@ -647,7 +647,7 @@ test('every v1 route that authenticates also enforces the expected user, except 
   assert.deepEqual(unguarded, []);
   assert.deepEqual(found.filter((r) => r.probe).map((r) => r.key), ['GET /auth/me']);
   assert.deepEqual(found.filter((r) => r.guests).map((r) => r.key).sort(), [...GUEST_ROUTES].sort());
-  for (const key of ['POST /assets/images', 'GET /assets/usage', 'POST /mess-cleanup/analyze', 'POST /sidekick/chat', 'POST /ai-assistant/generate', 'POST /voice-commands/interpret', 'PATCH /auth/me/preferences', 'GET /auth/me/landing', 'PATCH /boards/:id', 'GET /boards/:id', 'DELETE /boards/:id']) {
+  for (const key of ['POST /assets/images', 'GET /assets/usage', 'POST /mess-cleanup/analyze', 'POST /sidekick/chat', 'POST /ai-assistant/generate', 'POST /voice-commands/interpret', 'PATCH /auth/me/preferences', 'GET /auth/me/landing', 'POST /auth/claim-guest-board', 'PATCH /boards/:id', 'GET /boards/:id', 'DELETE /boards/:id']) {
     assert.equal(found.find((r) => r.key === key)?.guarded, true, key);
   }
 });

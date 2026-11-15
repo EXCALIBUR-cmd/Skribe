@@ -25,6 +25,8 @@ router.patch('/me/preferences', authenticate, validatePreferences, authControlle
 
 router.get('/me/landing', authenticate, authController.getLanding);
 
+router.post('/claim-guest-board', authenticate, authController.completeGuestClaim);
+
 router.post('/logout', authController.logout);
 
 export default router;

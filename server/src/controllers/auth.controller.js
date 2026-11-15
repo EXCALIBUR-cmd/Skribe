@@ -7,7 +7,7 @@ import config from '../config/env.js';
 import passport from 'passport';
 import { GOOGLE_CALLBACK_PATH, OAUTH_STATE_TTL_MS, consumeOAuthState, issueOAuthState } from '../services/oauthState.service.js';
 import { verifyAccessToken } from '../utils/jwt.js';
-import { guestPrincipal, isGuestClaims, newGuestPrincipal, setGuestSessionCookie } from '../utils/guest.js';
+import { guestPrincipal, isGuestClaims, isGuestUser, newGuestPrincipal, setGuestSessionCookie } from '../utils/guest.js';
 import { getSocketServer } from '../sockets/index.js';
 import { boardRoomName } from '../sockets/boardHandlers.js';
 
@@ -15,25 +15,44 @@ export const GUEST_CLAIM_COOKIE = 'skribe_guest_claim';
 
 const guestClaimCookieOptions = () => ({ httpOnly: true, secure: config.isProd, sameSite: 'lax', path: GOOGLE_CALLBACK_PATH });
 
-const guestFromToken = (token) => {
+export const PENDING_CLAIM_COOKIE = 'skribe_pending_claim';
+
+const pendingClaimCookieOptions = () => ({ httpOnly: true, secure: config.isProd, sameSite: config.isProd ? 'strict' : 'lax', path: '/api/v1/auth' });
+
+const guestSessionFrom = (token) => {
   if (typeof token !== 'string' || !token) return null;
   try {
-    return guestPrincipal(verifyAccessToken(token));
+    const claims = verifyAccessToken(token);
+    const guest = guestPrincipal(claims);
+    return guest ? { guest, token, exp: claims.exp } : null;
   } catch {
     return null;
   }
 };
 
-const claimGuestWork = async (guest, user, via) => {
-  if (!guest || !user?.id) return [];
-  try {
-    const { ownedBoards } = await boardService.claimGuestWork(guest, user.id, via);
-    ownedBoards.forEach((boardId) => getSocketServer()?.to(boardRoomName(boardId)).emit('board:converted', { boardId }));
-    return ownedBoards;
-  } catch (err) {
-    console.error(JSON.stringify({ event: 'guest_conversion_failed', guestId: guest.id, via, message: err.message }));
-    return [];
+const guestFromToken = (token) => guestSessionFrom(token)?.guest || null;
+
+const hoursLeft = (exp) => Math.max(0, Math.ceil((exp * 1000 - Date.now()) / (60 * 60 * 1000)));
+
+const attemptClaim = async (guest, user, via) => {
+  const { ownedBoards } = await boardService.claimGuestWork(guest, user.id, via);
+  ownedBoards.forEach((boardId) => getSocketServer()?.to(boardRoomName(boardId)).emit('board:converted', { boardId }));
+  return ownedBoards;
+};
+
+const logClaimFailure = (guest, via, attempt, err) => console.error(JSON.stringify({ event: 'guest_conversion_failed', guestId: guest.id, via, attempt, message: err.message }));
+
+const claimGuestWork = async (res, session, user, via) => {
+  if (!session || !user?.id) return { claimedBoardIds: [] };
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return { claimedBoardIds: await attemptClaim(session.guest, user, via) };
+    } catch (err) {
+      logClaimFailure(session.guest, via, attempt, err);
+    }
   }
+  res.cookie(PENDING_CLAIM_COOKIE, session.token, { ...pendingClaimCookieOptions(), maxAge: Math.max(0, session.exp * 1000 - Date.now()) });
+  return { claimedBoardIds: [], pendingClaim: { hoursLeft: hoursLeft(session.exp) } };
 };
 
 export class AuthController {
@@ -41,13 +60,13 @@ export class AuthController {
   async register(req, res, next) {
     try {
       const { name, email, password } = req.body;
-      const guest = guestFromToken(req.cookies?.[COOKIE_NAME]);
+      const session = guestSessionFrom(req.cookies?.[COOKIE_NAME]);
       const { user, token } = await authService.registerUser({ name, email, password });
-      const claimedBoardIds = await claimGuestWork(guest, user, 'register');
+      const claim = await claimGuestWork(res, session, user, 'register');
 
       res.cookie(COOKIE_NAME, token, getCookieOptions());
 
-      return success(res, { user, claimedBoardIds }, 'User registered successfully', 201);
+      return success(res, { user, ...claim }, 'User registered successfully', 201);
     } catch (err) {
       next(err);
     }
@@ -85,13 +104,13 @@ export class AuthController {
   async login(req, res, next) {
     try {
       const { email, password } = req.body;
-      const guest = guestFromToken(req.cookies?.[COOKIE_NAME]);
+      const session = guestSessionFrom(req.cookies?.[COOKIE_NAME]);
       const { user, token } = await authService.loginUser({ email, password });
-      const claimedBoardIds = await claimGuestWork(guest, user, 'login');
+      const claim = await claimGuestWork(res, session, user, 'login');
 
       res.cookie(COOKIE_NAME, token, getCookieOptions());
 
-      return success(res, { user, claimedBoardIds }, 'Login successful', 200);
+      return success(res, { user, ...claim }, 'Login successful', 200);
     } catch (err) {
       next(err);
     }
@@ -119,7 +138,7 @@ export class AuthController {
         if (err) console.error('[AuthController] Google sign-in failed:', err.code || err.name || 'error');
         return fail(err?.code === 'GOOGLE_EMAIL_UNVERIFIED' ? 'oauth_email_unverified' : 'oauth_failed');
       }
-      await claimGuestWork(guestFromToken(claimToken), result.user, 'google');
+      await claimGuestWork(res, guestSessionFrom(claimToken), result.user, 'google');
       res.cookie(COOKIE_NAME, result.token, getCookieOptions());
       return res.redirect(`${config.clientUrl}/start`);
     })(req, res, next);
@@ -136,7 +155,28 @@ export class AuthController {
 
   async getMe(req, res, next) {
     try {
-      return success(res, { user: req.user }, 'Current user profile retrieved successfully', 200);
+      const pending = isGuestUser(req.user) ? null : guestSessionFrom(req.cookies?.[PENDING_CLAIM_COOKIE]);
+      return success(res, { user: req.user, ...(pending ? { pendingClaim: { hoursLeft: hoursLeft(pending.exp) } } : {}) }, 'Current user profile retrieved successfully', 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async completeGuestClaim(req, res, next) {
+    try {
+      const session = guestSessionFrom(req.cookies?.[PENDING_CLAIM_COOKIE]);
+      if (!session) {
+        res.clearCookie(PENDING_CLAIM_COOKIE, pendingClaimCookieOptions());
+        return error(res, 'There is no guest board waiting to be moved.', 404, { code: 'NOTHING_TO_CLAIM' });
+      }
+      try {
+        const claimedBoardIds = await attemptClaim(session.guest, req.user, 'retry');
+        res.clearCookie(PENDING_CLAIM_COOKIE, pendingClaimCookieOptions());
+        return success(res, { claimedBoardIds }, 'Your board is now in your account', 200);
+      } catch (err) {
+        logClaimFailure(session.guest, 'retry', 1, err);
+        return error(res, 'We couldn\'t move your board yet. Please try again.', 503, { code: 'CLAIM_FAILED', hoursLeft: hoursLeft(session.exp) });
+      }
     } catch (err) {
       next(err);
     }

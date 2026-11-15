@@ -54,3 +54,5 @@ export const takeReturnPath = () => {
 export const GUEST_HIDDEN_NAV_PATHS = new Set(['/boards', '/ai-assist']);
 
 export const navItemsFor = (items, isGuest) => (isGuest ? items.filter((item) => !GUEST_HIDDEN_NAV_PATHS.has(item.path)) : items);
+
+export const pendingClaimMessage = (hours) => `We couldn't move your board yet; it's safe for ${hours} more ${hours === 1 ? 'hour' : 'hours'}.`;

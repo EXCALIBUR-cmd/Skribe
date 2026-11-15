@@ -79,3 +79,9 @@ test('guests do not see Boards or AI Assist in the navigation, and accounts see 
   assert.deepEqual(navItemsFor(items, true).map((item) => item.path), ['/', '/mobile']);
   assert.deepEqual(navItemsFor(items, false).map((item) => item.path), ['/', '/boards', '/ai-assist', '/mobile']);
 });
+
+test('a pending board transfer says how long the board is safe', async () => {
+  const { pendingClaimMessage } = await import('./guestSession.js');
+  assert.equal(pendingClaimMessage(23), 'We couldn\'t move your board yet; it\'s safe for 23 more hours.');
+  assert.equal(pendingClaimMessage(1), 'We couldn\'t move your board yet; it\'s safe for 1 more hour.');
+});

@@ -7,7 +7,7 @@ import { resolvePostSignInPath } from '../features/settings/landing';
 import { rememberReturnPath } from '../features/guest/guestSession.js';
 
 export const SignUpPage = () => {
-  const { user, register, isGuest } = useAuth();
+  const { user, register, isGuest, pendingClaim } = useAuth();
   const navigate = useNavigate();
   const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
@@ -30,9 +30,9 @@ export const SignUpPage = () => {
 
   useEffect(() => {
     if (user && !isGuest) {
-      navigate(destination, { replace: true });
+      navigate(pendingClaim ? '/boards' : destination, { replace: true });
     }
-  }, [user, isGuest, navigate]);
+  }, [user, isGuest, pendingClaim, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -60,8 +60,8 @@ export const SignUpPage = () => {
 
     try {
       setIsSubmitting(true);
-      await register(name.trim(), email.trim(), password);
-      navigate(destination, { replace: true });
+      const result = await register(name.trim(), email.trim(), password);
+      navigate(result?.pendingClaim ? '/boards' : destination, { replace: true });
     } catch (err) {
       setFormError(err.message || 'Registration failed. Please try again.');
     } finally {

@@ -7,7 +7,7 @@ import { rememberReturnPath } from '../features/guest/guestSession.js';
 import TryBoardButton from '../components/auth/TryBoardButton';
 
 export const SignInPage = () => {
-  const { user, login, isGuest } = useAuth();
+  const { user, login, isGuest, pendingClaim } = useAuth();
   const navigate = useNavigate();
   const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
@@ -29,9 +29,9 @@ export const SignInPage = () => {
 
   useEffect(() => {
     if (user && !isGuest) {
-      navigate(destination, { replace: true });
+      navigate(pendingClaim ? '/boards' : destination, { replace: true });
     }
-  }, [user, isGuest, navigate]);
+  }, [user, isGuest, pendingClaim, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,8 +44,8 @@ export const SignInPage = () => {
 
     try {
       setIsSubmitting(true);
-      await login(email, password);
-      navigate(destination, { replace: true });
+      const result = await login(email, password);
+      navigate(result?.pendingClaim ? '/boards' : destination, { replace: true });
     } catch (err) {
       setFormError(err.message || 'Invalid email or password. Please try again.');
     } finally {

@@ -24,6 +24,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sessionUserId, setSessionUserIdState] = useState(null);
+  const [pendingClaim, setPendingClaim] = useState(null);
   const socketPausedRef = useRef(false);
 
   const setSessionUserId = useCallback((id) => {
@@ -97,6 +98,7 @@ export const AuthProvider = ({ children }) => {
       const res = await apiClient.get('/auth/me');
       if (res.success && res.data?.user) {
         adoptUser(res.data.user);
+        setPendingClaim(res.data.pendingClaim || null);
 
         socketService.connect();
       } else {
@@ -123,7 +125,8 @@ export const AuthProvider = ({ children }) => {
         announce(res.data.user);
 
         reconnectAs(previous, res.data.user);
-        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [] };
+        setPendingClaim(res.data.pendingClaim || null);
+        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [], pendingClaim: res.data.pendingClaim || null };
       }
     } catch (err) {
       const errMsg = err.message || 'Login failed. Please check your credentials.';
@@ -142,7 +145,8 @@ export const AuthProvider = ({ children }) => {
         announce(res.data.user);
 
         reconnectAs(previous, res.data.user);
-        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [] };
+        setPendingClaim(res.data.pendingClaim || null);
+        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [], pendingClaim: res.data.pendingClaim || null };
       }
     } catch (err) {
       const errMsg = err.message || 'Registration failed. Please try again.';
@@ -166,6 +170,18 @@ export const AuthProvider = ({ children }) => {
 
   const joinWithShareLink = (boardId, secret) => enterAsGuest(() => apiClient.post(`/boards/${boardId}/join`, { secret }));
 
+  const retryGuestClaim = async () => {
+    try {
+      const res = await apiClient.post('/auth/claim-guest-board');
+      setPendingClaim(null);
+      return res?.data?.claimedBoardIds || [];
+    } catch (err) {
+      if (err?.errors?.code === 'NOTHING_TO_CLAIM') setPendingClaim(null);
+      else if (Number.isInteger(err?.errors?.hoursLeft)) setPendingClaim({ hoursLeft: err.errors.hoursLeft });
+      throw err;
+    }
+  };
+
   const logout = async () => {
     try {
       await apiClient.post('/auth/logout');
@@ -175,6 +191,7 @@ export const AuthProvider = ({ children }) => {
 
       socketService.disconnect();
       adoptUser(null);
+      setPendingClaim(null);
       announce(null);
       setError(null);
     }
@@ -185,6 +202,8 @@ export const AuthProvider = ({ children }) => {
       value={{
         user,
         isGuest: isGuestUser(user),
+        pendingClaim,
+        retryGuestClaim,
         startGuestBoard,
         joinWithShareLink,
         loading,

@@ -63,13 +63,15 @@ test.after(async () => {
 const resetJoinAttempts = () => { joinAttemptAddressLimiter.reset(); joinAttemptBoardLimiter.reset(); };
 test.beforeEach(() => { guestBoardAddressLimiter.reset(); guestJoinAddressLimiter.reset(); resetJoinAttempts(); });
 
-const call = async (method, path, { token, body } = {}) => {
+const call = async (method, path, { token, body, cookie } = {}) => {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.cookie = `${COOKIE_NAME}=${token}`;
+  if (cookie) headers.cookie = [headers.cookie, cookie].filter(Boolean).join('; ');
   const res = await fetch(`${base}/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const setCookie = res.headers.get('set-cookie') || '';
+  const setCookies = res.headers.getSetCookie();
   const match = setCookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  return { status: res.status, body: await res.json().catch(() => null), setCookie, token: match ? match[1] : null };
+  return { status: res.status, body: await res.json().catch(() => null), setCookie, setCookies, token: match ? match[1] : null };
 };
 
 const startGuest = (token) => call('POST', '/auth/guest', { token });
@@ -719,4 +721,110 @@ test('expired boards, forged guest tokens and plain sign-ups claim nothing', nee
   const plain = await register('plainuser');
   assert.equal(plain.status, 201);
   assert.deepEqual(plain.body.data.claimedBoardIds, []);
+});
+
+const failClaims = (times) => {
+  const original = boardService.claimGuestWork;
+  let failures = 0;
+  boardService.claimGuestWork = async (...args) => {
+    if (failures < times) {
+      failures += 1;
+      throw new Error('simulated database outage');
+    }
+    return original.apply(boardService, args);
+  };
+  return { restore: () => { boardService.claimGuestWork = original; }, failures: () => failures };
+};
+const pendingCookieOf = (res) => (res.setCookies || []).find((c) => c.startsWith('skribe_pending_claim='));
+
+test('a board transfer that fails once during sign-up is retried and succeeds', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const flaky = failClaims(1);
+  let res;
+  let events;
+  try {
+    events = await (async () => {
+      const lines = [];
+      const original = console.error;
+      console.error = (...args) => { lines.push(args.join(' ')); };
+      try {
+        res = await register('retryonce', mine.token);
+      } finally {
+        console.error = original;
+      }
+      return lines.map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+    })();
+  } finally {
+    flaky.restore();
+  }
+  assert.equal(res.status, 201);
+  assert.deepEqual(res.body.data.claimedBoardIds, [boardId]);
+  assert.equal(res.body.data.pendingClaim, undefined);
+  assert.equal(pendingCookieOf(res), undefined);
+  assert.equal(flaky.failures(), 1);
+  assert.deepEqual(events.filter((e) => e.event === 'guest_conversion_failed').map((e) => e.attempt), [1]);
+  assert.equal((await Board.findById(boardId).lean()).isGuest, false);
+});
+
+test('a board transfer that keeps failing leaves the board safe and can be completed later from the account', needsMongo, async () => {
+  const mine = await startGuest();
+  const boardId = mine.body.data.board.id;
+  const broken = failClaims(3);
+  let res;
+  try {
+    res = await register('retrylater', mine.token);
+  } finally {
+    broken.restore();
+  }
+  assert.equal(res.status, 201, 'sign-up failed because the transfer failed');
+  assert.ok(res.token, 'no account session was issued');
+  assert.deepEqual(res.body.data.claimedBoardIds, []);
+  assert.deepEqual(res.body.data.pendingClaim, { hoursLeft: 24 });
+  assert.equal(broken.failures(), 2, 'the transfer was not retried exactly once');
+  const pending = pendingCookieOf(res);
+  assert.ok(pending, 'no pending-claim cookie was set');
+  assert.match(pending, /HttpOnly/i);
+  assert.match(pending, /Path=\/api\/v1\/auth/);
+  const pendingPair = pending.split(';')[0];
+  const stillGuest = await Board.findById(boardId).lean();
+  assert.equal(stillGuest.isGuest, true);
+  assert.ok(stillGuest.expiresAt > new Date(), 'the guest board is not safe until it expires');
+  const me = await call('GET', '/auth/me', { token: res.token, cookie: pendingPair });
+  assert.deepEqual(me.body.data.pendingClaim, { hoursLeft: 24 });
+  const stillBroken = failClaims(1);
+  let failed;
+  try {
+    failed = await call('POST', '/auth/claim-guest-board', { token: res.token, cookie: pendingPair });
+  } finally {
+    stillBroken.restore();
+  }
+  assert.equal(failed.status, 503);
+  assert.equal(failed.body.errors?.code, 'CLAIM_FAILED');
+  assert.equal(failed.body.errors?.hoursLeft, 24);
+  assert.equal(pendingCookieOf(failed), undefined, 'a failed retry cleared the pending claim');
+  const done = await call('POST', '/auth/claim-guest-board', { token: res.token, cookie: pendingPair });
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  assert.deepEqual(done.body.data.claimedBoardIds, [boardId]);
+  assert.ok(/^skribe_pending_claim=;/.test(pendingCookieOf(done) || ''), 'the pending claim was not cleared');
+  const moved = await Board.findById(boardId).lean();
+  assert.equal(String(moved.owner), String(jwt.verify(res.token, TEST_SECRET).id));
+  assert.equal(moved.isGuest, false);
+  assert.equal((await call('GET', '/auth/me', { token: res.token })).body.data.pendingClaim, undefined);
+});
+
+test('completing a transfer needs an account and a pending claim', needsMongo, async () => {
+  const { token } = await makeUser('noclaim');
+  const nothing = await call('POST', '/auth/claim-guest-board', { token });
+  assert.equal(nothing.status, 404);
+  assert.equal(nothing.body.errors?.code, 'NOTHING_TO_CLAIM');
+  const guest = await startGuest();
+  const asGuest = await call('POST', '/auth/claim-guest-board', { token: guest.token, cookie: `skribe_pending_claim=${guest.token}` });
+  assert.equal(asGuest.status, 403);
+  assert.equal(asGuest.body.errors?.code, 'GUEST_NOT_ALLOWED');
+  assert.equal((await call('POST', '/auth/claim-guest-board', { cookie: `skribe_pending_claim=${guest.token}` })).status, 401);
+  const forged = jwt.sign({ role: 'guest', guestId: jwt.verify(guest.token, TEST_SECRET).guestId, name: 'Guest-1234' }, 'not-the-server-secret', { expiresIn: '24h' });
+  const forgedClaim = await call('POST', '/auth/claim-guest-board', { token, cookie: `skribe_pending_claim=${forged}` });
+  assert.equal(forgedClaim.status, 404);
+  assert.equal((await Board.findById(guest.body.data.board.id).lean()).isGuest, true, 'a forged pending claim moved a board');
 });
