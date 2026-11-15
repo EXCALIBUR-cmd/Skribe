@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fabric from 'fabric';
 import { applyHistoryEntry, conflictHistoryState, createHistoryEntry, rebaseHistoryState, serializeHistoryState, restoreHistoryIncrementally, captureCanvasHistory, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, restoreCanvasHistory, retainUnrestorable, captureHistoryState } from './canvasHistory.js';
+import { SkribeLine, createSkribeLineFabricObject } from './SkribeLine.js';
 import { SKRIBE_SERIALIZABLE_PROPERTIES, hydrateCanvasObjects } from './fabricHydration.js';
 import { playStickyEntrance } from './stickyEntrance.js';
 import { createSerializationMemo, isMemoizable } from './serializationMemo.js';
@@ -443,6 +444,33 @@ historyCases.forEach(([name, change, changed]) => {
     untouched.forEach((object) => assert.ok(canvas.getObjects().includes(object), object.id));
     canvas.getObjects().forEach((object) => assert.equal(object.canvas, canvas));
   });
+});
+
+test('lines restored by undo and redo serialize exactly as recorded, so later undo steps still apply in order', async () => {
+  const { canvas, memo } = undoBoard();
+  const horizontal = createSkribeLineFabricObject(new SkribeLine({ id: 'u_hline', start: { x: 100, y: 500 }, end: { x: 300, y: 500 } }));
+  const curved = createSkribeLineFabricObject(new SkribeLine({ id: 'u_curve', start: { x: 400, y: 500 }, end: { x: 600, y: 520 }, controlPoints: [{ x: 500, y: 380 }], mode: 'curve' }));
+  const empty = captureHistoryState(canvas, memo);
+  canvas.add(horizontal);
+  const one = captureHistoryState(canvas, memo);
+  canvas.add(curved);
+  const two = captureHistoryState(canvas, memo);
+  const first = createHistoryEntry(empty, one);
+  const second = createHistoryEntry(one, two);
+  await restoreHistoryIncrementally(canvas, one, memo);
+  await restoreHistoryIncrementally(canvas, empty, memo);
+  await restoreHistoryIncrementally(canvas, one, memo);
+  await restoreHistoryIncrementally(canvas, two, memo);
+  const restored = captureHistoryState(canvas, memo);
+  assert.deepEqual(restored.keys, two.keys);
+  two.keys.forEach((key, index) => assert.equal(restored.strings[index], two.strings[index], key));
+  const undoCurve = applyHistoryEntry(restored, second, 'undo');
+  assert.ok(undoCurve, 'undo of the curved line was skipped as a conflict');
+  assert.deepEqual(undoCurve.keys, one.keys);
+  await restoreHistoryIncrementally(canvas, undoCurve, memo);
+  const undoLine = applyHistoryEntry(captureHistoryState(canvas, memo), first, 'undo');
+  assert.ok(undoLine, 'undo of the horizontal line was skipped as a conflict');
+  assert.deepEqual(undoLine.keys, empty.keys);
 });
 
 test('undo keeps a collaborator in-progress stroke preview out of history and on the canvas, without a full rebuild', async () => {

@@ -223,9 +223,6 @@ export const syncSkribeLineToFabric = (fabricObj) => {
     top: box.centerY,
     originX: 'center',
     originY: 'center',
-    width: box.width,
-    height: box.height,
-    pathOffset: new fabric.Point(box.centerX, box.centerY),
     stroke: model.stroke,
     strokeWidth: model.strokeWidth,
     strokeDashArray: model.strokeDashArray,
@@ -237,6 +234,7 @@ export const syncSkribeLineToFabric = (fabricObj) => {
     isStraightLine: true,
     isSkribeLine: true
   });
+  fabricObj.setBoundingBox();
 
   if (typeof fabricObj.setCoords === 'function') {
     fabricObj.setCoords();
