@@ -188,6 +188,7 @@ export class BoardService {
     }
 
     const boardJson = (updatedBoard || board).toJSON();
+    boardJson.hasShareLink = Boolean(board.shareLinkHash);
     boardJson.viewportStates = (boardJson.viewportStates || []).filter(
       (state) => String(state.userId) === String(userId)
     );

@@ -2,8 +2,8 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-export const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+export const ProtectedRoute = ({ children, allowGuest = false }) => {
+  const { user, loading, isGuest } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -19,6 +19,10 @@ export const ProtectedRoute = ({ children }) => {
 
   if (!user) {
     return <Navigate to="/signin" state={{ from: location }} replace />;
+  }
+
+  if (isGuest && !allowGuest) {
+    return <Navigate to="/signup" replace />;
   }
 
   return children;

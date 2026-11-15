@@ -3,9 +3,11 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GOOGLE_SIGN_IN_URL, oauthErrorMessage, useAuthProviders } from '../api/authProviders.js';
 import SignUpIllustration from '../components/auth/SignUpIllustration';
+import { resolvePostSignInPath } from '../features/settings/landing';
+import { rememberReturnPath } from '../features/guest/guestSession.js';
 
 export const SignUpPage = () => {
-  const { user, register } = useAuth();
+  const { user, register, isGuest } = useAuth();
   const navigate = useNavigate();
   const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
@@ -24,11 +26,13 @@ export const SignUpPage = () => {
     if (message) setFormError(message);
   }, [location.search]);
 
+  const destination = location.state?.from ? resolvePostSignInPath(location.state.from) : '/boards';
+
   useEffect(() => {
-    if (user) {
-      navigate('/boards', { replace: true });
+    if (user && !isGuest) {
+      navigate(destination, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, isGuest, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -57,7 +61,7 @@ export const SignUpPage = () => {
     try {
       setIsSubmitting(true);
       await register(name.trim(), email.trim(), password);
-      navigate('/boards', { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setFormError(err.message || 'Registration failed. Please try again.');
     } finally {
@@ -66,6 +70,7 @@ export const SignUpPage = () => {
   };
 
   const handleGoogleSignUp = () => {
+    rememberReturnPath(destination);
     window.location.href = GOOGLE_SIGN_IN_URL;
   };
 
@@ -92,6 +97,13 @@ export const SignUpPage = () => {
           <div className="mb-6 p-3 bg-error-container text-on-error-container rounded-lg text-xs font-bold flex items-center gap-2 animate-shake">
             <span className="material-symbols-outlined text-base text-error">error</span>
             <span>{formError}</span>
+          </div>
+        )}
+
+        {isGuest && (
+          <div className="mb-6 p-3 bg-secondary-container/40 text-on-secondary-container rounded-lg text-sm font-bold flex items-center gap-2 border border-secondary/20" role="status">
+            <span className="material-symbols-outlined text-base" aria-hidden="true">bookmark_added</span>
+            <span>Your guest board and everything on it will move to your account.</span>
           </div>
         )}
 
@@ -212,7 +224,7 @@ export const SignUpPage = () => {
 
         <p className="mt-8 text-center font-body-md text-body-md text-on-surface-variant">
           Already have an account?{' '}
-          <Link className="text-secondary font-bold hover:underline" to="/signin">
+          <Link className="text-secondary font-bold hover:underline" to="/signin" state={location.state}>
             Log in here
           </Link>
         </p>

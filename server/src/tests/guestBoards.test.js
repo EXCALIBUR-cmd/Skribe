@@ -311,6 +311,7 @@ test('the guest owner creates a share link whose secret is returned once and sto
   assert.ok(!JSON.stringify(stored).includes(secret), 'the raw secret was stored');
   const fetched = await call('GET', `/boards/${boardId}`, { token: mine.token });
   assert.ok(!('shareLinkHash' in fetched.body.data.board), 'the hash was sent to the client');
+  assert.equal(fetched.body.data.board.hasShareLink, true);
   assert.ok(!JSON.stringify(fetched.body).includes(sha256(secret)));
 });
 

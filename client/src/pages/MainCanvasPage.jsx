@@ -26,6 +26,8 @@ import { renderMermaid } from '../features/aiAssistant/mermaidRenderer';
 import eraserManager from '../utils/EraserManager';
 import socketService from '../services/socket';
 import { ShareBoardModal } from '../components/ui/ShareBoardModal';
+import GuestBoardBanner from '../components/ui/GuestBoardBanner';
+import { guestLimitMessage } from '../features/guest/guestLimits.js';
 import { useAuth } from '../context/AuthContext';
 import { extractWorkspaceModel } from '../features/messCleanup/extractWorkspaceModel.js';
 import { analyzeWorkspace } from '../features/messCleanup/analyzeWorkspace.js';
@@ -73,6 +75,7 @@ export const MainCanvasPage = () => {
     if (!currentBoard || !user) return false;
     const currentUserId = String(user.id || user._id || user.userId || '').trim();
     if (!currentUserId) return false;
+    if (currentBoard.isGuest) return Boolean(currentBoard.ownerGuestId) && currentBoard.ownerGuestId === currentUserId;
 
     let boardOwnerId = '';
     if (currentBoard.owner) {
@@ -399,6 +402,8 @@ export const MainCanvasPage = () => {
                 addToast('Layer order conflict', 'You and a collaborator both changed the layer order. Your order was kept.', 'sync_problem', 'info');
               } else if (kind === 'unrestorable') {
                 addToast('Some items could not be shown', `${detail.count} item${detail.count === 1 ? '' : 's'} from a collaborator could not be displayed. They are kept safe and will not be lost when you save.`, 'warning', 'warning');
+              } else if (kind === 'guest-limit') {
+                addToast('Not saved on a guest board', guestLimitMessage(detail.code), 'block', 'warning');
               } else if (kind === 'sync-error') {
                 setSaveStatus('error');
               } else if (kind === 'recovered') {
@@ -690,6 +695,11 @@ export const MainCanvasPage = () => {
       rehydrateAssetImages(fabricCanvasRef.current?.getCanvas?.());
     };
 
+    const handleBoardConverted = (event) => {
+      if (event?.boardId !== boardId) return;
+      setCurrentBoard((board) => (board ? { ...board, isGuest: false, expiresAt: undefined, ownerGuestId: undefined, hasShareLink: true } : board));
+    };
+
     const handleAccessRevoked = (event) => {
       if (event?.boardId !== boardId) return;
       navigateRef.current('/boards', { replace: true, state: { accessNotice: 'Access removed: the board owner removed you from that board.' } });
@@ -697,6 +707,7 @@ export const MainCanvasPage = () => {
 
     socketService.on('board-joined', handleBoardJoined);
     socketService.on('board:access-revoked', handleAccessRevoked);
+    socketService.on('board:converted', handleBoardConverted);
     socketService.on('canvas:op-committed', handleRemoteOperation);
     socketService.on('board:revision', handleRemoteRevision);
     socketService.on('disconnect', handleSocketDisconnect);
@@ -706,6 +717,7 @@ export const MainCanvasPage = () => {
     return () => {
       socketService.off('board-joined', handleBoardJoined);
       socketService.off('board:access-revoked', handleAccessRevoked);
+      socketService.off('board:converted', handleBoardConverted);
       socketService.off('canvas:op-committed', handleRemoteOperation);
       socketService.off('board:revision', handleRemoteRevision);
       socketService.off('disconnect', handleSocketDisconnect);
@@ -1126,7 +1138,7 @@ export const MainCanvasPage = () => {
       const scopeType = selectedObjectIds.length > 0 ? 'SELECTION' : 'BOARD';
       const cleanupContext = { scopeType, selectedObjectIds };
 
-      const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot, { cleanupContext });
+      const organizationPlan = await analyzeWorkspace(workspaceModel, screenshot, { cleanupContext, boardId });
       const layoutProposal = createLayoutProposal(organizationPlan, workspaceModel);
       runBindingDiagnostic(workspaceModel, organizationPlan, null);
 
@@ -1257,7 +1269,7 @@ export const MainCanvasPage = () => {
     });
   };
 
-  const handleBackToBoards = useCallback(async () => {
+  const leaveBoard = useCallback(async (path, options) => {
     await flushViewportSave();
     await syncControllerRef.current?.drain?.();
     if (
@@ -1284,8 +1296,16 @@ export const MainCanvasPage = () => {
         }
       }
     }
-    navigate('/boards');
+    navigate(path, options);
   }, [boardId, flushViewportSave, navigate]);
+
+  const handleBackToBoards = useCallback(() => leaveBoard('/boards'), [leaveBoard]);
+
+  const [keepingBoard, setKeepingBoard] = useState(false);
+  const handleKeepBoard = useCallback(async () => {
+    setKeepingBoard(true);
+    await leaveBoard('/signup', { state: { from: { pathname: `/board/${boardId}` } } });
+  }, [boardId, leaveBoard]);
 
   const isOpeningSettingsRef = useRef(false);
   const handleOpenSettings = useCallback(async () => {
@@ -1349,6 +1369,9 @@ export const MainCanvasPage = () => {
 
   return (
     <div className="relative w-full h-[calc(100vh-64px)] overflow-hidden bg-background">
+      {currentBoard?.isGuest && (
+        <GuestBoardBanner expiresAt={currentBoard.expiresAt} canKeep={isOwner} onKeep={handleKeepBoard} keeping={keepingBoard} />
+      )}
       <MessCleanupPreviewModal
         isOpen={messCleanupPreview.isOpen}
         workspaceModel={messCleanupPreview.workspaceModel}

@@ -11,6 +11,7 @@ import SettingsPage from '../pages/SettingsPage';
 import LegalPage from '../pages/LegalPage';
 import LandingRedirect from '../features/settings/LandingRedirect';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
+import JoinBoardPage from '../pages/JoinBoardPage';
 
 export const AppRoutes = () => {
   return (
@@ -18,6 +19,7 @@ export const AppRoutes = () => {
       <Route path="/" element={<WelcomePage />} />
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
+      <Route path="/join/:id" element={<JoinBoardPage />} />
       <Route path="/terms" element={<LegalPage kind="terms" />} />
       <Route path="/privacy" element={<LegalPage kind="privacy" />} />
 
@@ -32,7 +34,7 @@ export const AppRoutes = () => {
       <Route
         path="/board/:id"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowGuest>
             <MainCanvasPage />
           </ProtectedRoute>
         }

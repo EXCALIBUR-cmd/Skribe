@@ -2330,3 +2330,72 @@ test('a held conflict whose resolution is refused for a changed account stays he
   assert.deepEqual(heldItems(store), []);
   reloaded.controller.dispose();
 });
+
+const guestImage = (id) => ({ type: 'Image', id, src: 'https://ik.imagekit.io/skribe/pasted.png', left: 5, top: 5, width: 40, height: 40 });
+const refuseLikeGuestBoard = (server) => {
+  const operation = server.operation;
+  const saveBoard = server.saveBoard;
+  const refusal = (objects) => {
+    if (objects.some((object) => /^image$/i.test(object.type) || object.src)) return 'GUEST_IMAGES_DISABLED';
+    if (objects.length > 500) return 'GUEST_OBJECT_LIMIT';
+    return null;
+  };
+  server.operation = (from, payload) => {
+    const applied = applyCanvasOperation(server.objects, payload);
+    const code = applied.ok ? refusal(applied.objects) : null;
+    if (code) return { ok: false, code, currentRevision: server.revision };
+    return operation(from, payload);
+  };
+  server.saveBoard = (from, body) => {
+    const code = refusal(body.canvasData.objects);
+    if (code) return { ok: false, code, currentRevision: server.revision };
+    return saveBoard(from, body);
+  };
+  return server;
+};
+const withGuestNotices = (client) => {
+  client.guestLimits = [];
+  return client;
+};
+
+test('a guest board refusing a pasted image reverts only the image and still saves the rest of the edit', async () => {
+  const server = refuseLikeGuestBoard(createServer());
+  const client = withGuestNotices(createClient('guest', server));
+  const result = await client.commit((objects) => [...objects, shape('shape_new', { left: 900 }), guestImage('img_pasted')]);
+  await settle(client);
+  assert.notEqual(result?.mode, 'error', JSON.stringify(result));
+  assert.ok(find(server.objects, 'shape_new'), 'the rest of the edit was lost');
+  assert.equal(find(server.objects, 'img_pasted'), undefined);
+  assert.equal(find(client.objects, 'img_pasted'), undefined, 'the refused image stayed on the canvas');
+  assert.ok(client.merges.some((merge) => merge.removedIds.includes('img_pasted')));
+  assert.deepEqual(client.syncErrors, []);
+  const later = await client.commit(patch('shape_new', { left: 950 }));
+  await settle(client);
+  assert.notEqual(later?.mode, 'error');
+  assert.equal(find(server.objects, 'shape_new').left, 950, 'later edits stopped saving after the refusal');
+});
+
+test('a guest board at the object cap keeps the first new object and reverts only the overflow', async () => {
+  const full = Array.from({ length: 499 }, (_, i) => shape(`shape_s${i}`, { left: i }));
+  const server = refuseLikeGuestBoard(createServer({ objects: full }));
+  const client = createClient('guest', server);
+  await client.commit((objects) => [...objects, shape('shape_n1'), shape('shape_n2'), shape('shape_n3')]);
+  await settle(client);
+  assert.equal(server.objects.length, 500);
+  assert.ok(find(server.objects, 'shape_n1'));
+  assert.equal(find(client.objects, 'shape_n2'), undefined);
+  assert.equal(find(client.objects, 'shape_n3'), undefined);
+  assert.equal(client.objects.length, 500);
+  assert.deepEqual(client.syncErrors, []);
+});
+
+test('a refused full save on a guest board reverts the image and saves the rest', async () => {
+  const server = refuseLikeGuestBoard(createServer({ enabled: false }));
+  const client = createClient('legacy-guest', server);
+  client.edit((objects) => [...objects, shape('shape_legacy', { left: 880 }), guestImage('img_legacy')]);
+  const saved = await client.save();
+  assert.equal(saved?.ok, true, JSON.stringify(saved));
+  assert.ok(find(server.objects, 'shape_legacy'));
+  assert.equal(find(server.objects, 'img_legacy'), undefined);
+  assert.equal(find(client.objects, 'img_legacy'), undefined);
+});

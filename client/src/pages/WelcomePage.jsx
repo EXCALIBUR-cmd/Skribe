@@ -4,6 +4,7 @@ import anime from 'animejs';
 import { useAuth } from '../context/AuthContext';
 import { isReducedMotion } from '../animations/config';
 import LandingBoardDemo from '../components/landing/LandingBoardDemo';
+import TryBoardButton from '../components/auth/TryBoardButton';
 
 const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary';
 const primaryAction = `inline-flex min-h-14 items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-primary bg-primary px-6 font-label text-lg font-bold text-on-primary sticker-shadow btn-pressed transition-transform hover:-translate-y-0.5 cursor-pointer ${focusRing}`;
@@ -65,7 +66,8 @@ const TogetherVisual = () => (
 
 export const WelcomePage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
+  const offerGuestBoard = !user || isGuest;
   const heroRef = useRef(null);
 
   useLayoutEffect(() => {
@@ -120,10 +122,13 @@ export const WelcomePage = () => {
             Sketch it out together in real time. When you're ready, Skribe's AI reads your board, answers questions and tidies things up. Nothing changes until you say so.
           </p>
           <div data-rise className="mt-9 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
-            <button type="button" onClick={startDrawing} className={primaryAction}>
+            {offerGuestBoard && <TryBoardButton className={primaryAction} />}
+            {!isGuest && (
+            <button type="button" onClick={startDrawing} className={offerGuestBoard ? secondaryAction : primaryAction}>
               <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }} aria-hidden="true">edit</span>
               {user ? 'Open My Boards' : 'Start Drawing'}
             </button>
+            )}
             <button type="button" onClick={meetSidekick} className={secondaryAction}>
               <span className="material-symbols-outlined" aria-hidden="true">auto_awesome</span>
               Meet AI Sidekick

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import apiClient, { getExpectedUser, setExpectedUser, setSessionRefusedHandler, setSessionUser } from '../api/apiClient';
 import socketService from '../services/socket';
+import { isGuestUser } from '../features/guest/guestSession.js';
 
 const AuthContext = createContext(null);
 
@@ -85,6 +86,11 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, sessionUserId]);
 
+  const reconnectAs = useCallback((previous, next) => {
+    if (previous && userIdOf(previous) !== userIdOf(next)) socketService.disconnect();
+    socketService.connect();
+  }, []);
+
   const checkAuth = useCallback(async () => {
     try {
       setLoading(true);
@@ -112,11 +118,12 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       const res = await apiClient.post('/auth/login', { email, password });
       if (res.success && res.data?.user) {
+        const previous = user;
         adoptUser(res.data.user);
         announce(res.data.user);
 
-        socketService.connect();
-        return res.data.user;
+        reconnectAs(previous, res.data.user);
+        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [] };
       }
     } catch (err) {
       const errMsg = err.message || 'Login failed. Please check your credentials.';
@@ -130,11 +137,12 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       const res = await apiClient.post('/auth/register', { name, email, password });
       if (res.success && res.data?.user) {
+        const previous = user;
         adoptUser(res.data.user);
         announce(res.data.user);
 
-        socketService.connect();
-        return res.data.user;
+        reconnectAs(previous, res.data.user);
+        return { user: res.data.user, claimedBoardIds: res.data.claimedBoardIds || [] };
       }
     } catch (err) {
       const errMsg = err.message || 'Registration failed. Please try again.';
@@ -142,6 +150,21 @@ export const AuthProvider = ({ children }) => {
       throw new Error(errMsg);
     }
   };
+
+  const enterAsGuest = async (request) => {
+    const previous = user;
+    const res = await request();
+    const next = res?.data?.user;
+    if (!res?.success || !next) throw new Error(res?.message || 'Could not open the board.');
+    adoptUser(next);
+    announce(next);
+    reconnectAs(previous, next);
+    return res.data;
+  };
+
+  const startGuestBoard = () => enterAsGuest(() => apiClient.post('/auth/guest'));
+
+  const joinWithShareLink = (boardId, secret) => enterAsGuest(() => apiClient.post(`/boards/${boardId}/join`, { secret }));
 
   const logout = async () => {
     try {
@@ -161,6 +184,9 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider
       value={{
         user,
+        isGuest: isGuestUser(user),
+        startGuestBoard,
+        joinWithShareLink,
         loading,
         error,
         login,

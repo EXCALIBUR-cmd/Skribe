@@ -2,12 +2,20 @@ import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/apiClient';
 import { resolveLandingTarget } from './landing';
+import { takeReturnPath } from '../guest/guestSession.js';
 
 export const LandingRedirect = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
     let active = true;
+    const returnPath = takeReturnPath();
+    if (returnPath) {
+      navigate(returnPath, { replace: true });
+      return () => {
+        active = false;
+      };
+    }
     apiClient
       .get('/auth/me/landing')
       .then((res) => res?.data?.path)

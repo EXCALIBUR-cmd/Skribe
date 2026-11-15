@@ -16,6 +16,7 @@ import {
   sameObjectList
 } from './boardSync.js';
 import { readRecord } from './pendingJournal.js';
+import { GUEST_LIMIT_CODES, planGuestRevert } from '../guest/guestLimits.js';
 
 const DEFAULT_OPTIONS = Object.freeze({
   pullDelayMs: 150,
@@ -427,6 +428,25 @@ export const createBoardSyncController = ({
     return result;
   };
 
+  const revertGuestRefusal = async (code) => {
+    const local = canvas.serialize();
+    const { removedIds, restored } = planGuestRevert({ code, local, base: localBase() });
+    if (removedIds.length === 0 && restored.length === 0) return false;
+    const prepared = restored.length > 0 ? await canvas.prepare(restored) : new Map();
+    const removed = new Set(removedIds);
+    const restoredById = new Map(restored.map((object) => [object.id, object]));
+    canvas.applyMerge({
+      objects: local.filter((object) => !removed.has(object.id)).map((object) => restoredById.get(object.id) || object),
+      changedIds: restored.map((object) => object.id),
+      removedIds,
+      orderChanged: false,
+      undoObjects: null,
+      prepared
+    });
+    notify('guest-limit', { code, count: removedIds.length + restored.length });
+    return true;
+  };
+
   const persistNow = async (canvasData) => {
     if (enabled !== true && socket.isConnected?.() === false) await pullNow().catch(() => {});
     for (let attempt = 0; attempt < settings.maxSaveAttempts; attempt += 1) {
@@ -456,6 +476,7 @@ export const createBoardSyncController = ({
         await pullNow();
         continue;
       }
+      if (GUEST_LIMIT_CODES.has(result?.code) && await revertGuestRefusal(result.code)) continue;
       return { ok: false, code: result?.code || 'SAVE_FAILED' };
     }
     return { ok: false, code: 'SAVE_RETRIES_EXHAUSTED' };
@@ -520,6 +541,7 @@ export const createBoardSyncController = ({
       }
       const code = ack?.code || 'NO_ACK';
       if (SESSION_CODES.has(code)) return { mode: 'held', code };
+      if (GUEST_LIMIT_CODES.has(code) && await revertGuestRefusal(code)) continue;
       if (code === 'OPERATIONS_DISABLED') {
         enabled = false;
         clearRetry();

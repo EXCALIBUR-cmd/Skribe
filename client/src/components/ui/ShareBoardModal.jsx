@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
 import { useAuth } from '../../context/AuthContext';
+import ShareLinkSection from './ShareLinkSection';
 
 export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner: propIsOwner, loadingBoard, addToast }) => {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const [email, setEmail] = useState('');
   const [collaborators, setCollaborators] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -64,7 +65,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
   }, []);
 
   const fetchCollaborators = useCallback(async () => {
-    if (!board?.id) return;
+    if (!board?.id || isGuest) return;
     try {
       setLoading(true);
       setError('');
@@ -78,7 +79,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
     } finally {
       setLoading(false);
     }
-  }, [board?.id]);
+  }, [board?.id, isGuest]);
 
   useEffect(() => {
     if (isOpen && initialBoard?.id) {
@@ -181,7 +182,14 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
         </div>
 
         <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-          {loadingBoard && !board.owner && !board.ownerId ? (
+          {isOwner && (board.isGuest || board.hasShareLink) && <ShareLinkSection board={board} addToast={addToast} />}
+
+          {isGuest ? (
+            <div className="p-3 bg-secondary-container/40 text-on-secondary-container rounded-xl text-xs font-bold flex items-center gap-2 border border-secondary/20">
+              <span className="material-symbols-outlined text-base" aria-hidden="true">info</span>
+              <span>{isOwner ? 'Sign up free to invite people by email.' : 'Ask the board owner for the share link to invite others.'}</span>
+            </div>
+          ) : loadingBoard && !board.owner && !board.ownerId ? (
             <div className="py-4 text-center text-xs font-bold text-on-surface-variant flex items-center justify-center gap-2 bg-surface-container-low/50 rounded-2xl border border-dashed border-outline-variant/60">
               <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               <span>Loading ownership details...</span>
@@ -231,6 +239,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
             </div>
           )}
 
+          {!isGuest && (
           <div>
             <h3 className="text-xs font-label font-bold text-on-surface mb-3 uppercase tracking-wider">
               Collaborators ({collaborators.length})
@@ -293,6 +302,7 @@ export const ShareBoardModal = ({ isOpen, onClose, board: initialBoard, isOwner:
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

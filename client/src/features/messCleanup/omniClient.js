@@ -23,7 +23,8 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
   try {
     const response = await client.post('/mess-cleanup/analyze', {
       workspaceModel,
-      image
+      image,
+      ...(options.boardId ? { boardId: options.boardId } : {})
     }, {
       timeout: options.timeout ?? 30000,
       signal: options.signal
@@ -62,7 +63,7 @@ export const analyzeWorkspaceWithOmni = async (workspaceModel, image, options = 
   } catch (err) {
     const status = err?.status || err?.response?.status || 500;
     const message = err?.message || err?.response?.data?.message || 'Mess Cleanup AI server request failed';
-    const code = err?.code || err?.response?.data?.errors?.code || 'OMNI_CLIENT_ERROR';
+    const code = err?.code || err?.errors?.code || err?.response?.data?.errors?.code || 'OMNI_CLIENT_ERROR';
 
     console.log(`[Gemini Client Diagnostic] Request error: HTTP ${status} (${code}) - ${message}`);
 

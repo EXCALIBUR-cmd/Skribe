@@ -3,9 +3,11 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GOOGLE_SIGN_IN_URL, oauthErrorMessage, useAuthProviders } from '../api/authProviders.js';
 import { resolvePostSignInPath } from '../features/settings/landing';
+import { rememberReturnPath } from '../features/guest/guestSession.js';
+import TryBoardButton from '../components/auth/TryBoardButton';
 
 export const SignInPage = () => {
-  const { user, login } = useAuth();
+  const { user, login, isGuest } = useAuth();
   const navigate = useNavigate();
   const { google: googleEnabled } = useAuthProviders();
   const location = useLocation();
@@ -26,10 +28,10 @@ export const SignInPage = () => {
   const destination = resolvePostSignInPath(location.state?.from);
 
   useEffect(() => {
-    if (user) {
+    if (user && !isGuest) {
       navigate(destination, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, isGuest, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -52,6 +54,7 @@ export const SignInPage = () => {
   };
 
   const handleGoogleSignIn = () => {
+    rememberReturnPath(destination);
     window.location.href = GOOGLE_SIGN_IN_URL;
   };
 
@@ -89,6 +92,13 @@ export const SignInPage = () => {
           <div className="mb-6 p-3 bg-error-container text-on-error-container rounded-lg text-xs font-bold flex items-center gap-2 animate-shake">
             <span className="material-symbols-outlined text-base text-error">error</span>
             <span>{formError}</span>
+          </div>
+        )}
+
+        {isGuest && (
+          <div className="mb-6 p-3 bg-secondary-container/40 text-on-secondary-container rounded-lg text-sm font-bold flex items-center gap-2 border border-secondary/20" role="status">
+            <span className="material-symbols-outlined text-base" aria-hidden="true">bookmark_added</span>
+            <span>Your guest board and everything on it will move to your account.</span>
           </div>
         )}
 
@@ -189,10 +199,15 @@ export const SignInPage = () => {
         <div className="mt-8 text-center">
           <p className="font-body-md text-body-md text-on-surface-variant">
             Don't have an account?{' '}
-            <Link className="font-label-lg text-label-lg text-primary hover:text-secondary transition-colors underline decoration-2 underline-offset-4 decoration-primary/30 hover:decoration-secondary font-bold" to="/signup">
+            <Link className="font-label-lg text-label-lg text-primary hover:text-secondary transition-colors underline decoration-2 underline-offset-4 decoration-primary/30 hover:decoration-secondary font-bold" to="/signup" state={location.state}>
               Create an account
             </Link>
           </p>
+          {!user && (
+            <div className="mt-6 flex justify-center">
+              <TryBoardButton className="inline-flex items-center justify-center gap-2 rounded-lg border-2 border-secondary bg-secondary-container/40 px-5 py-3 font-label-lg text-label-lg font-bold text-on-secondary-container hover:bg-secondary-container transition-colors cursor-pointer disabled:opacity-60" />
+            </div>
+          )}
         </div>
       </div>
     </div>

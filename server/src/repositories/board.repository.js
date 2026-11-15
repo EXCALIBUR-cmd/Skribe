@@ -22,6 +22,7 @@ export class BoardRepository {
       query.isDeleted = false;
     }
     return await Board.findOne(query)
+      .select('+shareLinkHash')
       .populate('owner', 'name email avatar')
       .populate('members', 'name email avatar')
       .exec();

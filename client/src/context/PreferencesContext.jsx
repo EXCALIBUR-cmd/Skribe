@@ -59,7 +59,7 @@ export const PreferencesProvider = ({ children }) => {
     const keys = Object.keys(patch);
     const previous = preferencesRef.current;
     setPreferences((current) => normalizePreferences({ ...current, ...patch }));
-    if (!user) return { ok: true };
+    if (!user || user.role === 'guest') return { ok: true };
     try {
       const res = await apiClient.patch('/auth/me/preferences', patch);
       if (!res?.success) throw new Error(res?.message || 'Preferences were not saved');

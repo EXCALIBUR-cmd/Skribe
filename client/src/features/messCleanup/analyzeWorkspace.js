@@ -2,6 +2,7 @@ import { detectSpatialClusters } from './detectClusters.js';
 import { buildStructuralUnits, classifyComponent, detectAnnotations, getTextCandidates } from './classifySections.js';
 import { EVIDENCE_STRENGTH, RELATIONSHIP_TYPES, SECTION_TYPES, TEXT_ROLES } from './organizationTypes.js';
 import { analyzeWorkspaceWithOmni } from './omniClient.js';
+import { GUEST_FEATURE_CODES } from '../guest/guestLimits.js';
 import { validateOrganizationPlan } from './validateOrganizationPlan.js';
 
 const sortIds = (ids) => [...new Set(ids)].sort((a, b) => String(a || '').localeCompare(String(b || '')));
@@ -416,6 +417,7 @@ export const analyzeWorkspace = (workspaceModel, screenshot = null, options = {}
         };
         return validatedPlan;
       } catch (err) {
+        if (GUEST_FEATURE_CODES.has(err?.code)) throw err;
         console.warn(
           `[MessCleanup] External AI semantic analysis unavailable (${err.message}). Falling back gracefully to deterministic local semantic engine.`
         );
