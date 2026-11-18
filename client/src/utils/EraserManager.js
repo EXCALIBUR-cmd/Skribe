@@ -32,15 +32,8 @@ export class EraserManager {
     }
     const e = opt ? (opt.e || opt) : opt;
     if (!e) return { x: 0, y: 0 };
-    if (canvas && typeof canvas.getPointer === 'function') {
-      return canvas.getPointer(e);
-    }
-    const vpt = canvas?.viewportTransform || [1, 0, 0, 1, 0, 0];
-    const invVpt = fabric.util.invertTransform(vpt);
-    const rect = canvas?.getElement ? canvas.getElement().getBoundingClientRect() : { left: 0, top: 0 };
-    const offsetX = e.offsetX !== undefined ? e.offsetX : (e.clientX - (rect?.left || 0));
-    const offsetY = e.offsetY !== undefined ? e.offsetY : (e.clientY - (rect?.top || 0));
-    return fabric.util.transformPoint(new fabric.Point(offsetX, offsetY), invVpt);
+    if (opt.scenePoint) return opt.scenePoint;
+    return canvas.getScenePoint(e);
   }
 
   isObjectHit(obj, pt, pointer) {

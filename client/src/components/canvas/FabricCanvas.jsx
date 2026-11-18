@@ -21,6 +21,7 @@ import {
   auditRenderPipeline
 } from '../../utils/SkribeLine';
 import eraserManager from '../../utils/EraserManager';
+import { isPointerJump, scenePointOf, withoutPointerJumps } from '../../utils/canvasPointer.js';
 import { applyCleanup } from '../../features/messCleanup/applyCleanup.js';
 import { playStickyEntrance } from '../../utils/stickyEntrance.js';
 import { applyHistoryEntry, captureCanvasHistory, captureHistoryState, conflictHistoryState, createHistoryEntry, diffCanvasHistory, loadCanvasTolerant, mergeRetainedObjects, rebaseHistoryState, restoreHistoryIncrementally, retainUnrestorable, serializeHistoryState } from '../../utils/canvasHistory.js';
@@ -3459,10 +3460,7 @@ export const FabricCanvas = forwardRef(({
         { id: 'c_' + Date.now(), checked: false, text: '' }
       ];
 
-      const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-      const invVpt = fabric.util.invertTransform(vpt);
-      const clickPoint = new fabric.Point(opt.e.offsetX || 0, opt.e.offsetY || 0);
-      const scenePoint = fabric.util.transformPoint(clickPoint, invVpt);
+      const scenePoint = scenePointOf(canvas, opt);
 
       const isCheckboxColumn = (scenePoint.x >= textObj.left - 10) && (scenePoint.x <= textObj.left + 35);
 
@@ -3750,7 +3748,7 @@ export const FabricCanvas = forwardRef(({
       if (e.ctrlKey || e.metaKey) {
         let zoom = canvas.getZoom();
         zoom *= 0.999 ** e.deltaY;
-        const mousePoint = canvasPrefsRef.current.zoomFocus === 'center' ? null : new fabric.Point(e.offsetX, e.offsetY);
+        const mousePoint = canvasPrefsRef.current.zoomFocus === 'center' ? null : canvas.getViewportPoint(e);
         applyZoom(zoom, mousePoint, false);
       } else {
         const vpt = canvas.viewportTransform;
@@ -3794,10 +3792,7 @@ export const FabricCanvas = forwardRef(({
       if (tool === 'draw') {
         isDrawingStrokeRef.current = true;
         strokeIdRef.current = 'stroke_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-        const vpt = canvas.viewportTransform;
-        const invVpt = fabric.util.invertTransform(vpt);
-        const clickPoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        const scenePoint = fabric.util.transformPoint(clickPoint, invVpt);
+        const scenePoint = scenePointOf(canvas, opt);
 
         strokePointsRef.current = [scenePoint];
 
@@ -3842,10 +3837,7 @@ export const FabricCanvas = forwardRef(({
 
       if (tool === 'line') {
         isDrawingLineRef.current = true;
-        const vpt = canvas.viewportTransform;
-        const invVpt = fabric.util.invertTransform(vpt);
-        const clickPoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        const scenePoint = fabric.util.transformPoint(clickPoint, invVpt);
+        const scenePoint = scenePointOf(canvas, opt);
 
         lineStartPointRef.current = scenePoint;
 
@@ -3876,10 +3868,7 @@ export const FabricCanvas = forwardRef(({
       }
 
       if (!opt.target && ['rect', 'circle', 'sticky', 'checklist', 'callout', 'text'].includes(tool)) {
-        const vpt = canvas.viewportTransform;
-        const invVpt = fabric.util.invertTransform(vpt);
-        const clickPoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        const scenePoint = placeAt(fabric.util.transformPoint(clickPoint, invVpt));
+        const scenePoint = placeAt(scenePointOf(canvas, opt));
 
         if (tool === 'rect') addRect(scenePoint);
         if (tool === 'circle') addCircle(scenePoint);
@@ -3926,10 +3915,7 @@ export const FabricCanvas = forwardRef(({
       }
 
       if (isDrawingLineRef.current && activeLineRef.current) {
-        const vpt = canvas.viewportTransform;
-        const invVpt = fabric.util.invertTransform(vpt);
-        const movePoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        let scenePoint = fabric.util.transformPoint(movePoint, invVpt);
+        let scenePoint = scenePointOf(canvas, opt);
 
         const x1 = lineStartPointRef.current.x;
         const y1 = lineStartPointRef.current.y;
@@ -3954,10 +3940,8 @@ export const FabricCanvas = forwardRef(({
       }
 
       if (isDrawingStrokeRef.current && activeDrawPathRef.current) {
-        const vpt = canvas.viewportTransform;
-        const invVpt = fabric.util.invertTransform(vpt);
-        const movePoint = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
-        const scenePoint = fabric.util.transformPoint(movePoint, invVpt);
+        const scenePoint = scenePointOf(canvas, opt);
+        if (isPointerJump(canvas, strokePointsRef.current[strokePointsRef.current.length - 1], scenePoint)) return;
 
         strokePointsRef.current.push(scenePoint);
 
@@ -4077,7 +4061,8 @@ export const FabricCanvas = forwardRef(({
         canvas.remove(activeDrawPathRef.current);
         activeDrawPathRef.current = null;
 
-        if (strokePointsRef.current && strokePointsRef.current.length > 0) {
+        strokePointsRef.current = withoutPointerJumps(canvas, strokePointsRef.current || []);
+        if (strokePointsRef.current.length > 0) {
           const pConfig = penConfigRef.current || { color: '#000000', width: 4, opacity: 1.0 };
           const drawColor = pConfig.color || '#000000';
           const strokeWidth = pConfig.width || 4;

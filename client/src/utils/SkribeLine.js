@@ -309,10 +309,7 @@ export const attachSkribeLineControls = (fabricObj) => {
       const canvas = target.canvas;
       if (!canvas || !target.skribeLine) return false;
 
-      const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-      const invVpt = fabric.util.invertTransform(vpt);
-      const mousePt = new fabric.Point(eventData.offsetX, eventData.offsetY);
-      let scenePt = fabric.util.transformPoint(mousePt, invVpt);
+      let scenePt = canvas.getScenePoint(eventData);
 
       let newX = scenePt.x;
       let newY = scenePt.y;
@@ -369,10 +366,7 @@ export const attachSkribeLineControls = (fabricObj) => {
       const canvas = target.canvas;
       if (!canvas || !target.skribeLine) return false;
 
-      const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-      const invVpt = fabric.util.invertTransform(vpt);
-      const mousePt = new fabric.Point(eventData.offsetX, eventData.offsetY);
-      const scenePt = fabric.util.transformPoint(mousePt, invVpt);
+      const scenePt = canvas.getScenePoint(eventData);
 
       target.skribeLine.controlPoints = [{ x: scenePt.x, y: scenePt.y }];
       target.skribeLine.mode = 'curve';
@@ -412,10 +406,7 @@ export const attachSkribeLineControls = (fabricObj) => {
       const canvas = target.canvas;
       if (!canvas || !target.skribeLine) return false;
 
-      const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
-      const invVpt = fabric.util.invertTransform(vpt);
-      const mousePt = new fabric.Point(eventData.offsetX, eventData.offsetY);
-      let scenePt = fabric.util.transformPoint(mousePt, invVpt);
+      let scenePt = canvas.getScenePoint(eventData);
 
       let newX = scenePt.x;
       let newY = scenePt.y;
