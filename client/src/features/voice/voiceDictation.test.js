@@ -380,8 +380,8 @@ test('TEST 14: Shared-board safety — interim speech is user-local and not broa
 
 test('TEST 15: Speech processing disclosure discloses vendor network processing', () => {
   const disclosure = getSpeechProcessingDisclosure();
-  assert.equal(disclosure.provider, 'Web Speech API');
+  assert.equal(disclosure.provider, 'Web Speech API or Groq Whisper');
   assert.equal(disclosure.isLocal, false);
-  assert.equal(disclosure.processingLocation, 'browser-vendor-service');
+  assert.equal(disclosure.processingLocation, 'browser-vendor-service-or-skribe-server');
   assert.ok(disclosure.details.length > 0);
 });

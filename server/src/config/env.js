@@ -45,6 +45,7 @@ export const buildConfig = (env = process.env) => {
     geminiApiKey: env.GEMINI_API_KEY || '',
     geminiModel: env.GEMINI_MODEL || 'gemini-3.8-flash',
     groqApiKey: env.GROQ_API_KEY || '',
+    groqVoiceApiKey: env.GROQ_VOICE_API_KEY || '',
     voiceCommandModel: env.VOICE_COMMAND_MODEL || 'openai/gpt-oss-20b',
     groqMessCleanupApiKey: env.GROQ_MESS_CLEANUP_API_KEY || '',
     messCleanupModel: env.MESS_CLEANUP_MODEL || 'qwen/qwen3.8-27b',

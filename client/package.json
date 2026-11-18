@@ -26,7 +26,7 @@
     "test:shape-text-relationship": "node --test src/features/messCleanup/shapeTextRelationship.test.js",
     "test:mess-cleanup-connector-repair": "node --test src/features/messCleanup/connectorRepair.test.js",
     "test:connector-collision-integrity": "node --test src/features/messCleanup/connectorCollisionIntegrity.test.js",
-    "test:voice-dictation": "node --test src/features/voice/voiceDictation.test.js",
+    "test:voice-dictation": "node --test src/features/voice/voiceDictation.test.js src/features/voice/serverDictation.test.js",
     "test:voice-commands": "node --test src/features/voice/voiceCommands.test.js",
     "test:quick-dictation": "node --test src/features/voice/quickDictationLogic.test.js",
     "test:ai-assistant": "node --test src/features/aiAssistant/assistantActions.test.js",

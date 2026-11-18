@@ -6,6 +6,7 @@ import { initSocketIO } from './sockets/index.js';
 import { startAssetCleanupSchedule } from './services/asset.service.js';
 import { assertJwtSecret } from './utils/jwt.js';
 import { ensureGuestBoardIndexes } from './models/Board.js';
+import { ensureVoiceUsageIndexes } from './models/VoiceUsage.js';
 
 const startServer = async () => {
   try {
@@ -18,6 +19,10 @@ const startServer = async () => {
 
     await ensureGuestBoardIndexes().catch((err) => {
       console.error(`[MongoDB] Guest board indexes could not be created: ${err.message}`);
+    });
+
+    await ensureVoiceUsageIndexes().catch((err) => {
+      console.error(`[MongoDB] Voice usage indexes could not be created: ${err.message}`);
     });
 
     startAssetCleanupSchedule();

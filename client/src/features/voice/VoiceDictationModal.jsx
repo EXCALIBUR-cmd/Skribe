@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { WebSpeechAdapter, isSpeechRecognitionSupported, getSpeechProcessingDisclosure } from './speechRecognitionAdapter.js';
+import { createSpeechAdapter, isDictationSupported, getSpeechProcessingDisclosure } from './speechRecognitionAdapter.js';
 import { describeVoiceCommand } from './voiceCommands.js';
 
 const COMMAND_EXAMPLES = [
@@ -41,7 +41,7 @@ export const VoiceDictationModal = ({
   const adapterRef = useRef(null);
   const textareaRef = useRef(null);
   const disclosure = getSpeechProcessingDisclosure();
-  const supported = isSpeechRecognitionSupported();
+  const supported = isDictationSupported();
 
   const handleStateChange = useCallback((newState) => {
     setDictationState(newState);
@@ -101,7 +101,7 @@ export const VoiceDictationModal = ({
         onEnd: handleEnd
       };
     } else {
-      adapterRef.current = new WebSpeechAdapter({
+      adapterRef.current = createSpeechAdapter({
         onStateChange: handleStateChange,
         onTranscript: handleTranscript,
         onError: handleError,
@@ -264,7 +264,8 @@ export const VoiceDictationModal = ({
   if (!isOpen) return null;
 
   const isListening = dictationState === 'LISTENING';
-  const isRequesting = dictationState === 'REQUESTING_PERMISSION';
+  const isTranscribing = dictationState === 'TRANSCRIBING';
+  const isRequesting = dictationState === 'REQUESTING_PERMISSION' || isTranscribing;
   const isUnsupported = dictationState === 'UNSUPPORTED';
   const isError = dictationState === 'ERROR';
   const canInsert = Boolean(transcript.trim()) && !isInserting;
@@ -299,6 +300,8 @@ export const VoiceDictationModal = ({
               <span className="text-[11px] font-medium text-on-surface-variant">
                 {isListening
                   ? 'Listening... Speak into your microphone'
+                  : isTranscribing
+                  ? 'Transcribing your recording...'
                   : isRequesting
                   ? 'Requesting microphone permission...'
                   : isUnsupported

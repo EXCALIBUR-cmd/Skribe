@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { usePreferences } from '../../context/PreferencesContext';
-import { WebSpeechAdapter } from './speechRecognitionAdapter';
+import { MAX_RECORDING_SECONDS, createSpeechAdapter } from './speechRecognitionAdapter';
 import {
   canExecutePreview,
   createDoubleTapDetector,
@@ -14,10 +14,9 @@ import {
 import { confirmVoiceCommandProposal, describeVoiceCommand, looksLikeVoiceCommand, requestVoiceCommandInterpretation, resolveVoiceCommand } from './voiceCommands';
 import { getDictationCanvas } from './dictationCanvasBridge';
 
-const MAX_RECORDING_SECONDS = 120;
 const TRANSCRIBE_TIMEOUT_MS = 8000;
 const ERROR_DISMISS_MS = 6000;
-const ERROR_CODES = new Set(['PERMISSION_DENIED', 'AUDIO_CAPTURE_ERROR', 'NOT_SUPPORTED', 'NO_SPEECH', 'NETWORK_ERROR']);
+const ERROR_CODES = new Set(['PERMISSION_DENIED', 'AUDIO_CAPTURE_ERROR', 'NOT_SUPPORTED', 'NO_SPEECH', 'NETWORK_ERROR', 'VOICE_DAILY_LIMIT', 'VOICE_RATE_LIMITED', 'VOICE_UNAVAILABLE']);
 const BAR_DELAYS = [0, 180, 360, 120, 300];
 
 const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
@@ -101,7 +100,7 @@ export const QuickDictation = () => {
     setElapsed(0);
     setCopied(false);
     const session = { text: '', stopFocus: null, ticker: null, transcribeTimer: null, adapter: null };
-    session.adapter = new WebSpeechAdapter({
+    session.adapter = createSpeechAdapter({
       onTranscript: ({ text }) => {
         if (sessionRef.current !== session) return;
         session.text = text;
@@ -139,7 +138,7 @@ export const QuickDictation = () => {
       finish(session.text);
       return;
     }
-    session.transcribeTimer = setTimeout(() => finish(session.text), TRANSCRIBE_TIMEOUT_MS);
+    session.transcribeTimer = setTimeout(() => finish(session.text), session.adapter.transcribeTimeoutMs || TRANSCRIBE_TIMEOUT_MS);
     session.adapter.stop();
   }, [dispatch, finish]);
 

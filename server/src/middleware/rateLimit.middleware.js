@@ -76,6 +76,13 @@ export const joinAttemptBoardLimiter = createRateLimiter({
   message: 'Too many attempts to join this board. Please wait a few minutes and try again.'
 });
 
+export const voiceTranscribeLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  limit: 10,
+  key: (req) => `voice:${req.user?.id || clientAddress(req)}`,
+  message: 'Too many voice requests. Please wait a minute and try again.'
+});
+
 export const registerAddressLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 30,
